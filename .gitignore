@@ -4,19 +4,39 @@ node_modules/
 
 # Build output
 dist/
+build/
 *.tsbuildinfo
-.vitepress/dist/
-.vitepress/cache/
 
-# Test / coverage
+# VitePress.
+# A pattern containing a slash is anchored to this file's directory, so
+# `.vitepress/cache/` would only ever match at the repo root. The `**/` prefix
+# is what makes it match `docs/.vitepress/cache/`.
+**/.vitepress/cache/
+**/.vitepress/dist/
+
+# Test and coverage
 coverage/
 .vitest-cache/
+**/test-results/
+**/playwright-report/
+
+# Benchmark artefacts
+benchmarks/**/dist/
+**/traces/
+**/results/
 
 # Editor and OS noise
 .DS_Store
 Thumbs.db
 *.swp
+*.swo
 .idea/
+*.iml
+
+# Logs and debug output
+*.log
+npm-debug.log*
+pnpm-debug.log*
 
 # Local env
 .env
