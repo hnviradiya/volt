@@ -20,10 +20,38 @@ export class Greeting {
 | Option | Meaning |
 |---|---|
 | `selector` | The tag this component answers to. Required. |
-| `template` | Template source, compiled on first use |
+| `templateUrl` | Path to an `.html` file, relative to this file |
+| `template` | Inline template source |
 | `render` | A pre-compiled render function (the Vite plugin fills this in) |
-| `styles` | CSS injected once per component |
+| `styleUrl` / `styleUrls` | Path(s) to CSS files, relative to this file |
+| `styles` | Inline CSS, injected once per component |
 | `imports` | Components this template may reference |
+
+### Prefer a separate `.html` file
+
+```ts
+@Component({
+  selector: 'v-greeting',
+  templateUrl: './greeting.html',
+  styleUrl: './greeting.css',
+})
+export class Greeting {
+  name = new Signal.State('world');
+}
+```
+
+```html
+<!-- greeting.html -->
+<p class="greeting">Hello, {{ name.get() }}.</p>
+```
+
+A real `.html` file gets syntax highlighting, formatting, Emmet and folding —
+none of which a template literal does. Both files are resolved and compiled at
+build time, and both are watched, so editing the markup or the CSS
+hot-reloads without touching the TypeScript.
+
+Inline `template` still works, and is the right choice for a two-line
+component or a test.
 
 ## Inputs
 

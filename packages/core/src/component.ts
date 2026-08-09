@@ -61,12 +61,33 @@ export interface ComponentType<T = unknown> {
 export interface ComponentConfig {
   /** Tag this component answers to in a template, e.g. `v-counter`. */
   selector: string;
-  /** Template source, compiled on first use unless `render` is supplied. */
+
+  /**
+   * Path to an `.html` file holding the template, relative to this file.
+   *
+   * The preferred form: a real `.html` file gets syntax highlighting,
+   * formatting and Emmet, none of which a template literal does. Resolved and
+   * compiled at build time by `@voltjs/vite-plugin`, which also watches the
+   * file so edits hot-reload.
+   */
+  templateUrl?: string;
+
+  /**
+   * Inline template source. Useful for tiny components, tests, and
+   * playgrounds; prefer `templateUrl` for anything real.
+   */
   template?: string;
+
   /** A pre-compiled render function. The Vite plugin fills this in. */
   render?: RenderFn;
+
+  /** Path(s) to CSS files, relative to this file. Inlined at build time. */
+  styleUrl?: string;
+  styleUrls?: string[];
+
   /** Component-scoped CSS, injected once per component. */
   styles?: string | string[];
+
   /** Components this template is allowed to reference. */
   imports?: ComponentType<unknown>[];
 }
@@ -347,6 +368,14 @@ function getRenderFn(component: ComponentType<unknown>, resolved: ResolvedConfig
 
   if (config.render) {
     render = config.render;
+  } else if (typeof config.templateUrl === 'string') {
+    // Reaching here means the build-time pass did not run: `templateUrl` is
+    // resolved from disk, which the browser cannot do.
+    throw new Error(
+      `[volt] ${component.name} uses templateUrl "${config.templateUrl}", which is ` +
+        'resolved at build time. Add @voltjs/vite-plugin to your Vite config, or ' +
+        'use an inline `template` if you are running without a build step.',
+    );
   } else if (typeof config.template === 'string') {
     if (!templateCompiler) {
       throw new Error(

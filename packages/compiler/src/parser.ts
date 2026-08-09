@@ -30,8 +30,11 @@ export class CompilerError extends Error {
     message: string,
     public loc: { line: number; column: number },
     public source?: string,
+    /** The file the template came from, which may not be the importing module. */
+    public filename?: string,
   ) {
-    super(`[volt:compiler] ${message} (${loc.line}:${loc.column})`);
+    const where = filename ? `${filename}:${loc.line}:${loc.column}` : `${loc.line}:${loc.column}`;
+    super(`[volt:compiler] ${message} (${where})`);
     this.name = 'CompilerError';
   }
 }
@@ -57,6 +60,7 @@ class Parser {
   private column = 1;
   private readonly whitespace: 'condense' | 'preserve';
   private readonly keepComments: boolean;
+  private readonly filename: string | undefined;
 
   constructor(
     private readonly source: string,
@@ -64,6 +68,7 @@ class Parser {
   ) {
     this.whitespace = options.whitespace ?? 'condense';
     this.keepComments = options.comments ?? false;
+    this.filename = options.filename;
   }
 
   parseRoot(): RootNode {
@@ -94,7 +99,12 @@ class Parser {
   }
 
   private error(message: string): never {
-    throw new CompilerError(message, { line: this.line, column: this.column }, this.source);
+    throw new CompilerError(
+      message,
+      { line: this.line, column: this.column },
+      this.source,
+      this.filename,
+    );
   }
 
   private advance(count: number): string {
@@ -316,6 +326,7 @@ class Parser {
         `Missing closing tag for \`<${tag}>\``,
         { line: openLoc.line, column: openLoc.column },
         this.source,
+        this.filename,
       );
     }
     if (!this.isClosingTagFor([tag])) {
@@ -324,6 +335,7 @@ class Parser {
         `Mismatched closing tag: expected \`</${tag}>\` but found \`${found}\``,
         { line: this.line, column: this.column },
         this.source,
+        this.filename,
       );
     }
     this.advance(2);

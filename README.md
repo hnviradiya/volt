@@ -7,19 +7,13 @@ A TypeScript UI framework built from three ideas that fit together:
 - **Reactivity is the [TC39 Signals proposal](https://github.com/tc39/proposal-signals)** — with no virtual DOM anywhere
 
 ```ts
+// counter.ts
 import { Component, Signal } from '@voltjs/core';
 
 @Component({
   selector: 'v-counter',
-  template: `
-    <div>
-      <button :click="decrement()">−</button>
-      <output>{{ count.get() }}</output>
-      <button :click="increment()">+</button>
-
-      <p :if="count.get() > 9">That's a lot.</p>
-    </div>
-  `,
+  templateUrl: './counter.html',
+  styleUrl: './counter.css',
 })
 export class Counter {
   count = new Signal.State(0);
@@ -27,6 +21,17 @@ export class Counter {
   increment() { this.count.set(this.count.get() + 1); }
   decrement() { this.count.set(this.count.get() - 1); }
 }
+```
+
+```html
+<!-- counter.html -->
+<div>
+  <button :click="decrement()">−</button>
+  <output>{{ count.get() }}</output>
+  <button :click="increment()">+</button>
+
+  <p :if="count.get() > 9">That's a lot.</p>
+</div>
 ```
 
 ```ts
@@ -127,7 +132,7 @@ polyfilled (Volt installs it).
 
 ```bash
 pnpm install
-pnpm test          # 81 tests across reactivity, compiler, runtime, and plugin
+pnpm test          # 96 tests across reactivity, compiler, runtime, and plugin
 pnpm typecheck
 pnpm build
 pnpm dev           # the example app

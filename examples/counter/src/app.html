@@ -1,0 +1,31 @@
+<main class="app">
+  <header>
+    <h1>Volt</h1>
+    <p class="tagline">
+      Angular-shaped classes, Vue-shaped templates, TC39 signals, no virtual DOM.
+    </p>
+  </header>
+
+  <div class="grid">
+    <article class="card">
+      <v-counter
+        :label="'Steps of ' + step.get()"
+        :step="step.get()"
+        :min="-10"
+        :on-changed="onCount($event)"
+      ></v-counter>
+
+      <div class="row">
+        <label for="step">Step size</label>
+        <input id="step" type="range" min="1" max="10" :model.number="step" />
+        <span class="value">{{ step.get() }}</span>
+      </div>
+
+      <p class="log">Last value seen by the parent: <strong>{{ lastCount.get() }}</strong></p>
+    </article>
+
+    <article class="card">
+      <v-todos></v-todos>
+    </article>
+  </div>
+</main>

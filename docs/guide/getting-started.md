@@ -69,16 +69,8 @@ import { Component, Signal } from '@voltjs/core';
 
 @Component({
   selector: 'v-counter',
-  template: `
-    <div class="counter">
-      <button :click="decrement()">−</button>
-      <output>{{ count.get() }}</output>
-      <button :click="increment()">+</button>
-    </div>
-  `,
-  styles: `
-    .counter { display: flex; gap: 0.5rem; align-items: center; }
-  `,
+  templateUrl: './counter.html',
+  styleUrl: './counter.css',
 })
 export class Counter {
   count = new Signal.State(0);
@@ -92,6 +84,23 @@ export class Counter {
   }
 }
 ```
+
+```html
+<!-- src/counter.html -->
+<div class="counter">
+  <button :click="decrement()">−</button>
+  <output>{{ count.get() }}</output>
+  <button :click="increment()">+</button>
+</div>
+```
+
+```css
+/* src/counter.css */
+.counter { display: flex; gap: 0.5rem; align-items: center; }
+```
+
+Both paths are resolved relative to the `.ts` file, compiled at build time,
+and watched — editing the markup or the CSS hot-reloads on its own.
 
 ## Mount it
 

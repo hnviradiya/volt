@@ -17,60 +17,8 @@ type Filter = 'all' | 'active' | 'done';
  */
 @Component({
   selector: 'v-todos',
-  template: `
-    <section class="todos">
-      <h2>Todos</h2>
-
-      <form class="add" :submit.prevent="add()">
-        <input
-          class="input"
-          placeholder="What needs doing?"
-          :model.trim="draft"
-          :keydown.escape="draft.set('')"
-        />
-        <button class="btn primary" :disabled="draft.get().length === 0">Add</button>
-      </form>
-
-      <div class="filters">
-        <button
-          :for="option in filters"
-          :key="option"
-          class="chip"
-          :class="{ active: filter.get() === option }"
-          :click="filter.set(option)"
-        >
-          {{ option }}
-        </button>
-      </div>
-
-      <ul class="list">
-        <li :for="todo in visible.get()" :key="todo.id" :class="{ done: todo.done }">
-          <label>
-            <input type="checkbox" :checked="todo.done" :change="toggle(todo.id)" />
-            <span class="text">{{ todo.text }}</span>
-          </label>
-          <button class="link" :click="remove(todo.id)" aria-label="Remove">×</button>
-        </li>
-      </ul>
-
-      <p class="empty" :if="visible.get().length === 0">Nothing here.</p>
-
-      <footer class="summary">
-        {{ remaining.get() }} of {{ todos.get().length }} remaining
-      </footer>
-    </section>
-  `,
-  styles: `
-    .todos { display: grid; gap: 1rem; }
-    .todos .add { display: flex; gap: 0.5rem; }
-    .todos .input { flex: 1; }
-    .todos .filters { display: flex; gap: 0.5rem; }
-    .todos .list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.25rem; }
-    .todos .list li { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.4rem 0.6rem; border-radius: 8px; background: var(--surface-2); }
-    .todos .list li.done .text { text-decoration: line-through; color: var(--muted); }
-    .todos label { display: flex; align-items: center; gap: 0.6rem; cursor: pointer; }
-    .todos .empty, .todos .summary { color: var(--muted); font-size: 0.9rem; margin: 0; }
-  `,
+  templateUrl: './todos.html',
+  styleUrl: './todos.css',
 })
 export class Todos {
   readonly filters: Filter[] = ['all', 'active', 'done'];

@@ -1,0 +1,10 @@
+.counter { display: grid; gap: 0.75rem; }
+.counter .row { display: flex; align-items: center; gap: 0.75rem; }
+.counter .value {
+  font-variant-numeric: tabular-nums;
+  font-size: 2rem;
+  min-width: 3ch;
+  text-align: center;
+}
+.counter .value.negative { color: var(--danger); }
+.counter .hint { color: var(--muted); margin: 0; font-size: 0.9rem; }

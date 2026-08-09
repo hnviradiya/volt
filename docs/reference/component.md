@@ -5,8 +5,11 @@
 ```ts
 interface ComponentConfig {
   selector: string;
+  templateUrl?: string;
   template?: string;
   render?: (ctx: unknown) => unknown;
+  styleUrl?: string;
+  styleUrls?: string[];
   styles?: string | string[];
   imports?: ComponentType[];
 }
@@ -15,10 +18,17 @@ interface ComponentConfig {
 | Option | Description |
 |---|---|
 | `selector` | Tag this component answers to. Required |
-| `template` | Template source, compiled on first use |
+| `templateUrl` | Path to an `.html` file, relative to this file. **Preferred** |
+| `template` | Inline template source, for tiny components and tests |
 | `render` | Pre-compiled render function; the Vite plugin fills this in |
-| `styles` | CSS injected once per component |
+| `styleUrl` / `styleUrls` | Path(s) to CSS files, relative to this file |
+| `styles` | Inline CSS, injected once per component |
 | `imports` | Components this template may reference |
+
+`templateUrl`, `styleUrl` and `styleUrls` are resolved **at build time** by
+`@voltjs/vite-plugin`, which also registers each file with the watcher so
+edits hot-reload. Without the plugin they cannot be resolved — the browser has
+no filesystem — and Volt throws with a message saying so.
 
 Applied to a class. Runs after every member decorator, so the input and
 output metadata it reads is complete.

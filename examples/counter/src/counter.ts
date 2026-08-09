@@ -8,30 +8,8 @@ import { Component, EventEmitter, Input, Output, Signal, type OnInit } from '@vo
  */
 @Component({
   selector: 'v-counter',
-  template: `
-    <div class="counter">
-      <h2>{{ label.get() }}</h2>
-
-      <div class="row">
-        <button class="btn" :click="decrement()" :disabled="count.get() <= min.get()">−</button>
-        <output class="value" :class="{ negative: count.get() < 0 }">{{ count.get() }}</output>
-        <button class="btn" :click="increment()">+</button>
-      </div>
-
-      <p class="hint" :if="count.get() === 0">Nothing counted yet.</p>
-      <p class="hint" :else-if="count.get() < 0">Below zero.</p>
-      <p class="hint" :else>Counted {{ count.get() }} so far.</p>
-
-      <button class="link" :click="reset()" :show="count.get() !== 0">Reset</button>
-    </div>
-  `,
-  styles: `
-    .counter { display: grid; gap: 0.75rem; }
-    .counter .row { display: flex; align-items: center; gap: 0.75rem; }
-    .counter .value { font-variant-numeric: tabular-nums; font-size: 2rem; min-width: 3ch; text-align: center; }
-    .counter .value.negative { color: var(--danger); }
-    .counter .hint { color: var(--muted); margin: 0; font-size: 0.9rem; }
-  `,
+  templateUrl: './counter.html',
+  styleUrl: './counter.css',
 })
 export class Counter implements OnInit {
   @Input() label = new Signal.State('Counter');

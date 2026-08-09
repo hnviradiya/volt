@@ -12,6 +12,8 @@
  *     ships to production and no template is parsed at runtime.
  */
 
+import { readFile } from 'node:fs/promises';
+import { dirname, resolve as resolvePath } from 'node:path';
 import { transform as esbuildTransform } from 'esbuild';
 import { compile, CompilerError } from '@voltjs/compiler';
 import type { Plugin } from 'vite';
@@ -50,15 +52,19 @@ export function volt(options: VoltPluginOptions = {}): Plugin[] {
     name: 'volt:templates',
     // Must see the original source, before decorators are lowered away.
     enforce: 'pre',
-    transform(code, id) {
+    async transform(code, id) {
       if (!precompile || !shouldProcess(id)) return null;
       if (!code.includes('@Component')) return null;
 
       try {
-        return compileTemplates(code, id, runtimeModule, options.debug ?? false);
+        return await compileTemplates(code, id, runtimeModule, options.debug ?? false, (file) =>
+          this.addWatchFile(file),
+        );
       } catch (err) {
         if (err instanceof CompilerError) {
-          this.error(`${err.message}\n  in ${id}`);
+          // The message already names the template's own file, which for a
+          // templateUrl is not this module.
+          this.error(err.filename ? err.message : `${err.message}\n  in ${id}`);
         }
         throw err;
       }
@@ -102,36 +108,70 @@ export default volt;
 // ---------------------------------------------------------------------------
 
 interface TemplateSite {
-  /** Range covering `template: \`...\`` including the key. */
+  /** Range covering the whole `template:`/`templateUrl:` property. */
   start: number;
   end: number;
-  source: string;
+  /** `inline` carries markup; `url` carries a path to resolve and read. */
+  kind: 'inline' | 'url';
+  value: string;
+}
+
+interface StyleSite {
+  start: number;
+  end: number;
+  /** One or more paths to CSS files. */
+  paths: string[];
 }
 
 /**
- * Replace every `template` in a `@Component({...})` with a compiled `render`.
+ * Replace every template in a `@Component({...})` with a compiled `render`,
+ * and inline any `styleUrl`/`styleUrls` files.
  *
  * Sites are located by scanning tokens rather than matching source patterns,
  * so a backtick inside a string, a comment mentioning `template:`, or a nested
  * object literal cannot produce a false hit.
  */
-function compileTemplates(
+async function compileTemplates(
   code: string,
   id: string,
   runtimeModule: string,
   debug: boolean,
-): { code: string; map: null } | null {
-  const sites = findTemplateSites(code);
-  if (sites.length === 0) return null;
+  watch: (file: string) => void,
+): Promise<{ code: string; map: null } | null> {
+  const templates = findTemplateSites(code);
+  const styles = findStyleSites(code);
+  if (templates.length === 0 && styles.length === 0) return null;
 
+  const dir = dirname(id.split('?')[0] ?? id);
   const preamble: string[] = [];
-  let output = '';
-  let cursor = 0;
+
+  interface Replacement {
+    start: number;
+    end: number;
+    text: string;
+  }
+  const edits: Replacement[] = [];
   let index = 0;
 
-  for (const site of sites) {
-    const result = compile(site.source, {
-      filename: id,
+  for (const site of templates) {
+    let source = site.value;
+
+    if (site.kind === 'url') {
+      const file = resolvePath(dir, site.value);
+      // Registering the file makes an edit to the markup re-run this
+      // transform, so templates hot-reload like any other source file.
+      watch(file);
+      try {
+        source = await readFile(file, 'utf8');
+      } catch {
+        throw new Error(
+          `[volt] templateUrl "${site.value}" could not be read (resolved to ${file}), referenced by ${id}`,
+        );
+      }
+    }
+
+    const result = compile(source, {
+      filename: site.kind === 'url' ? resolvePath(dir, site.value) : id,
       runtime: RUNTIME_NAMESPACE,
       runtimeModule,
     });
@@ -141,37 +181,129 @@ function compileTemplates(
       console.info(
         `[volt] ${id}: ${stats.templates} template(s), ${stats.effects} effect(s), ` +
           `${stats.foldedBindings} binding(s) folded, ` +
+          `${stats.delegatedEvents} event(s) delegated, ` +
           `${stats.dedupedTemplates} markup dedupe(s)`,
       );
     }
 
     const renderName = `__volt_render_${index++}`;
     preamble.push(...result.hoisted);
-    preamble.push(
-      `function ${renderName}(_ctx) {\n  return ${result.renderExpression};\n}`,
-    );
-
-    output += code.slice(cursor, site.start);
-    output += `render: ${renderName}`;
-    cursor = site.end;
+    preamble.push(`function ${renderName}(_ctx) {\n  return ${result.renderExpression};\n}`);
+    edits.push({ start: site.start, end: site.end, text: `render: ${renderName}` });
   }
 
+  for (const site of styles) {
+    const collected: string[] = [];
+    for (const relative of site.paths) {
+      const file = resolvePath(dir, relative);
+      watch(file);
+      try {
+        collected.push(await readFile(file, 'utf8'));
+      } catch {
+        throw new Error(
+          `[volt] styleUrl "${relative}" could not be read (resolved to ${file}), referenced by ${id}`,
+        );
+      }
+    }
+    edits.push({
+      start: site.start,
+      end: site.end,
+      text: `styles: ${JSON.stringify(collected.join('\n'))}`,
+    });
+  }
+
+  edits.sort((a, b) => a.start - b.start);
+
+  let output = '';
+  let cursor = 0;
+  for (const edit of edits) {
+    output += code.slice(cursor, edit.start) + edit.text;
+    cursor = edit.end;
+  }
   output += code.slice(cursor);
 
   const header =
-    `import * as ${RUNTIME_NAMESPACE} from ${JSON.stringify(runtimeModule)};\n` +
-    preamble.join('\n') +
-    '\n';
+    preamble.length > 0
+      ? `import * as ${RUNTIME_NAMESPACE} from ${JSON.stringify(runtimeModule)};\n` +
+        preamble.join('\n') +
+        '\n'
+      : '';
 
   return { code: header + output, map: null };
 }
 
-/** Scan for `template:` properties that sit inside a `@Component(` call. */
+/**
+ * Scan for `template:` / `templateUrl:` properties inside a `@Component(`
+ * call, ignoring anything in a comment, a string, or an unrelated object.
+ */
 function findTemplateSites(code: string): TemplateSite[] {
   const sites: TemplateSite[] = [];
-  let i = 0;
 
-  // Depth of brackets since entering a @Component( call, or -1 when outside.
+  scanComponentProperties(code, (name, start, valueStart) => {
+    if (name === 'template') {
+      if (code[valueStart] !== '`') return null;
+      const end = skipTemplateLiteral(code, valueStart);
+      const raw = code.slice(valueStart + 1, end - 1);
+      // Host-language interpolation cannot be resolved at build time; leave
+      // it for the runtime compiler.
+      if (/\$\{/.test(raw)) return null;
+      sites.push({ start, end, kind: 'inline', value: unescapeTemplate(raw) });
+      return end;
+    }
+
+    if (name === 'templateUrl') {
+      const quote = code[valueStart];
+      if (quote !== '"' && quote !== "'") return null;
+      const end = skipQuoted(code, valueStart, quote);
+      sites.push({ start, end, kind: 'url', value: code.slice(valueStart + 1, end - 1) });
+      return end;
+    }
+
+    return null;
+  });
+
+  return sites;
+}
+
+/** Scan for `styleUrl:` / `styleUrls:` inside a `@Component(` call. */
+function findStyleSites(code: string): StyleSite[] {
+  const sites: StyleSite[] = [];
+
+  scanComponentProperties(code, (name, start, valueStart) => {
+    if (name !== 'styleUrl' && name !== 'styleUrls') return null;
+
+    const quote = code[valueStart];
+    if (quote === '"' || quote === "'") {
+      const end = skipQuoted(code, valueStart, quote);
+      sites.push({ start, end, paths: [code.slice(valueStart + 1, end - 1)] });
+      return end;
+    }
+
+    if (quote === '[') {
+      const end = matchBracket(code, valueStart);
+      const inner = code.slice(valueStart + 1, end - 1);
+      const paths = [...inner.matchAll(/['"]([^'"]+)['"]/g)].map((m) => m[1]!);
+      if (paths.length === 0) return null;
+      sites.push({ start, end, paths });
+      return end;
+    }
+
+    return null;
+  });
+
+  return sites;
+}
+
+/**
+ * Walk `code`, invoking `onProperty` for each `name:` found directly inside a
+ * `@Component(` argument. The callback returns the index to resume from when
+ * it consumed the value, or null to skip.
+ */
+function scanComponentProperties(
+  code: string,
+  onProperty: (name: string, start: number, valueStart: number) => number | null,
+): void {
+  let i = 0;
   let componentDepth = -1;
   let depth = 0;
 
@@ -180,7 +312,6 @@ function findTemplateSites(code: string): TemplateSite[] {
   while (i < code.length) {
     const ch = code[i]!;
 
-    // Skip over anything that could contain misleading text.
     if (ch === '/' && code[i + 1] === '/') {
       const nl = code.indexOf('\n', i);
       i = nl === -1 ? code.length : nl;
@@ -222,41 +353,48 @@ function findTemplateSites(code: string): TemplateSite[] {
       continue;
     }
 
-    // Only inside a @Component(...) call is `template:` meaningful.
-    if (
-      componentDepth !== -1 &&
-      code.startsWith('template', i) &&
-      !isIdentChar(code[i - 1] ?? ' ') &&
-      !isIdentChar(code[i + 8] ?? '')
-    ) {
-      const start = i;
-      let j = i + 8;
-      while (j < code.length && /\s/.test(code[j]!)) j++;
-      if (code[j] === ':') {
-        j++;
-        while (j < code.length && /\s/.test(code[j]!)) j++;
-        if (code[j] === '`') {
-          const literalStart = j;
-          const literalEnd = skipTemplateLiteral(code, j);
-          const raw = code.slice(literalStart + 1, literalEnd - 1);
+    if (componentDepth !== -1 && /[A-Za-z_$]/.test(ch) && !isIdentChar(code[i - 1] ?? ' ')) {
+      let j = i;
+      while (j < code.length && isIdentChar(code[j]!)) j++;
+      const name = code.slice(i, j);
 
-          // An interpolated template literal is host-language interpolation,
-          // not a Volt template; leave it for the runtime compiler.
-          if (!/\$\{/.test(raw)) {
-            sites.push({ start, end: literalEnd, source: unescapeTemplate(raw) });
-            i = literalEnd;
-            continue;
-          }
+      let k = j;
+      while (k < code.length && /\s/.test(code[k]!)) k++;
+      if (code[k] === ':') {
+        k++;
+        while (k < code.length && /\s/.test(code[k]!)) k++;
+        const resume = onProperty(name, i, k);
+        if (resume !== null) {
+          i = resume;
+          continue;
         }
       }
-      i = start + 8;
+      i = j;
       continue;
     }
 
     i++;
   }
+}
 
-  return sites;
+/** Index just past the `]` matching the `[` at `start`. */
+function matchBracket(code: string, start: number): number {
+  let depth = 0;
+  let i = start;
+  while (i < code.length) {
+    const ch = code[i]!;
+    if (ch === '"' || ch === "'") {
+      i = skipQuoted(code, i, ch);
+      continue;
+    }
+    if (ch === '[') depth++;
+    else if (ch === ']') {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+    i++;
+  }
+  return i;
 }
 
 function skipQuoted(code: string, start: number, quote: string): number {
