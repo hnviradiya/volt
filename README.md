@@ -67,7 +67,7 @@ resolved in a fixed order so a name always means one thing:
 
 | Kind | Examples |
 |---|---|
-| Structure | `:if` `:else-if` `:else` `:for` `:key` `:show` `:text` `:html` `:model` `:ref` `:slot` |
+| Structure | `:if` `:else-if` `:else` `:for` `:key` `:text` `:html` `:model` `:ref` `:slot` |
 | Events | `:click` `:input` `:submit.prevent` `:keydown.enter` `:on-customEvent` |
 | Bindings | `:class` `:style` `:disabled` `:value` `:attr-foo` `:prop-foo` |
 

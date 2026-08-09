@@ -52,7 +52,7 @@ describe('generated code shape', () => {
   });
 
   it('prefixes free identifiers but leaves loop bindings and globals alone', () => {
-    const code = gen(`<ul><li :for="item in items.get()">{{ Math.max(item.n, 0) }}</li></ul>`);
+    const code = gen(`<ul><li :for="item in items.get()" :key="item.id">{{ Math.max(item.n, 0) }}</li></ul>`);
     expect(code).toContain('_ctx.items.get()');
     expect(code).toContain('Math.max(');
     expect(code).not.toContain('_ctx.Math');

@@ -1,11 +1,10 @@
 /**
  * `:for` keying.
  *
- * With no `:key`, rows are keyed by **item identity** — the Solid model.
- * Reordering therefore moves elements and takes their DOM state with them,
- * which is correct by default. `:key` exists for the case identity cannot
- * cover: data replaced with equal-but-new objects. `:key="$index"` opts back
- * into positional keying.
+ * `:key` is mandatory. Neither possible default is safe — keying by position
+ * strands DOM state on the wrong row after a reorder, and keying by object
+ * identity rebuilds the whole list when data is refetched — so the choice is
+ * the author's, every time.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { compileTemplate } from '@voltjs/core/jit';
@@ -30,14 +29,6 @@ const ITEMS: Item[] = [
 ];
 
 @Component({
-  selector: 'v-default',
-  render: compileTemplate(`<ul><li :for="item in items.get()">{{ item.text }}</li></ul>`),
-})
-class ByIdentity {
-  items = new Signal.State<Item[]>(ITEMS);
-}
-
-@Component({
   selector: 'v-by-id',
   render: compileTemplate(`<ul><li :for="item in items.get()" :key="item.id">{{ item.text }}</li></ul>`),
 })
@@ -53,70 +44,22 @@ class ByIndex {
   items = new Signal.State<Item[]>(ITEMS);
 }
 
-describe('default: keyed by item identity', () => {
-  it('reordering moves the existing elements', () => {
-    const handle = mount(ByIdentity, host);
-    const [a, b, c] = [...host.querySelectorAll('li')];
-
-    (handle.instance as ByIdentity).items.set([...ITEMS].reverse());
-    flushSync();
-
-    expect([...host.querySelectorAll('li')]).toEqual([c, b, a]);
-    expect(host.textContent).toBe('cba');
+describe(':key is required', () => {
+  it('refuses to compile a `:for` without one', () => {
+    expect(() => compileTemplate(`<ul><li :for="x in xs.get()">{{ x }}</li></ul>`)).toThrow(
+      /`:for` requires `:key`/,
+    );
   });
 
-  it('DOM state travels with the item, with no key needed', () => {
-    const handle = mount(ByIdentity, host);
-    // Stands in for focus, a typed-in value, a running transition, or a
-    // child component's internal state.
-    host.querySelectorAll('li')[0]!.setAttribute('data-state', 'belongs-to-a');
-
-    (handle.instance as ByIdentity).items.set([...ITEMS].reverse());
-    flushSync();
-
-    const after = [...host.querySelectorAll('li')];
-    expect(after[2]!.textContent).toBe('a');
-    expect(after[2]!.getAttribute('data-state')).toBe('belongs-to-a');
-  });
-
-  it('removing from the front leaves the survivors untouched', () => {
-    const handle = mount(ByIdentity, host);
-    const [, b, c] = [...host.querySelectorAll('li')];
-
-    (handle.instance as ByIdentity).items.set(ITEMS.slice(1));
-    flushSync();
-
-    expect([...host.querySelectorAll('li')]).toEqual([b, c]);
-  });
-
-  it('handles duplicate values by pairing them up in order', () => {
-    @Component({
-      selector: 'v-dupes',
-      render: compileTemplate(`<ul><li :for="s in items.get()">{{ s }}</li></ul>`),
-    })
-    class Dupes {
-      items = new Signal.State(['a', 'b', 'a']);
+  it('names both remedies in the error', () => {
+    let message = '';
+    try {
+      compileTemplate(`<ul><li :for="x in xs.get()">{{ x }}</li></ul>`);
+    } catch (err) {
+      message = (err as Error).message;
     }
-
-    const handle = mount(Dupes, host);
-    expect(host.textContent).toBe('aba');
-
-    (handle.instance as Dupes).items.set(['a', 'a', 'b']);
-    flushSync();
-    expect(host.textContent).toBe('aab');
-  });
-
-  it('rebuilds a row whose item was replaced by an equal-but-new object', () => {
-    const handle = mount(ByIdentity, host);
-    const first = host.querySelectorAll('li')[0]!;
-
-    // A refetch returning fresh objects: identity changed, so the row is new.
-    // This is the case `:key` exists for.
-    (handle.instance as ByIdentity).items.set(ITEMS.map((i) => ({ ...i })));
-    flushSync();
-
-    expect(host.querySelectorAll('li')[0]!).not.toBe(first);
-    expect(host.textContent).toBe('abc');
+    expect(message).toContain(':key="item.id"');
+    expect(message).toContain(':key="$index"');
   });
 });
 
@@ -132,14 +75,45 @@ describe(':key="item.id" — identity that survives replacement', () => {
     expect([...host.querySelectorAll('li')]).toEqual(before);
   });
 
-  it('still moves elements on reorder', () => {
+  it('moves elements on reorder, taking their DOM state along', () => {
     const handle = mount(ById, host);
     const [a, b, c] = [...host.querySelectorAll('li')];
+    // Stands in for focus, a typed-in value, or a running transition.
+    a.setAttribute('data-state', 'belongs-to-a');
 
     (handle.instance as ById).items.set([...ITEMS].reverse());
     flushSync();
 
-    expect([...host.querySelectorAll('li')]).toEqual([c, b, a]);
+    const after = [...host.querySelectorAll('li')];
+    expect(after).toEqual([c, b, a]);
+    expect(after[2]!.getAttribute('data-state')).toBe('belongs-to-a');
+  });
+
+  it('leaves the survivors untouched when one row is removed', () => {
+    const handle = mount(ById, host);
+    const [, b, c] = [...host.querySelectorAll('li')];
+
+    (handle.instance as ById).items.set(ITEMS.slice(1));
+    flushSync();
+
+    expect([...host.querySelectorAll('li')]).toEqual([b, c]);
+  });
+
+  it('pairs duplicate keys up in order', () => {
+    @Component({
+      selector: 'v-dupes',
+      render: compileTemplate(`<ul><li :for="s in items.get()" :key="s">{{ s }}</li></ul>`),
+    })
+    class Dupes {
+      items = new Signal.State(['a', 'b', 'a']);
+    }
+
+    const handle = mount(Dupes, host);
+    expect(host.textContent).toBe('aba');
+
+    (handle.instance as Dupes).items.set(['a', 'a', 'b']);
+    flushSync();
+    expect(host.textContent).toBe('aab');
   });
 });
 

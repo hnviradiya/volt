@@ -7,8 +7,8 @@ Structure, events, and bindings all share it.
 
 `:name` is resolved in a fixed order, so a given name always means one thing:
 
-1. **Structural directives** — `if`, `else-if`, `else`, `for`, `key`, `show`,
-   `text`, `html`, `model`, `ref`, `slot`
+1. **Structural directives** — `if`, `else-if`, `else`, `for`, `key`, `text`,
+   `html`, `model`, `ref`, `slot`
 2. **Explicit escapes** — `:on-*` (event), `:prop-*` (property), `:attr-*`
    (attribute)
 3. **`:class` and `:style`**, which have their own merge semantics
@@ -72,30 +72,19 @@ and index update in place, so only the bindings that actually read them
 re-run. Reordering a list moves existing elements rather than recreating
 them.
 
-**`:key` is optional.** With no key, rows are keyed by *item identity*, so
-reordering is correct by default — elements move, and whatever is attached to
-them moves too.
+**`:key` is required.** Neither possible default is safe, so the choice is
+yours every time:
 
-Reach for `:key` when identity alone is not enough:
-
-| | when to use it |
+| | meaning |
 |---|---|
-| *(omitted)* | the default; items keep their identity across updates |
-| `:key="item.id"` | items are replaced by equal-but-new objects, e.g. after a refetch |
-| `:key="$index"` | you explicitly want positional reuse |
+| `:key="item.id"` | a stable identity that survives the item object being replaced |
+| `:key="$index"` | positional reuse, for a list that is never reordered |
 
-Without a key, replacing every item with a fresh object — `items.map(i => ({...i}))`
-— counts as an entirely new list and rebuilds every row. `:key="item.id"`
-is what keeps the rows.
-
-### `:show`
-
-```html
-<div :show="visible.get()">…</div>
-```
-
-Toggles `display` without removing the element. Use `:if` when the content is
-expensive and often absent; use `:show` when it toggles frequently.
+Keying by position strands DOM state on the wrong row after a reorder — the
+text updates correctly while focus, input values and animations stay behind.
+Keying by object identity is correct on reorder but rebuilds the whole list
+when data is refetched as equal-but-new objects. A `:for` without `:key` is a
+compile error naming both options.
 
 ### `:text` and `:html`
 
@@ -242,6 +231,16 @@ A constant `:class` is folded into the markup: `:class="'btn'"` becomes
 
 Camel-case keys are hyphenated. Properties the binding previously set and no
 longer includes are removed.
+
+There is no `:show` directive — hiding an element is a style binding, and an
+empty string lets the stylesheet decide the visible value:
+
+```html
+<div :style="{ display: visible.get() ? '' : 'none' }">…</div>
+```
+
+Prefer `:if` when the content is expensive or genuinely absent; the element is
+then not in the DOM, the accessibility tree, or the tab order at all.
 
 ### `:spread`
 

@@ -172,8 +172,15 @@ describe('bindings', () => {
     expect(div.style.color).toBe('blue');
   });
 
-  it('toggles visibility with :show without removing the node', () => {
-    @Component({ selector: 'v-show', render: compileTemplate(`<div :show="visible.get()">x</div>`) })
+  it('hides an element with :style without removing it', () => {
+    // There is no `:show` directive — toggling display is a style binding,
+    // and an empty string lets the stylesheet decide the visible value.
+    @Component({
+      selector: 'v-show',
+      render: compileTemplate(
+        `<div :style="{ display: visible.get() ? '' : 'none' }">x</div>`,
+      ),
+    })
     class Shown {
       visible = new Signal.State(true);
     }

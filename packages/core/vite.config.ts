@@ -1,7 +1,21 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'node:path';
+import { createRequire } from 'node:module';
 
 const r = (p: string) => resolve(import.meta.dirname, p);
+const pkg = createRequire(import.meta.url)('./package.json');
+
+/**
+ * Everything this package declares as a dependency stays external.
+ *
+ * Bundling a dependency into a library is wrong in general, and actively
+ * breaks for packages that use CommonJS internally — dart-sass calls
+ * `require` at runtime, which fails once inlined into an ES module.
+ */
+const external = [
+  ...Object.keys(pkg.dependencies ?? {}),
+  ...Object.keys(pkg.peerDependencies ?? {}),
+].map((name) => new RegExp(`^${name}(/.*)?$`));
 
 export default defineConfig({
   build: {
@@ -12,9 +26,7 @@ export default defineConfig({
       formats: ['es'],
     },
     rollupOptions: {
-      // Workspace packages and the host toolchain stay external so each
-      // package ships only its own code.
-      external: [/^@voltjs\//, /^node:/, 'esbuild', 'vite'],
+      external: [...external, /^node:/],
     },
     sourcemap: true,
     minify: false,

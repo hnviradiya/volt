@@ -29,13 +29,23 @@ export class Panel {
 The chart is not constructed until `expanded` is true, and is torn down when
 it becomes false.
 
-### `:if` vs `:show`
+### Hiding without removing
 
-`:if` creates and destroys. `:show` toggles `display` on an element that is
-always present.
+`:if` creates and destroys. When you want the element to stay — to preserve
+scroll position, a running animation, or a measured size — bind `display`
+instead:
 
-Use `:if` when the content is expensive or usually absent. Use `:show` when
-it toggles often and is cheap to keep around.
+```html
+<div :style="{ display: open.get() ? '' : 'none' }">…</div>
+```
+
+There is no `:show` directive for this. It would be five lines of framework
+wrapping a style binding you can already write, and one that hides which CSS
+property is being set.
+
+Prefer `:if` when the content is expensive or genuinely absent: a hidden
+element is still in the DOM, still in the accessibility tree, and still
+built.
 
 ### Grouping
 
@@ -56,32 +66,37 @@ it toggles often and is cheap to keep around.
 
 ### Keys
 
-Rows are keyed by **item identity** unless you say otherwise, so reordering
-is correct without writing anything:
+`:key` is **required** on every `:for`. There is no default, because neither
+candidate is safe:
 
-```ts
-// The same three <li> elements move; they are not recreated, and any focus,
-// input value, or running transition moves with them.
-todos.set([...todos.get()].reverse());
-```
-
-This is deliberate. Frameworks that key by position instead will happily
-render the right text after a reorder while leaving a checkbox ticked on the
-wrong row — a bug that only shows up once rows hold state.
-
-`:key` covers the case identity cannot:
+- keying by **position** is cheap, but after a reorder the text updates
+  correctly while focus, input values and animations stay behind on the wrong
+  row — a bug that only surfaces once rows hold state
+- keying by **object identity** is correct on reorder, but rebuilds the whole
+  list when data is refetched as equal-but-new objects
 
 ```html
 <li :for="todo in todos.get()" :key="todo.id">{{ todo.text }}</li>
 ```
 
-Use it when items are **replaced rather than moved** — an immutable update
-like `todos.map(t => t.id === id ? { ...t, done: !t.done } : t)` produces a
-new object, and without a key that row is torn down and rebuilt. With
-`:key="todo.id"` the row survives and only the changed binding re-runs.
+With a stable key, reordering moves the existing elements and takes their DOM
+state along; removing one leaves every other row untouched:
 
-`:key="$index"` opts back into positional keying, which is occasionally what
-you want for a fixed-length list of slots.
+```ts
+// The same three <li> elements move. They are not recreated.
+todos.set([...todos.get()].reverse());
+```
+
+It also survives an immutable update, which identity alone cannot:
+
+```ts
+// A new object for one todo — with :key="todo.id" the row is reused and only
+// the changed binding re-runs.
+todos.set(todos.get().map(t => t.id === id ? { ...t, done: !t.done } : t));
+```
+
+Use `:key="$index"` when you genuinely want positional reuse — a fixed-length
+list of slots that is never reordered.
 
 ### Index
 

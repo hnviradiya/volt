@@ -11,5 +11,5 @@
   <p class="hint" :else-if="count.get() < 0">Below zero.</p>
   <p class="hint" :else>Counted {{ count.get() }} so far.</p>
 
-  <button class="link" :click="reset()" :show="count.get() !== 0">Reset</button>
+  <button class="link" :click="reset()" :if="count.get() !== 0">Reset</button>
 </div>

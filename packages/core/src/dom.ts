@@ -745,13 +745,6 @@ export function bindHtml(el: Element, accessor: MaybeAccessor<unknown>): void {
   });
 }
 
-export function show(el: HTMLElement, accessor: MaybeAccessor<unknown>): void {
-  const original = el.style.display === 'none' ? '' : el.style.display;
-  bind(accessor, (value) => {
-    el.style.display = value ? original : 'none';
-  });
-}
-
 export function spread(el: Element, accessor: MaybeAccessor<Record<string, unknown>>): void {
   let applied: string[] = [];
   bind(accessor, (props) => {

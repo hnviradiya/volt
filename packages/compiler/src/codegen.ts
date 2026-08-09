@@ -247,7 +247,9 @@ class Generator {
   }
 
   private error(message: string, node: { loc: { line: number; column: number } }): never {
-    throw new CompilerError(`${message} [${this.filename}]`, node.loc);
+    // Pass the filename through rather than appending it, so the message
+    // names the file the template actually lives in.
+    throw new CompilerError(message, node.loc, undefined, this.filename);
   }
 
   // -------------------------------------------------------------------------
@@ -721,12 +723,6 @@ class Generator {
         return;
       }
 
-      case 'show': {
-        const accessor = this.genAccessor(dir.exp!, ctx);
-        push((el) => [`${this.rt}.show(${el}, ${accessor});`]);
-        return;
-      }
-
       case 'text': {
         const accessor = this.genAccessor(dir.exp!, ctx);
         push((el) => [`${this.rt}.bindText(${el}, ${accessor});`]);
@@ -912,6 +908,20 @@ class Generator {
     const parsed = parseForExpression(dir.exp!);
     const keyDir = findDirective(node, 'key');
 
+    // `:key` is mandatory. Neither possible default is safe — keying by
+    // position strands DOM state on the wrong row after a reorder, and keying
+    // by object identity rebuilds the whole list when data is refetched — so
+    // the choice is the author's to make, every time.
+    if (!keyDir?.exp) {
+      this.error(
+        '`:for` requires `:key`.\n' +
+          '  Use `:key="item.id"` for a stable identity that survives the item\n' +
+          '  object being replaced, or `:key="$index"` if this list is never\n' +
+          '  reordered and positional reuse is what you want.',
+        dir,
+      );
+    }
+
     const listAccessor = this.thunk(printExpression(parsed.source, ctx, 1));
     const stripped = stripDirectives(node, ['for', 'key']);
     const indexParam = parsed.index ?? this.nextId('idx');
@@ -940,24 +950,20 @@ class Generator {
     }
 
     // The key function sees raw values, so its scope is plain — no auto-call.
-    // `null` means "key by item identity", which the runtime handles.
-    let keyFn = 'null';
-    if (keyDir?.exp) {
-      const keyNames = patternNames(parsed.item);
-      if (parsed.index) keyNames.push(parsed.index);
+    const keyNames = patternNames(parsed.item);
+    if (parsed.index) keyNames.push(parsed.index);
 
-      keyFn = withScope(ctx, keyNames, () => {
-        const itemParam = printPattern(parsed.item, ctx);
-        const expression = printExpression(parseExpression(keyDir.exp!), ctx, 1);
+    const keyFn = withScope(ctx, keyNames, () => {
+      const itemParam = printPattern(parsed.item, ctx);
+      const expression = printExpression(parseExpression(keyDir.exp!), ctx, 1);
 
-        // `$index` is always the second parameter, so `:key="$index"` works
-        // whether or not the loop declared an index name of its own.
-        if (parsed.index) {
-          return `(${itemParam}, $index) => { const ${parsed.index} = $index; return (${expression}); }`;
-        }
-        return this.thunk(expression, `${itemParam}, $index`);
-      });
-    }
+      // `$index` is always the second parameter, so `:key="$index"` works
+      // whether or not the loop declared an index name of its own.
+      if (parsed.index) {
+        return `(${itemParam}, $index) => { const ${parsed.index} = $index; return (${expression}); }`;
+      }
+      return this.thunk(expression, `${itemParam}, $index`);
+    });
 
     return `${this.rt}.each(${listAccessor}, ${rowFn}, ${keyFn})`;
   }

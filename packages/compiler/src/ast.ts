@@ -13,7 +13,6 @@ export type DirectiveKind =
   | 'else'
   | 'for'
   | 'key'
-  | 'show'
   | 'text'
   | 'html'
   | 'model'
@@ -133,7 +132,6 @@ export const STRUCTURAL_DIRECTIVES = new Set<string>([
   'else',
   'for',
   'key',
-  'show',
   'text',
   'html',
   'model',
