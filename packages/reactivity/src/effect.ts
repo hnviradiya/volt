@@ -36,8 +36,10 @@ export type EffectFn = () => void | CleanupFn;
 
 export interface Scope {
   parent: Scope | null;
-  children: Set<Scope>;
-  cleanups: CleanupFn[];
+  /** Allocated on first child; most scopes never have one. */
+  children: Set<Scope> | null;
+  /** Allocated on first cleanup; most scopes never register one. */
+  cleanups: CleanupFn[] | null;
   contexts: Map<symbol, unknown> | null;
   disposed: boolean;
 }
@@ -47,12 +49,12 @@ let currentScope: Scope | null = null;
 function createScope(parent: Scope | null): Scope {
   const scope: Scope = {
     parent,
-    children: new Set(),
-    cleanups: [],
+    children: null,
+    cleanups: null,
     contexts: null,
     disposed: false,
   };
-  parent?.children.add(scope);
+  if (parent) (parent.children ??= new Set()).add(scope);
   return scope;
 }
 
@@ -76,27 +78,31 @@ export function runWithScope<T>(scope: Scope | null, fn: () => T): T {
 
 /** Tear down a scope's children and cleanups without disposing the scope. */
 function clearScope(scope: Scope): void {
-  // Copied first: disposeScope removes each child from this same set.
-  for (const child of [...scope.children]) disposeScope(child);
-  scope.children.clear();
-
-  // Cleanups run newest-first so teardown mirrors construction order.
-  const { cleanups } = scope;
-  for (let i = cleanups.length - 1; i >= 0; i--) {
-    try {
-      cleanups[i]!();
-    } catch (err) {
-      reportError(err);
-    }
+  if (scope.children !== null) {
+    // Copied first: disposeScope removes each child from this same set.
+    for (const child of [...scope.children]) disposeScope(child);
+    scope.children.clear();
   }
-  cleanups.length = 0;
+
+  const cleanups = scope.cleanups;
+  if (cleanups !== null) {
+    // Cleanups run newest-first so teardown mirrors construction order.
+    for (let i = cleanups.length - 1; i >= 0; i--) {
+      try {
+        cleanups[i]!();
+      } catch (err) {
+        reportError(err);
+      }
+    }
+    cleanups.length = 0;
+  }
 }
 
 export function disposeScope(scope: Scope): void {
   if (scope.disposed) return;
   scope.disposed = true;
   clearScope(scope);
-  scope.parent?.children.delete(scope);
+  scope.parent?.children?.delete(scope);
   scope.contexts = null;
 }
 
@@ -121,7 +127,7 @@ export function onCleanup(fn: CleanupFn): CleanupFn {
     }
     return fn;
   }
-  currentScope.cleanups.push(fn);
+  (currentScope.cleanups ??= []).push(fn);
   return fn;
 }
 
@@ -337,7 +343,7 @@ function createEffect(fn: EffectFn, watcher: WatcherNode): Dispose {
   };
 
   // Disposing the owning scope disposes its effects.
-  parent?.cleanups.push(dispose);
+  if (parent) (parent.cleanups ??= []).push(dispose);
   return dispose;
 }
 

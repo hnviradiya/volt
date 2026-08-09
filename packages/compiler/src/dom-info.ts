@@ -122,6 +122,27 @@ export const KEY_MODIFIERS: Record<string, string> = {
   pagedown: 'PageDown',
 };
 
+/**
+ * Events attached once at the document and dispatched by walking up from the
+ * target, instead of one listener per element.
+ *
+ * A thousand-row table with two handlers per row is two listeners rather than
+ * two thousand. Only events that genuinely bubble are listed — `focus` and
+ * `blur` do not, and media events are per-element by nature.
+ */
+export const DELEGATED_EVENTS = new Set([
+  'click', 'dblclick', 'contextmenu', 'auxclick',
+  'mousedown', 'mouseup', 'mousemove', 'mouseover', 'mouseout',
+  'pointerdown', 'pointerup', 'pointermove', 'pointerover', 'pointerout',
+  'touchstart', 'touchend', 'touchmove', 'touchcancel',
+  'keydown', 'keyup', 'keypress',
+  'input', 'change', 'submit', 'reset', 'beforeinput',
+  'focusin', 'focusout',
+  'dragstart', 'dragend', 'dragenter', 'dragleave', 'dragover', 'drop',
+  'copy', 'cut', 'paste',
+  'wheel',
+]);
+
 export const SYSTEM_MODIFIERS = new Set(['ctrl', 'alt', 'shift', 'meta']);
 export const EVENT_OPTION_MODIFIERS = new Set(['capture', 'once', 'passive']);
 export const EVENT_GUARD_MODIFIERS = new Set(['stop', 'prevent', 'self']);

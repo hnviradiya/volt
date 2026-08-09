@@ -493,6 +493,70 @@ export function on(
   onCleanup(() => el.removeEventListener(name, handler, options));
 }
 
+/** Event types that already have a document-level listener installed. */
+const delegatedTypes = new Set<string>();
+
+/**
+ * Attach a handler without adding a listener to the element.
+ *
+ * One listener per event *type* is installed on the document; dispatch walks
+ * up from the target looking for a handler stashed on each node. A table of a
+ * thousand rows with two handlers each costs two listeners instead of two
+ * thousand, and rows can be created and discarded without touching the
+ * listener registry at all.
+ */
+export function delegate(el: Element, name: string, handler: EventListener): void {
+  const key = `$$${name}`;
+  (el as unknown as Record<string, unknown>)[key] = handler;
+
+  if (!delegatedTypes.has(name)) {
+    delegatedTypes.add(name);
+    document.addEventListener(name, dispatchDelegated);
+  }
+
+  onCleanup(() => {
+    (el as unknown as Record<string, unknown>)[key] = undefined;
+  });
+}
+
+function dispatchDelegated(event: Event): void {
+  const key = `$$${event.type}`;
+  let node = event.target as (Node & Record<string, unknown>) | null;
+
+  // The walk is synthetic, so the browser's own bubbling has already
+  // finished; `stopPropagation` is intercepted to stop *this* walk. Reading
+  // `cancelBubble` would be the alternative, but it is deprecated.
+  let stopped = false;
+  const stopPropagation = event.stopPropagation.bind(event);
+  Object.defineProperty(event, 'stopPropagation', {
+    configurable: true,
+    value() {
+      stopped = true;
+      stopPropagation();
+    },
+  });
+
+  try {
+    while (node !== null) {
+      const handler = node[key] as EventListener | undefined;
+      if (handler) {
+        // `currentTarget` is null during a synthetic walk, so expose the node
+        // the handler was attached to — that is what `.self` compares against.
+        Object.defineProperty(event, 'currentTarget', {
+          configurable: true,
+          value: node,
+        });
+        Reflect.apply(handler, node, [event]);
+        if (stopped) return;
+      }
+      node = node.parentNode as (Node & Record<string, unknown>) | null;
+    }
+  } finally {
+    Reflect.deleteProperty(event, 'stopPropagation');
+    Reflect.deleteProperty(event, 'currentTarget');
+  }
+}
+
 export interface GuardConfig {
   stop?: boolean;
   prevent?: boolean;

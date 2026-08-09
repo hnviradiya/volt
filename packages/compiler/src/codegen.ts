@@ -27,6 +27,7 @@ import {
 import {
   ATTR_TO_PROP,
   BOOLEAN_ATTRIBUTES,
+  DELEGATED_EVENTS,
   EVENT_GUARD_MODIFIERS,
   EVENT_OPTION_MODIFIERS,
   KEY_MODIFIERS,
@@ -81,6 +82,7 @@ export interface CompileStats {
   dedupedTemplates: number;
   effects: number;
   foldedBindings: number;
+  delegatedEvents: number;
   hoistedHandlers: number;
   staticNodes: number;
 }
@@ -158,6 +160,7 @@ class Generator {
     dedupedTemplates: 0,
     effects: 0,
     foldedBindings: 0,
+    delegatedEvents: 0,
     hoistedHandlers: 0,
     staticNodes: 0,
   };
@@ -661,9 +664,19 @@ class Generator {
     switch (dir.kind) {
       case 'event': {
         const { handler, options } = this.genEventHandler(dir, ctx);
-        push((el) => [
-          `${this.rt}.on(${el}, ${JSON.stringify(dir.name)}, ${handler}${options ? `, ${options}` : ''});`,
-        ]);
+        // Listener options (capture/once/passive) need a real listener on the
+        // element; everything else can share one document-level listener.
+        const canDelegate = options === null && DELEGATED_EVENTS.has(dir.name);
+        if (canDelegate) {
+          this.stats.delegatedEvents++;
+          push((el) => [
+            `${this.rt}.delegate(${el}, ${JSON.stringify(dir.name)}, ${handler});`,
+          ]);
+        } else {
+          push((el) => [
+            `${this.rt}.on(${el}, ${JSON.stringify(dir.name)}, ${handler}${options ? `, ${options}` : ''});`,
+          ]);
+        }
         return;
       }
 

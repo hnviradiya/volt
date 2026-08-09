@@ -108,7 +108,7 @@ function track(producer: Producer): void {
   if (!tracking || currentConsumer === null) return;
   const consumer = currentConsumer;
 
-  producer.sinks.add(consumer);
+  (producer.sinks ??= new Set()).add(consumer);
   consumer.sources.push(producer);
   consumer.sourceVersions.push(producer.version);
 
@@ -123,7 +123,7 @@ function track(producer: Producer): void {
 function unlinkSources(consumer: ComputedSignal<unknown>): void {
   const wasLive = consumer.liveCount > 0;
   for (const source of consumer.sources) {
-    source.sinks.delete(consumer as Consumer);
+    source.sinks?.delete(consumer as Consumer);
     if (wasLive) decrementLive(source);
   }
   consumer.sources.length = 0;
@@ -141,8 +141,14 @@ function unlinkSources(consumer: ComputedSignal<unknown>): void {
  * on what the intermediate computeds produce.
  */
 function propagate(node: Producer, direct: boolean, pending: Set<WatcherNode>): void {
+  if (node.sinks === null) return;
   for (const sink of node.sinks) {
     if (sink instanceof WatcherNode) {
+      // Record which watched signal went dirty as we colour, so `getPending`
+      // is proportional to what actually changed rather than to everything
+      // being watched. With thousands of live effects that difference is the
+      // whole cost of an update.
+      sink.pending.add(node);
       if (!sink.notified) pending.add(sink);
       continue;
     }
@@ -165,7 +171,7 @@ function propagate(node: Producer, direct: boolean, pending: Set<WatcherNode>): 
 export class StateSignal<T> {
   /** @internal */ value: T;
   /** @internal */ version = 0;
-  /** @internal */ sinks = new Set<Consumer>();
+  /** @internal */ sinks: Set<Consumer> | null = null;
   /** @internal */ liveCount = 0;
   /** @internal */ options: SignalOptions<T> | undefined;
   /** @internal */ readonly equals: (a: T, b: T) => boolean;
@@ -194,7 +200,7 @@ export class StateSignal<T> {
     this.value = value;
     this.version++;
 
-    if (this.sinks.size === 0) return;
+    if (this.sinks === null || this.sinks.size === 0) return;
 
     const pending = new Set<WatcherNode>();
     propagate(this as Producer, true, pending);
@@ -219,7 +225,7 @@ export class ComputedSignal<T> {
   /** @internal */ error: unknown = UNSET;
   /** @internal */ version = 0;
   /** @internal */ state: NodeState = DIRTY;
-  /** @internal */ sinks = new Set<Consumer>();
+  /** @internal */ sinks: Set<Consumer> | null = null;
   /** @internal */ sources: Producer[] = [];
   /** @internal */ sourceVersions: number[] = [];
   /** @internal */ liveCount = 0;
@@ -320,6 +326,7 @@ export class WatcherNode {
   /** @internal */ liveCount = 1;
   /** @internal */ notified = false;
   /** @internal */ watching = new Set<Producer>();
+  /** @internal */ pending = new Set<Producer>();
 
   constructor(notify: (this: WatcherNode) => void) {
     this.notifyCallback = notify;
@@ -335,7 +342,7 @@ export class WatcherNode {
       const producer = signal as Producer;
       if (this.watching.has(producer)) continue;
       this.watching.add(producer);
-      producer.sinks.add(this as Consumer);
+      (producer.sinks ??= new Set()).add(this as Consumer);
       this.sources.push(producer);
       incrementLive(producer);
     }
@@ -347,22 +354,29 @@ export class WatcherNode {
       const producer = signal as Producer;
       if (!this.watching.has(producer)) continue;
       this.watching.delete(producer);
-      producer.sinks.delete(this as Consumer);
+      this.pending.delete(producer);
+      producer.sinks?.delete(this as Consumer);
       const index = this.sources.indexOf(producer);
       if (index !== -1) this.sources.splice(index, 1);
       decrementLive(producer);
     }
   }
 
-  /** The watched signals that are currently out of date. */
+  /**
+   * The watched signals that are currently out of date.
+   *
+   * Reads from the set maintained during propagation, and drops entries that
+   * have since settled — so this costs what changed, not what is watched.
+   */
   getPending(): ComputedSignal<unknown>[] {
-    const pending: ComputedSignal<unknown>[] = [];
-    for (const source of this.watching) {
-      if (source instanceof ComputedSignal && source.state !== CLEAN) {
-        pending.push(source);
-      }
+    if (this.pending.size === 0) return [];
+
+    const out: ComputedSignal<unknown>[] = [];
+    for (const source of this.pending) {
+      if (source instanceof ComputedSignal && source.state !== CLEAN) out.push(source);
+      else this.pending.delete(source);
     }
-    return pending;
+    return out;
   }
 }
 
@@ -396,11 +410,11 @@ export function introspectSources(
 export function introspectSinks(
   node: StateSignal<unknown> | ComputedSignal<unknown>,
 ): (ComputedSignal<unknown> | WatcherNode)[] {
-  return [...node.sinks];
+  return node.sinks ? [...node.sinks] : [];
 }
 
 export function hasSinks(node: StateSignal<unknown> | ComputedSignal<unknown>): boolean {
-  return node.sinks.size > 0;
+  return (node.sinks?.size ?? 0) > 0;
 }
 
 export function hasSources(node: ComputedSignal<unknown> | WatcherNode): boolean {

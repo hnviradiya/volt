@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Volt — js-framework-benchmark</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 0; padding: 1.5rem; }
+      .controls { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+      button { font: inherit; padding: 0.5rem 0.9rem; cursor: pointer; }
+      table { border-collapse: collapse; width: 100%; }
+      td { padding: 0.25rem 0.5rem; border-bottom: 1px solid #eee; }
+      tr.danger { background: #ffe8e8; }
+      .col-id { width: 6ch; color: #888; }
+      a { color: #06c; cursor: pointer; text-decoration: none; }
+      #results { margin-top: 1rem; font-variant-numeric: tabular-nums; white-space: pre; }
+    </style>
+  </head>
+  <body>
+    <h1>Volt — js-framework-benchmark</h1>
+    <p>
+      Real browser numbers. Open DevTools' Performance panel for a breakdown, or
+      use the buttons below for coarse timings.
+    </p>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
