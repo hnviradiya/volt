@@ -244,7 +244,12 @@ function printRaw(node: ExprNode, ctx: PrintContext): string {
         if (p.type === 'Spread') return `...${printExpression(p.argument, ctx, P_ASSIGN)}`;
         const value = printExpression(p.value, ctx, P_ASSIGN);
         if (p.computed) return `[${printExpression(p.key, ctx)}]: ${value}`;
-        const key = p.key.type === 'Identifier' ? p.key.name : p.key.raw ?? '';
+        // A non-computed key is an identifier or a string/number literal;
+        // anything else cannot appear in that position.
+        let key: string;
+        if (p.key.type === 'Identifier') key = p.key.name;
+        else if (p.key.type === 'Literal') key = p.key.raw;
+        else key = printExpression(p.key, ctx);
         // Shorthand must still expand — `{ count }` means `{ count: _ctx.count }`.
         return `${key}: ${value}`;
       });

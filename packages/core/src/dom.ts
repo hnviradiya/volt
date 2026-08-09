@@ -19,7 +19,9 @@ import {
   type Scope,
 } from '@voltjs/reactivity';
 
-const { untrack } = Signal.subtle;
+// Annotated explicitly: the inferred type names an internal module, which
+// would leak a non-portable path into the emitted declarations.
+const untrack: <T>(cb: () => T) => T = Signal.subtle.untrack;
 
 export type Accessor<T> = () => T;
 export type MaybeAccessor<T> = T | Accessor<T>;
@@ -166,9 +168,9 @@ function appendAll(parent: Node, value: Node | Node[], before: Node | null): voi
 function removeNodes(current: Current): void {
   if (current === null || current === undefined) return;
   if (Array.isArray(current)) {
-    for (const node of current) node.remove();
+    for (const node of current) (node as ChildNode).remove();
   } else {
-    current.remove();
+    (current as ChildNode).remove();
   }
 }
 
@@ -212,12 +214,12 @@ function reconcileArrays(parent: Node, a: Node[], b: Node[], marker: Node | null
 
     if (aEnd === aStart) {
       const node =
-        bEnd < bLength ? (bStart > 0 ? b[bStart - 1]!.nextSibling : b[bEnd]) : after;
+        bEnd < bLength ? (bStart > 0 ? b[bStart - 1]!.nextSibling : (b[bEnd] ?? null)) : after;
       while (bStart < bEnd) parent.insertBefore(b[bStart++]!, node);
     } else if (bEnd === bStart) {
       while (aStart < aEnd) {
         const node = a[aStart]!;
-        if (!map || !map.has(node)) node.parentNode?.removeChild(node);
+        if (!map?.has(node)) (node as ChildNode).remove();
         aStart++;
       }
     } else if (a[aStart] === b[bEnd - 1] && b[bStart] === a[aEnd - 1]) {
@@ -253,7 +255,7 @@ function reconcileArrays(parent: Node, a: Node[], b: Node[], marker: Node | null
         }
       } else {
         const node = a[aStart++]!;
-        node.parentNode?.removeChild(node);
+        (node as ChildNode).remove();
       }
     }
   }

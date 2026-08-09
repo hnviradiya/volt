@@ -503,10 +503,22 @@ class ExprParser {
       }
 
       if (this.eatPunct(':')) {
-        properties.push({ key, value: this.parseAssignment(), computed, shorthand: false });
+        properties.push({
+          type: 'Property',
+          key,
+          value: this.parseAssignment(),
+          computed,
+          shorthand: false,
+        });
       } else {
         if (computed || key.type !== 'Identifier') this.fail('Expected `:` after property name');
-        properties.push({ key, value: key, computed: false, shorthand: true });
+        properties.push({
+          type: 'Property',
+          key,
+          value: key,
+          computed: false,
+          shorthand: true,
+        });
       }
 
       if (!this.eatPunct(',')) break;

@@ -104,6 +104,8 @@ export interface ArrayNode {
 }
 
 export interface ObjectProperty {
+  /** Discriminant, so a property is distinguishable from a spread element. */
+  type: 'Property';
   key: ExprNode;
   value: ExprNode;
   computed: boolean;

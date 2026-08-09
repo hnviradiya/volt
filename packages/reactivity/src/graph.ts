@@ -68,6 +68,18 @@ export function isEffectComputed(node: unknown): boolean {
  * transitions in and out of observation — which is what lets a signal attach
  * and release external resources.
  */
+/**
+ * Invoke a `watched`/`unwatched` hook with the signal as `this`.
+ *
+ * The options object is generic in the signal's value type, which does not
+ * survive erasure to `Producer`; the hook only ever receives `this`, so the
+ * value type is genuinely irrelevant here.
+ */
+function callLivenessHook(node: Producer, key: typeof watched | typeof unwatched): void {
+  const hook = node.options?.[key] as ((this: Producer) => void) | undefined;
+  hook?.call(node);
+}
+
 function incrementLive(node: Producer): void {
   node.liveCount++;
   if (node.liveCount > 1) return;
@@ -75,7 +87,7 @@ function incrementLive(node: Producer): void {
   if (node instanceof ComputedSignal) {
     for (const source of node.sources) incrementLive(source);
   }
-  node.options?.[watched]?.call(node as AnySignal<never>);
+  callLivenessHook(node, watched);
 }
 
 function decrementLive(node: Producer): void {
@@ -85,7 +97,7 @@ function decrementLive(node: Producer): void {
   if (node instanceof ComputedSignal) {
     for (const source of node.sources) decrementLive(source);
   }
-  node.options?.[unwatched]?.call(node as AnySignal<never>);
+  callLivenessHook(node, unwatched);
 }
 
 // ---------------------------------------------------------------------------
