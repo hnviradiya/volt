@@ -1092,6 +1092,20 @@ class Generator {
           if (!dir.exp) break;
           const parsed = parseExpression(dir.exp);
           const name = dir.kind === 'class' ? 'class' : dir.kind === 'style' ? 'style' : dir.name;
+
+          // A callback prop given a bare method reference would arrive
+          // unbound, and `this` inside it would be the child. Wrap it so the
+          // method is invoked on the component that declared it. Restricted
+          // to the `onX` naming convention, since wrapping an ordinary value
+          // in an arrow would break it.
+          const isCallbackProp = /^on[A-Z]/.test(name);
+          const isBareReference = parsed.type === 'Identifier' || parsed.type === 'Member';
+          if (isCallbackProp && isBareReference) {
+            const target = printExpression(parsed, ctx);
+            props.push(`${JSON.stringify(name)}: (...a) => ${target}(...a)`);
+            break;
+          }
+
           if (isStaticExpression(parsed)) {
             this.stats.foldedBindings++;
             props.push(`${JSON.stringify(name)}: ${JSON.stringify(evaluateStatic(parsed))}`);

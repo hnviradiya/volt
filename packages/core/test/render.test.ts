@@ -460,6 +460,37 @@ describe('components', () => {
     expect(view.html).toContain('count:2');
   });
 
+  it('keeps `this` correct when a callback prop is a bare method reference', () => {
+    @Component({
+      selector: 'v-child',
+      render: compileTemplate(`<button :click="fire()">go</button>`),
+    })
+    class Child {
+      @Input() onPing?: (value: number) => void;
+      fire() {
+        this.onPing?.(1);
+      }
+    }
+
+    @Component({
+      selector: 'v-parent',
+      imports: [Child],
+      // No arrow — the natural thing to write. The method must still run with
+      // the parent as `this`, not the child.
+      render: compileTemplate(`<div><v-child :onPing="record"></v-child></div>`),
+    })
+    class Parent {
+      seen: number[] = [];
+      record(value: number) {
+        this.seen.push(value);
+      }
+    }
+
+    const view = render(Parent);
+    view.click('button');
+    expect((view.handle.instance as Parent).seen).toEqual([1]);
+  });
+
   it('explains that :on-* does not apply to a component', () => {
     @Component({ selector: 'v-child', render: compileTemplate(`<span>x</span>`) })
     class Child {}

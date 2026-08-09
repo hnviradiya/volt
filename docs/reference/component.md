@@ -64,8 +64,11 @@ this.onChanged?.(next);
 ```
 
 ```html
-<v-counter :onChanged="(n) => handle(n)"></v-counter>
+<v-counter :onChanged="handle"></v-counter>
 ```
+
+A prop matching `on[A-Z]` given a bare method reference is bound to the
+component that declared it, so `this` is correct without an arrow.
 
 `:on-*` remains the syntax for real DOM and custom-element events. Applying
 it to a Volt component throws, naming the callback prop to use instead.

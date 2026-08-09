@@ -109,7 +109,16 @@ export class Counter {
 ```
 
 ```html
-<v-counter :onChanged="(n) => record(n)"></v-counter>
+<v-counter :onChanged="record"></v-counter>
+```
+
+A prop named `onSomething` given a bare method reference is invoked on the
+component that declared it, so `this` is the parent — passing `record`
+directly does the right thing. Write an arrow when you want to reshape the
+arguments:
+
+```html
+<v-counter :onChanged="(n) => record(n * 2)"></v-counter>
 ```
 
 That is the whole mechanism — no emitter to construct, no subscription to
