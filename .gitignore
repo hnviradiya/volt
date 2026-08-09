@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+*.tsbuildinfo
+.vitepress/dist/
+.vitepress/cache/
+
+# Test / coverage
+coverage/
+.vitest-cache/
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+
+# Local env
+.env
+.env.local
+.env.*.local
+
+# Ignore vscode AI rules
+.github/instructions/codacy.instructions.md

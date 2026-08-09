@@ -1,0 +1,41 @@
+{
+  "name": "@voltjs/reactivity",
+  "version": "0.1.0",
+  "description": "TC39-conformant signals with Volt's effect scheduling and disposal scopes.",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "vite build && tsc -p tsconfig.build.json"
+  },
+  "keywords": [
+    "signals",
+    "reactivity",
+    "tc39",
+    "volt"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "main": "./dist/index.js",
+    "module": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  }
+}

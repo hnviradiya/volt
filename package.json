@@ -1,0 +1,37 @@
+{
+  "name": "volt-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Volt — a TypeScript UI framework: Angular-style classes, Vue-style templates, Solid-style reactivity.",
+  "type": "module",
+  "packageManager": "pnpm@10.26.1",
+  "scripts": {
+    "build": "pnpm -r --filter \"./packages/*\" run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "coverage": "vitest run --coverage",
+    "typecheck": "tsc --build",
+    "clean": "tsc --build --clean",
+    "dev": "pnpm --filter @voltjs/example-counter run dev",
+    "docs:dev": "pnpm --filter volt-docs run dev",
+    "docs:build": "pnpm --filter volt-docs run build"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "esbuild": "^0.28.2",
+    "happy-dom": "^20.11.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=10"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

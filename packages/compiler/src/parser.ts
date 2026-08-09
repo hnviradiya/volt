@@ -1,0 +1,505 @@
+/**
+ * Template parser: Volt template source -> AST.
+ *
+ * Volt has exactly one piece of dynamic syntax in markup: a `:` prefix.
+ * `:if`, `:for`, `:click`, `:class`, `:disabled` — structure, events and
+ * bindings all share it, and the name alone decides which one you get.
+ */
+
+import {
+  PRESERVE_WHITESPACE_TAGS,
+  RAW_TEXT_TAGS,
+  STRUCTURAL_DIRECTIVES,
+  VOID_TAGS,
+  type AttributeNode,
+  type CommentNode,
+  type DirectiveKind,
+  type DirectiveNode,
+  type ElementNode,
+  type InterpolationNode,
+  type RootNode,
+  type SlotOutletNode,
+  type SourceLocation,
+  type TemplateChildNode,
+  type TextNode,
+} from './ast.js';
+import { KNOWN_EVENTS, isComponentTag } from './dom-info.js';
+
+export class CompilerError extends Error {
+  constructor(
+    message: string,
+    public loc: { line: number; column: number },
+    public source?: string,
+  ) {
+    super(`[volt:compiler] ${message} (${loc.line}:${loc.column})`);
+    this.name = 'CompilerError';
+  }
+}
+
+export interface ParserOptions {
+  /** `condense` (default) trims insignificant whitespace the way Vue does. */
+  whitespace?: 'condense' | 'preserve';
+  /** Drop comment nodes from output. Defaults to true when not in dev. */
+  comments?: boolean;
+  filename?: string;
+}
+
+const OPEN_DELIM = '{{';
+const CLOSE_DELIM = '}}';
+
+export function parse(source: string, options: ParserOptions = {}): RootNode {
+  return new Parser(source, options).parseRoot();
+}
+
+class Parser {
+  private pos = 0;
+  private line = 1;
+  private column = 1;
+  private readonly whitespace: 'condense' | 'preserve';
+  private readonly keepComments: boolean;
+
+  constructor(
+    private readonly source: string,
+    options: ParserOptions,
+  ) {
+    this.whitespace = options.whitespace ?? 'condense';
+    this.keepComments = options.comments ?? false;
+  }
+
+  parseRoot(): RootNode {
+    const start = this.loc();
+    const children = this.parseChildren([]);
+    if (this.pos < this.source.length) {
+      // Only reachable via a stray close tag with no matching open tag.
+      const rest = this.source.slice(this.pos, this.pos + 20);
+      this.error(`Unexpected closing tag near \`${rest}\``);
+    }
+    return {
+      type: 'root',
+      children: this.condenseWhitespace(children, null),
+      loc: this.finishLoc(start),
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Scanning primitives
+  // -------------------------------------------------------------------------
+
+  private loc(): SourceLocation {
+    return { start: this.pos, end: this.pos, line: this.line, column: this.column };
+  }
+
+  private finishLoc(start: SourceLocation): SourceLocation {
+    return { ...start, end: this.pos };
+  }
+
+  private error(message: string): never {
+    throw new CompilerError(message, { line: this.line, column: this.column }, this.source);
+  }
+
+  private advance(count: number): string {
+    const text = this.source.slice(this.pos, this.pos + count);
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] === '\n') {
+        this.line++;
+        this.column = 1;
+      } else {
+        this.column++;
+      }
+    }
+    this.pos += count;
+    return text;
+  }
+
+  private startsWith(text: string): boolean {
+    return this.source.startsWith(text, this.pos);
+  }
+
+  private skipWhitespace(): void {
+    let count = 0;
+    while (this.pos + count < this.source.length && /\s/.test(this.source[this.pos + count]!)) {
+      count++;
+    }
+    if (count) this.advance(count);
+  }
+
+  private atEnd(): boolean {
+    return this.pos >= this.source.length;
+  }
+
+  // -------------------------------------------------------------------------
+  // Children
+  // -------------------------------------------------------------------------
+
+  private parseChildren(stack: string[]): TemplateChildNode[] {
+    const nodes: TemplateChildNode[] = [];
+    const parent = stack.length ? stack[stack.length - 1]! : null;
+
+    while (!this.atEnd()) {
+      if (this.startsWith('</')) {
+        // Let the caller decide whether this close tag is theirs.
+        if (this.isClosingTagFor(stack)) break;
+        // A close tag for an ancestor: also stop, the caller unwinds.
+        break;
+      }
+
+      if (this.startsWith('<!--')) {
+        const comment = this.parseComment();
+        if (this.keepComments) nodes.push(comment);
+        continue;
+      }
+
+      if (this.startsWith('<!')) {
+        // Doctype or CDATA — not meaningful inside a component template.
+        this.skipUntil('>');
+        continue;
+      }
+
+      if (this.startsWith('<') && /[a-zA-Z]/.test(this.source[this.pos + 1] ?? '')) {
+        const el = this.parseElement(stack);
+        if (el) nodes.push(el);
+        continue;
+      }
+
+      const text = this.parseTextAndInterpolation(parent);
+      for (const node of text) nodes.push(node);
+    }
+
+    return nodes;
+  }
+
+  private isClosingTagFor(stack: string[]): boolean {
+    if (!stack.length) return false;
+    const tag = stack[stack.length - 1]!;
+    const candidate = this.source.slice(this.pos + 2, this.pos + 2 + tag.length);
+    if (candidate.toLowerCase() !== tag.toLowerCase()) return false;
+    const after = this.source[this.pos + 2 + tag.length];
+    return after === '>' || after === undefined || /\s/.test(after);
+  }
+
+  private skipUntil(char: string): void {
+    const idx = this.source.indexOf(char, this.pos);
+    this.advance((idx === -1 ? this.source.length : idx + 1) - this.pos);
+  }
+
+  private parseComment(): CommentNode {
+    const start = this.loc();
+    this.advance(4); // <!--
+    const end = this.source.indexOf('-->', this.pos);
+    const content = end === -1 ? this.source.slice(this.pos) : this.source.slice(this.pos, end);
+    this.advance(content.length + (end === -1 ? 0 : 3));
+    return { type: 'comment', content, loc: this.finishLoc(start) };
+  }
+
+  // -------------------------------------------------------------------------
+  // Text + interpolation
+  // -------------------------------------------------------------------------
+
+  private parseTextAndInterpolation(parentTag: string | null): TemplateChildNode[] {
+    const nodes: TemplateChildNode[] = [];
+    const preserve = parentTag !== null && PRESERVE_WHITESPACE_TAGS.has(parentTag);
+    let buffer = '';
+    let bufferStart = this.loc();
+
+    const flush = () => {
+      if (!buffer) return;
+      nodes.push({ type: 'text', content: buffer, loc: this.finishLoc(bufferStart) });
+      buffer = '';
+    };
+
+    while (!this.atEnd()) {
+      if (this.startsWith('<') && /[a-zA-Z!/]/.test(this.source[this.pos + 1] ?? '')) break;
+
+      if (this.startsWith(OPEN_DELIM) && !preserve) {
+        flush();
+        nodes.push(this.parseInterpolation());
+        bufferStart = this.loc();
+        continue;
+      }
+
+      if (!buffer) bufferStart = this.loc();
+      buffer += this.advance(1);
+    }
+
+    flush();
+    return nodes;
+  }
+
+  private parseInterpolation(): InterpolationNode {
+    const start = this.loc();
+    this.advance(OPEN_DELIM.length);
+    const end = this.source.indexOf(CLOSE_DELIM, this.pos);
+    if (end === -1) this.error('Unclosed interpolation — missing `}}`');
+    const exp = this.advance(end - this.pos).trim();
+    this.advance(CLOSE_DELIM.length);
+    if (!exp) this.error('Empty interpolation `{{ }}`');
+    return { type: 'interpolation', exp, loc: this.finishLoc(start) };
+  }
+
+  // -------------------------------------------------------------------------
+  // Elements
+  // -------------------------------------------------------------------------
+
+  private parseElement(stack: string[]): TemplateChildNode | null {
+    const start = this.loc();
+    this.advance(1); // <
+
+    const tag = this.parseTagName();
+    if (!tag) this.error('Expected a tag name after `<`');
+
+    const attrs: AttributeNode[] = [];
+    const directives: DirectiveNode[] = [];
+
+    this.skipWhitespace();
+    while (!this.atEnd() && !this.startsWith('>') && !this.startsWith('/>')) {
+      const parsed = this.parseAttribute(tag);
+      if (parsed.type === 'attribute') attrs.push(parsed);
+      else directives.push(parsed);
+      this.skipWhitespace();
+    }
+
+    let selfClosing = false;
+    if (this.startsWith('/>')) {
+      selfClosing = true;
+      this.advance(2);
+    } else if (this.startsWith('>')) {
+      this.advance(1);
+    } else {
+      this.error(`Unclosed tag \`<${tag}\``);
+    }
+
+    const isVoid = VOID_TAGS.has(tag.toLowerCase());
+    let children: TemplateChildNode[] = [];
+
+    if (!selfClosing && !isVoid) {
+      if (RAW_TEXT_TAGS.has(tag.toLowerCase())) {
+        children = this.parseRawText(tag);
+      } else {
+        stack.push(tag);
+        children = this.parseChildren(stack);
+        stack.pop();
+        this.consumeClosingTag(tag, start);
+      }
+    }
+
+    const loc = this.finishLoc(start);
+    children = this.condenseWhitespace(children, tag);
+
+    if (tag === 'slot') {
+      const nameAttr = attrs.find((a) => a.name === 'name');
+      return {
+        type: 'slot-outlet',
+        name: nameAttr?.value ?? 'default',
+        attrs: attrs.filter((a) => a.name !== 'name'),
+        directives,
+        children,
+        loc,
+      } satisfies SlotOutletNode;
+    }
+
+    return {
+      type: 'element',
+      tag,
+      isComponent: isComponentTag(tag),
+      isTemplate: tag === 'template',
+      attrs,
+      directives,
+      children,
+      selfClosing: selfClosing || isVoid,
+      loc,
+    } satisfies ElementNode;
+  }
+
+  private consumeClosingTag(tag: string, openLoc: SourceLocation): void {
+    if (!this.startsWith('</')) {
+      throw new CompilerError(
+        `Missing closing tag for \`<${tag}>\``,
+        { line: openLoc.line, column: openLoc.column },
+        this.source,
+      );
+    }
+    if (!this.isClosingTagFor([tag])) {
+      const found = this.source.slice(this.pos, this.source.indexOf('>', this.pos) + 1);
+      throw new CompilerError(
+        `Mismatched closing tag: expected \`</${tag}>\` but found \`${found}\``,
+        { line: this.line, column: this.column },
+        this.source,
+      );
+    }
+    this.advance(2);
+    this.advance(tag.length);
+    this.skipWhitespace();
+    if (!this.startsWith('>')) this.error(`Malformed closing tag for \`<${tag}>\``);
+    this.advance(1);
+  }
+
+  private parseRawText(tag: string): TemplateChildNode[] {
+    const start = this.loc();
+    const closeIdx = this.source.toLowerCase().indexOf(`</${tag.toLowerCase()}`, this.pos);
+    const content =
+      closeIdx === -1 ? this.source.slice(this.pos) : this.source.slice(this.pos, closeIdx);
+    this.advance(content.length);
+    if (closeIdx !== -1) this.consumeClosingTag(tag, start);
+    if (!content) return [];
+    return [{ type: 'text', content, loc: this.finishLoc(start) } satisfies TextNode];
+  }
+
+  private parseTagName(): string {
+    let count = 0;
+    while (
+      this.pos + count < this.source.length &&
+      /[a-zA-Z0-9\-_.:]/.test(this.source[this.pos + count]!)
+    ) {
+      count++;
+    }
+    return this.advance(count);
+  }
+
+  // -------------------------------------------------------------------------
+  // Attributes and directives
+  // -------------------------------------------------------------------------
+
+  private parseAttribute(tag: string): AttributeNode | DirectiveNode {
+    const start = this.loc();
+
+    let count = 0;
+    while (this.pos + count < this.source.length) {
+      const ch = this.source[this.pos + count]!;
+      if (/[\s=/>]/.test(ch)) break;
+      count++;
+    }
+    if (count === 0) this.error(`Unexpected character in \`<${tag}>\` attribute list`);
+    const rawName = this.advance(count);
+
+    let value: string | null = null;
+    this.skipWhitespace();
+    if (this.startsWith('=')) {
+      this.advance(1);
+      this.skipWhitespace();
+      value = this.parseAttributeValue(rawName);
+    }
+
+    if (!rawName.startsWith(':')) {
+      return { type: 'attribute', name: rawName, value, loc: this.finishLoc(start) };
+    }
+
+    return this.resolveDirective(rawName, value, this.finishLoc(start));
+  }
+
+  private parseAttributeValue(attrName: string): string {
+    const quote = this.source[this.pos];
+    if (quote === '"' || quote === "'") {
+      this.advance(1);
+      const end = this.source.indexOf(quote, this.pos);
+      if (end === -1) this.error(`Unclosed quote in value of \`${attrName}\``);
+      const value = this.advance(end - this.pos);
+      this.advance(1);
+      return value;
+    }
+    // Unquoted value: read to the next whitespace or tag terminator.
+    let count = 0;
+    while (this.pos + count < this.source.length && !/[\s>]/.test(this.source[this.pos + count]!)) {
+      count++;
+    }
+    if (count === 0) this.error(`Missing value for \`${attrName}\``);
+    return this.advance(count);
+  }
+
+  /**
+   * Resolve `:name.mod1.mod2` into a typed directive.
+   *
+   * Precedence, deliberately fixed so a name always means one thing:
+   *   1. structural directives (`:if`, `:for`, `:model`, …)
+   *   2. explicit escapes (`:on-*`, `:prop-*`, `:attr-*`)
+   *   3. `:class` / `:style`
+   *   4. a known DOM event name -> event listener
+   *   5. anything else -> property / attribute binding
+   */
+  private resolveDirective(
+    rawName: string,
+    exp: string | null,
+    loc: SourceLocation,
+  ): DirectiveNode {
+    const withoutColon = rawName.slice(1);
+    const parts = withoutColon.split('.');
+    const base = parts[0] ?? '';
+    const modifiers = parts.slice(1);
+
+    if (!base) this.error('Empty directive name — expected something after `:`');
+
+    const make = (kind: DirectiveKind, name: string): DirectiveNode => ({
+      type: 'directive',
+      kind,
+      name,
+      rawName,
+      modifiers,
+      exp: exp && exp.trim() ? exp.trim() : null,
+      loc,
+    });
+
+    if (STRUCTURAL_DIRECTIVES.has(base)) {
+      const node = make(base as DirectiveKind, '');
+      if (base !== 'else' && !node.exp) {
+        this.error(`\`${rawName}\` requires a value, e.g. \`${rawName}="expression"\``);
+      }
+      if (base === 'else' && node.exp) {
+        this.error('`:else` does not take a value');
+      }
+      return node;
+    }
+
+    if (base === 'spread') return make('spread', '');
+
+    if (base.startsWith('on-')) return make('event', base.slice(3));
+    if (base.startsWith('prop-')) return make('prop', base.slice(5));
+    if (base.startsWith('attr-')) return make('attr', base.slice(5));
+
+    if (base === 'class') return make('class', 'class');
+    if (base === 'style') return make('style', 'style');
+
+    if (KNOWN_EVENTS.has(base)) return make('event', base);
+
+    return make('prop', base);
+  }
+
+  // -------------------------------------------------------------------------
+  // Whitespace
+  // -------------------------------------------------------------------------
+
+  /**
+   * Condense mode drops whitespace-only text between elements when it spans a
+   * line break (pure indentation) and collapses other whitespace runs to one
+   * space. This is what lets formatted templates compile to tight markup.
+   */
+  private condenseWhitespace(
+    nodes: TemplateChildNode[],
+    parentTag: string | null,
+  ): TemplateChildNode[] {
+    if (this.whitespace === 'preserve') return nodes;
+    if (parentTag !== null && PRESERVE_WHITESPACE_TAGS.has(parentTag.toLowerCase())) return nodes;
+
+    const result: TemplateChildNode[] = [];
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i]!;
+      if (node.type !== 'text') {
+        result.push(node);
+        continue;
+      }
+
+      if (!/[^\t\r\n\f ]/.test(node.content)) {
+        const prev = nodes[i - 1];
+        const next = nodes[i + 1];
+        const isEdge = !prev || !next;
+        const hasNewline = /[\r\n]/.test(node.content);
+        // Indentation between two elements carries no meaning; a single space
+        // deliberately placed between inline content does.
+        if (isEdge || hasNewline) continue;
+        node.content = ' ';
+      } else {
+        node.content = node.content.replace(/[\t\r\n\f ]+/g, ' ');
+      }
+      result.push(node);
+    }
+    return result;
+  }
+}

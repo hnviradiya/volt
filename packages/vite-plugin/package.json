@@ -1,0 +1,45 @@
+{
+  "name": "@voltjs/vite-plugin",
+  "version": "0.1.0",
+  "description": "Compile Volt templates at build time so no compiler ships to the browser.",
+  "type": "module",
+  "license": "MIT",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "vite build && tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@voltjs/compiler": "workspace:*",
+    "esbuild": "^0.28.2"
+  },
+  "peerDependencies": {
+    "vite": "^8.0.0"
+  },
+  "keywords": [
+    "vite-plugin",
+    "volt"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "main": "./dist/index.js",
+    "module": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  }
+}

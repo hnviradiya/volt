@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    // Volt targets current engines only. Nothing here is downlevelled, so the
+    // output is the same modern JavaScript the source is written in.
+    "target": "ESNext",
+    "lib": ["ESNext", "DOM", "DOM.Iterable", "DOM.AsyncIterable", "ESNext.Decorators"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "exactOptionalPropertyTypes": false,
+
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "composite": true,
+
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+
+    // Standard TC39 decorators. The legacy experimental transform is not
+    // supported and never will be.
+    "experimentalDecorators": false,
+    "useDefineForClassFields": true
+  }
+}
