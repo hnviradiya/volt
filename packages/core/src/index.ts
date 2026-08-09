@@ -27,8 +27,6 @@ export type {
   ComponentType,
   PropOptions,
   MountHandle,
-  OnDestroy,
-  OnInit,
   OnMount,
   RenderFn,
   SlotMap,

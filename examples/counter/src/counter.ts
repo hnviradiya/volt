@@ -1,4 +1,4 @@
-import { Component, Prop, Signal, type OnInit } from '@voltjs/core';
+import { Component, Prop, Signal, effect } from '@voltjs/core';
 
 /**
  * A counter with a reactive prop and a callback prop.
@@ -12,7 +12,7 @@ import { Component, Prop, Signal, type OnInit } from '@voltjs/core';
   templateUrl: './counter.html',
   styleUrl: './counter.scss',
 })
-export class Counter implements OnInit {
+export class Counter {
   @Prop() label = new Signal.State('Counter');
   @Prop() step = new Signal.State(1);
   @Prop() min = new Signal.State(-Infinity);
@@ -22,10 +22,9 @@ export class Counter implements OnInit {
 
   count = new Signal.State(0);
 
-  onInit(): void {
-    // Runs before the template is built, so the first paint already reflects it.
-    this.onChanged?.(this.count.get());
-  }
+  // Report the count to the parent, now and on every change. The first run is
+  // deferred, so `onChanged` has already been supplied by the time it fires.
+  #report = effect(() => this.onChanged?.(this.count.get()));
 
   increment(): void {
     this.setCount(this.count.get() + this.step.get());
@@ -41,6 +40,5 @@ export class Counter implements OnInit {
 
   private setCount(next: number): void {
     this.count.set(next);
-    this.onChanged?.(next);
   }
 }

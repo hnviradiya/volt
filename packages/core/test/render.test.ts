@@ -4,15 +4,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { compileTemplate } from '@voltjs/core/jit';
-import {
-  Component,
-  Prop,
-  Signal,
-  flushSync,
-  mount,
-  type OnDestroy,
-  type OnInit,
-} from '@voltjs/core';
+import { Component, Prop, Signal, effect, flushSync, mount, onCleanup } from '@voltjs/core';
 
 let host: HTMLElement;
 
@@ -303,9 +295,10 @@ describe(':if', () => {
     const cleanup = vi.fn();
 
     @Component({ selector: 'v-child', render: compileTemplate(`<span>{{ label.get() }}</span>`) })
-    class Child implements OnDestroy {
+    class Child {
       @Prop() label = new Signal.State('x');
-      onDestroy = cleanup;
+      // Teardown sits beside the setup it undoes.
+      #cleanup = onCleanup(cleanup);
     }
 
     @Component({
@@ -551,30 +544,54 @@ describe('components', () => {
 });
 
 describe('lifecycle', () => {
-  it('runs onInit before render and onDestroy on unmount', () => {
+  it('a field effect sees props, and onCleanup tears down', () => {
     const order: string[] = [];
 
     @Component({ selector: 'v-life', render: compileTemplate(`<span>{{ value.get() }}</span>`) })
-    class Life implements OnInit, OnDestroy {
+    class Life {
+      @Prop() seed = new Signal.State('default');
       value = new Signal.State('initial');
 
-      onInit() {
-        order.push('init');
-        this.value.set('from onInit');
-      }
+      // Deferred, so the prop has landed by the time this runs.
+      #sync = effect(() => {
+        order.push(`effect:${this.seed.get()}`);
+        this.value.set(`from ${this.seed.get()}`);
+      });
 
-      onDestroy() {
-        order.push('destroy');
+      #bye = onCleanup(() => order.push('cleanup'));
+    }
+
+    @Component({
+      selector: 'v-host',
+      imports: [Life],
+      render: compileTemplate(`<div><v-life :seed="'prop'"></v-life></div>`),
+    })
+    class Host {}
+
+    const view = render(Host);
+    // The effect ran once, with the prop rather than the field default.
+    expect(order).toEqual(['effect:prop']);
+    expect(view.html).toContain('from prop');
+
+    view.handle.unmount();
+    expect(order).toEqual(['effect:prop', 'cleanup']);
+  });
+
+  it('onMount runs once the DOM is in the document', async () => {
+    let seenInDocument: boolean | null = null;
+
+    @Component({ selector: 'v-mounted', render: compileTemplate(`<p>hi</p>`) })
+    class Mounted {
+      onMount() {
+        seenInDocument = document.body.contains(host.querySelector('p'));
       }
     }
 
-    const view = render(Life);
-    expect(order).toEqual(['init']);
-    // onInit ran before the template was built, so its write is the first paint.
-    expect(view.html).toBe('<span>from onInit</span>');
+    render(Mounted);
+    expect(seenInDocument).toBeNull();   // deferred past render
 
-    view.handle.unmount();
-    expect(order).toEqual(['init', 'destroy']);
+    await new Promise<void>((r) => queueMicrotask(r));
+    expect(seenInDocument).toBe(true);
   });
 });
 

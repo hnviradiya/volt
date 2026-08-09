@@ -6,8 +6,8 @@
  *
  *   - `renderEffect` — DOM patching. Runs immediately on creation so a
  *     template builds synchronously, and flushes before user effects.
- *   - `effect` — user work. Flushes after the DOM is settled, so it always
- *     observes a consistent tree.
+ *   - `effect` — user work. Its first run is deferred along with the rest, so
+ *     it always observes a settled tree.
  *
  * Updates are coalesced onto a microtask, which means a burst of `.set()`
  * calls repaints once. `flushSync()` drains the queues immediately when you
@@ -286,7 +286,7 @@ function reportError(err: unknown): void {
 // Effects
 // ---------------------------------------------------------------------------
 
-function createEffect(fn: EffectFn, watcher: WatcherNode): Dispose {
+function createEffect(fn: EffectFn, watcher: WatcherNode, immediate: boolean): Dispose {
   const parent = currentScope;
   const scope = createScope(parent);
   let cleanup: CleanupFn | null = null;
@@ -317,15 +317,25 @@ function createEffect(fn: EffectFn, watcher: WatcherNode): Dispose {
 
   watcher.watch(computed as ComputedSignal<unknown>);
 
-  // Untracked so that creating an effect inside another effect does not make
-  // the outer one depend on the inner.
-  untrack(() => {
-    try {
-      computed.get();
-    } catch (err) {
-      reportError(err);
-    }
-  });
+  if (immediate) {
+    // Untracked so that creating an effect inside another effect does not make
+    // the outer one depend on the inner.
+    untrack(() => {
+      try {
+        computed.get();
+      } catch (err) {
+        reportError(err);
+      }
+    });
+  } else {
+    // A fresh computed is already DIRTY; queueing it means the first run
+    // happens in the next flush rather than at creation. That is what lets an
+    // effect declared in a class field observe values assigned to the
+    // instance afterwards — component props, most importantly — instead of
+    // firing once against the field's initial value.
+    watcher.pending.add(computed as ComputedSignal<unknown>);
+    schedule();
+  }
 
   const dispose: Dispose = () => {
     if (disposed) return;
@@ -347,12 +357,21 @@ function createEffect(fn: EffectFn, watcher: WatcherNode): Dispose {
   return dispose;
 }
 
-/** A user effect. Runs after the DOM has settled. */
+/**
+ * A user effect.
+ *
+ * The first run is deferred to the next flush, so the effect observes a
+ * settled tree — and, for an effect declared in a class field, values
+ * assigned to the instance after construction.
+ */
 export function effect(fn: EffectFn): Dispose {
-  return createEffect(fn, effectWatcher);
+  return createEffect(fn, effectWatcher, false);
 }
 
-/** A DOM-patching effect. Runs synchronously on creation, before user effects. */
+/**
+ * A DOM-patching effect. Runs synchronously on creation, because a template
+ * has to produce its nodes before anything can insert them.
+ */
 export function renderEffect(fn: EffectFn): Dispose {
-  return createEffect(fn, renderWatcher);
+  return createEffect(fn, renderWatcher, true);
 }

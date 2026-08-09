@@ -76,18 +76,22 @@ it to a Volt component throws, naming the callback prop to use instead.
 ## Lifecycle
 
 ```ts
-interface OnInit    { onInit(): void }
-interface OnMount   { onMount(): void }
-interface OnDestroy { onDestroy(): void }
+interface OnMount { onMount(): void }
 ```
 
-| Hook | When |
+| | when |
 |---|---|
-| `onInit` | Props applied, before the template is built |
-| `onMount` | After the DOM is in the document |
-| `onDestroy` | When the component is torn down |
+| field initializers | at construction — computeds are lazy and effects are deferred, so both see props |
+| `onMount` | after the component's DOM is in the document |
+| `onCleanup(fn)` | registered anywhere in the component; runs on teardown |
 
-Writes in `onInit` are visible in the first paint.
+There is no `onInit`: a `Signal.Computed` field reads props lazily, and an
+`effect` field has its first run deferred until after props are applied.
+There is no `onDestroy`: `onCleanup` does the same job beside the setup it
+undoes.
+
+`mount()` flushes before returning, so the tree it hands back already
+reflects any field effects.
 
 ## `mount(component, target)`
 

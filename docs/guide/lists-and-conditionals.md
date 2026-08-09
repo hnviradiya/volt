@@ -12,7 +12,7 @@ Conditions are tested in order and short-circuit. Only the winning branch is
 built — the others never run.
 
 Leaving a branch **disposes it**: its effects stop, their cleanups run, child
-components receive `onDestroy`, and the DOM is removed. Entering a branch
+their `onCleanup` callbacks run, and the DOM is removed. Entering a branch
 builds it fresh.
 
 ```ts

@@ -99,8 +99,22 @@ createRoot((dispose) => {
 });
 ```
 
-An effect runs once immediately to collect its dependencies, then again
-whenever one of them changes.
+An effect's first run is **deferred to the next flush**, not performed at
+creation. That is what lets an effect declared in a class field observe values
+assigned to the instance afterwards — component props, most importantly —
+rather than firing once against the field's initial value.
+
+```ts
+createRoot(() => {
+  effect(() => console.log(count.get()));
+});
+// nothing logged yet
+flushSync();
+// 0
+```
+
+`renderEffect` is the exception: it runs immediately, because a template has
+to produce its nodes before anything can insert them.
 
 ### Cleanup
 

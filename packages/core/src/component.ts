@@ -26,6 +26,7 @@
 import {
   Signal,
   createRoot,
+  flushSync,
   getScope,
   isWritableSignal,
   onCleanup,
@@ -107,25 +108,23 @@ interface ResolvedConfig {
   stylesInjected: boolean;
 }
 
-export interface OnInit {
-  /** Runs after props are applied, before the template is built. */
-  onInit(): void;
-}
-
+/**
+ * The only lifecycle hook.
+ *
+ * Setup belongs in field initializers: a `Signal.Computed` for derived state,
+ * an `effect` for work with side effects — both see props, because a computed
+ * is lazy and an effect's first run is deferred. Teardown belongs in
+ * `onCleanup`, beside the setup it undoes.
+ *
+ * What none of those can do is touch DOM that is in the document, which is
+ * what this is for: focus, measurement, handing an element to a library.
+ */
 export interface OnMount {
-  /** Runs once the component's DOM is in the document. */
   onMount(): void;
 }
 
-export interface OnDestroy {
-  /** Runs when the component is torn down. */
-  onDestroy(): void;
-}
-
 interface LifecycleHooks {
-  onInit?: () => void;
   onMount?: () => void;
-  onDestroy?: () => void;
 }
 
 export type SlotMap = Record<string, (props?: Record<string, unknown>) => unknown>;
@@ -399,9 +398,6 @@ function instantiate(
 
   applyProps(instance, options.props ?? null, resolved);
 
-  instance.onInit?.();
-  if (instance.onDestroy) onCleanup(() => instance.onDestroy!());
-
   const render = getRenderFn(component, resolved);
   const dom = render(instance);
 
@@ -559,6 +555,11 @@ export function mount(
     });
     insert(host, dom);
   });
+
+  // Effects are deferred, so without this the tree handed back would not yet
+  // reflect them — a component whose setup runs in a field effect would paint
+  // its placeholder first.
+  flushSync();
 
   return {
     instance,

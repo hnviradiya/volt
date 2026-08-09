@@ -135,29 +135,67 @@ web components but not for Volt components. Using it on a component is an
 error that names the callback prop you meant.
 :::
 
-## Lifecycle
+## Setup, teardown, and the DOM
+
+Volt has one lifecycle hook. Most of what a hook is usually for belongs in a
+field initializer instead.
+
+**Derived state** is a computed. It is lazy, so it reads props at render time:
 
 ```ts
-import { type OnInit, type OnMount, type OnDestroy } from '@voltjs/core';
+export class Counter {
+  @Prop() step = new Signal.State(1);
+  label = new Signal.Computed(() => `Steps of ${this.step.get()}`);
+}
+```
 
-export class Panel implements OnInit, OnMount, OnDestroy {
-  onInit() {
-    // Props are applied; the template has not been built yet, so writes
-    // here are visible in the first paint.
-  }
+**Work with side effects** is an effect. Its first run is deferred, so props
+have landed by the time it fires:
+
+```ts
+export class UserCard {
+  @Prop() userId = new Signal.State('');
+  user = new Signal.State<User | null>(null);
+
+  #load = effect(() => {
+    fetchUser(this.userId.get()).then((u) => this.user.set(u));
+  });
+}
+```
+
+That effect also re-runs whenever `userId` changes, which a one-shot
+initialisation hook could not do.
+
+**Teardown** is `onCleanup`, beside the setup it undoes — no instance field to
+park a handle on:
+
+```ts
+export class Clock {
+  #tick = effect(() => {
+    const id = setInterval(() => this.now.set(Date.now()), 1000);
+    onCleanup(() => clearInterval(id));
+  });
+}
+```
+
+### `onMount`
+
+The one hook, for the one thing none of the above can do: touch DOM that is
+in the document.
+
+```ts
+export class Search implements OnMount {
+  input: HTMLInputElement | null = null;
 
   onMount() {
-    // The DOM is in the document — safe to measure or focus.
-  }
-
-  onDestroy() {
-    // The component is being torn down.
+    this.input?.focus();   // focus and measurement need a document-attached node
   }
 }
 ```
 
-Effects created during `onInit` are owned by the component and disposed with
-it, so most cleanup needs no `onDestroy` at all.
+Use it for focus, `getBoundingClientRect`, or handing an element to a library
+that expects a live node. `:ref` fires during render, before insertion, so it
+cannot substitute.
 
 ## Composition
 
@@ -210,9 +248,8 @@ import { createContext, provideContext, useContext } from '@voltjs/core';
 const Theme = createContext<'light' | 'dark'>('light');
 
 export class Shell {
-  onInit() {
-    provideContext(Theme, 'dark');
-  }
+  // Provided during construction, so descendants see it as they are built.
+  #theme = provideContext(Theme, 'dark');
 }
 
 export class Button {

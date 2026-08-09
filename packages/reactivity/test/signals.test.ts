@@ -248,22 +248,42 @@ describe('Signal.subtle', () => {
 });
 
 describe('effects', () => {
-  it('runs immediately and re-runs on change', async () => {
+  it('runs on the first flush, then again on change', async () => {
     const count = new Signal.State(0);
     const seen: number[] = [];
 
-    const dispose = createRoot(() => {
+    const dispose = createRoot((d) => {
       effect(() => {
         seen.push(count.get());
       });
-      return () => {};
+      return d;
     });
 
+    // Deferred: nothing has run yet.
+    expect(seen).toEqual([]);
+    flushSync();
     expect(seen).toEqual([0]);
+
     count.set(1);
     await tick();
     expect(seen).toEqual([0, 1]);
     dispose();
+  });
+
+  it('sees values assigned after the effect was created', () => {
+    // The reason the first run is deferred: an effect declared alongside
+    // state it depends on must not fire against a placeholder.
+    const value = new Signal.State('placeholder');
+    const seen: string[] = [];
+
+    createRoot(() => {
+      effect(() => void seen.push(value.get()));
+      // Stands in for a component prop applied after construction.
+      value.set('real');
+    });
+
+    flushSync();
+    expect(seen).toEqual(['real']);
   });
 
   it('coalesces a burst of writes into one run', async () => {
@@ -273,8 +293,9 @@ describe('effects', () => {
     createRoot(() => {
       effect(spy);
     });
-
+    flushSync();
     expect(spy).toHaveBeenCalledTimes(1);
+
     count.set(1);
     count.set(2);
     count.set(3);
@@ -289,6 +310,9 @@ describe('effects', () => {
     createRoot(() => {
       effect(() => void seen.push(count.get()));
     });
+
+    flushSync();
+    expect(seen).toEqual([0]);
 
     count.set(1);
     expect(seen).toEqual([0]);
@@ -311,8 +335,21 @@ describe('effects', () => {
       });
     });
 
+    flushSync();
     order.length = 0;
     source.set(1);
+    flushSync();
+    expect(order).toEqual(['render', 'user']);
+  });
+
+  it('a render effect runs immediately, because a template must build now', () => {
+    const order: string[] = [];
+    createRoot(() => {
+      renderEffect(() => void order.push('render'));
+      effect(() => void order.push('user'));
+      // Only the render effect has run at this point.
+      expect(order).toEqual(['render']);
+    });
     flushSync();
     expect(order).toEqual(['render', 'user']);
   });
@@ -328,6 +365,7 @@ describe('effects', () => {
         return () => cleanups.push(value);
       });
     });
+    flushSync();
 
     expect(cleanups).toEqual([]);
     count.set(1);
@@ -358,12 +396,25 @@ describe('effects', () => {
       effect(spy);
       return d;
     });
-
+    flushSync();
     expect(spy).toHaveBeenCalledTimes(1);
+
     dispose();
     count.set(1);
     await tick();
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('a root disposed before the first flush never runs its effect', () => {
+    const spy = vi.fn();
+    const dispose = createRoot((d) => {
+      effect(spy);
+      return d;
+    });
+
+    dispose();
+    flushSync();
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it('disposes nested effects with their parent', async () => {
@@ -378,10 +429,9 @@ describe('effects', () => {
       });
       return d;
     });
-
+    flushSync();
     expect(innerSpy).toHaveBeenCalledTimes(1);
 
-    // Re-running the outer effect discards the previous inner effect.
     outer.set(1);
     await tick();
     expect(innerSpy).toHaveBeenCalledTimes(2);
@@ -403,6 +453,7 @@ describe('effects', () => {
     createRoot(() => {
       effect(() => mirror.set(source.get() * 10));
     });
+    flushSync();
 
     expect(mirror.get()).toBe(10);
     source.set(2);
@@ -418,6 +469,7 @@ describe('effects', () => {
     createRoot(() => {
       effect(spy);
     });
+    flushSync();
     expect(spy).toHaveBeenCalledTimes(1);
 
     batch(() => {
