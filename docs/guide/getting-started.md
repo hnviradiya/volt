@@ -129,8 +129,9 @@ app.unmount();  // disposes every effect it created, then clears the host
 
 ## Using one component from another
 
-A template may only reference components listed in its `imports`. This keeps
-resolution explicit and lets bundlers see the dependency.
+A template may only reference components listed in its `imports`. There is no
+global registry — this keeps resolution explicit and lets bundlers see the
+dependency.
 
 ```ts
 @Component({
@@ -139,13 +140,6 @@ resolution explicit and lets bundlers see the dependency.
   templateUrl: './app.html',
 })
 export class App {}
-```
-
-Alternatively, register a component once and use it anywhere:
-
-```ts
-import { registerComponent } from '@voltjs/core';
-registerComponent(Counter);
 ```
 
 ## Next

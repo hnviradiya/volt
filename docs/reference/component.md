@@ -96,11 +96,6 @@ app.instance;   // the component instance
 app.unmount();  // dispose every effect, then clear the host
 ```
 
-## `registerComponent(component)`
-
-Register a component globally so any template can use it without listing it
-in `imports`.
-
 ## `compileTemplate(source, filename?)`
 
 From `@voltjs/core/jit`. Compiles template source into a render function at

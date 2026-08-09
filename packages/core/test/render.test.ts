@@ -547,3 +547,79 @@ describe('two-way binding', () => {
     expect(view.html).toContain('<span>b</span>');
   });
 });
+
+describe('component resolution', () => {
+  it('resolves only through the using component\'s imports', () => {
+    @Component({ selector: 'v-child', render: compileTemplate(`<span>child</span>`) })
+    class Child {}
+
+    @Component({
+      selector: 'v-parent',
+      imports: [Child],
+      render: compileTemplate(`<div><v-child></v-child></div>`),
+    })
+    class Parent {}
+
+    expect(render(Parent).html).toContain('<span>child</span>');
+  });
+
+  it('throws naming the tag and the component that used it', () => {
+    @Component({
+      selector: 'v-orphan',
+      render: compileTemplate(`<div><VMissing></VMissing></div>`),
+    })
+    class Orphan {}
+
+    // There is no global registry to fall back on, so this cannot resolve.
+    expect(() => render(Orphan)).toThrow(/Unknown component <VMissing> used by Orphan/);
+  });
+
+  it('does not leak a component between unrelated parents', () => {
+    @Component({ selector: 'v-shared', render: compileTemplate(`<i>shared</i>`) })
+    class Shared {}
+
+    @Component({
+      selector: 'v-knows',
+      imports: [Shared],
+      render: compileTemplate(`<div><v-shared></v-shared></div>`),
+    })
+    class Knows {}
+
+    @Component({
+      selector: 'v-does-not',
+      render: compileTemplate(`<div><v-shared></v-shared></div>`),
+    })
+    class DoesNot {}
+
+    expect(render(Knows).html).toContain('<i>shared</i>');
+
+    document.body.innerHTML = '<div id="app"></div>';
+    host = document.querySelector('#app')!;
+    // Mounting `Knows` first must not make `v-shared` visible to anyone else.
+    expect(() => render(DoesNot)).toThrow(/Unknown component/);
+  });
+
+  it('renders a genuinely defined custom element', () => {
+    customElements.define('my-widget', class extends HTMLElement {});
+
+    @Component({
+      selector: 'v-host',
+      render: compileTemplate(`<div><my-widget></my-widget></div>`),
+    })
+    class Host {}
+
+    expect(render(Host).html).toContain('<my-widget>');
+  });
+
+  it('throws for a hyphenated tag that is neither imported nor defined', () => {
+    @Component({
+      selector: 'v-typo',
+      render: compileTemplate(`<div><v-buton></v-buton></div>`),
+    })
+    class Typo {}
+
+    // Volt selectors are hyphenated too, so a missing import must not be
+    // mistaken for a web component and silently render nothing.
+    expect(() => render(Typo)).toThrow(/Unknown component <v-buton> used by Typo/);
+  });
+});

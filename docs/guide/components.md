@@ -153,15 +153,13 @@ A template may reference components listed in its `imports`:
 export class App {}
 ```
 
-Or register globally, once:
+`imports` is the **only** way a template can reference another component.
+There is no global registry, so a tag either appears in the using component's
+`imports` or it does not resolve — which keeps the dependency visible in the
+source and lets a bundler see it.
 
-```ts
-import { registerComponent } from '@voltjs/core';
-registerComponent(Counter);
-```
-
-A hyphenated tag that resolves to no component is treated as a real custom
-element, so web components work without registration.
+A hyphenated tag that matches nothing in `imports` is treated as a real custom
+element, so web components work without any registration at all.
 
 ## Sharing state
 

@@ -144,16 +144,6 @@ export type SlotMap = Record<string, (props?: Record<string, unknown>) => unknow
 const CONFIGS = new WeakMap<ComponentType<unknown>, ResolvedConfig>();
 const RENDERERS = new WeakMap<ComponentType<unknown>, RenderFn>();
 const SLOTS = new WeakMap<object, SlotMap | null>();
-const GLOBAL_COMPONENTS = new Map<string, ComponentType<unknown>>();
-
-/** Register a component so any template can use it without importing it. */
-export function registerComponent(component: ComponentType<unknown>): void {
-  const resolved = CONFIGS.get(component);
-  if (!resolved) {
-    throw new Error(`[volt] ${component.name} is not a @Component.`);
-  }
-  GLOBAL_COMPONENTS.set(resolved.config.selector, component);
-}
 
 // ---------------------------------------------------------------------------
 // Metadata helpers
@@ -329,19 +319,25 @@ export function isComponent(value: unknown): value is ComponentType<unknown> {
   return typeof value === 'function' && CONFIGS.has(value as ComponentType<unknown>);
 }
 
+/**
+ * Resolve a tag against the using component's `imports`, and nowhere else.
+ *
+ * There is no global registry: a template can only reference what its own
+ * component declares. That keeps the dependency visible in the source and
+ * lets a bundler see it, at the cost of listing each import once.
+ */
 function resolveComponent(parentCtx: unknown, tag: string): ComponentType<unknown> | null {
   const parentClass = (parentCtx as { constructor?: ComponentType<unknown> } | null)
     ?.constructor;
   const imports = parentClass ? CONFIGS.get(parentClass)?.config.imports : undefined;
+  if (!imports) return null;
 
-  if (imports) {
-    for (const candidate of imports) {
-      const resolved = CONFIGS.get(candidate);
-      if (resolved?.config.selector === tag || candidate.name === tag) return candidate;
-    }
+  for (const candidate of imports) {
+    const resolved = CONFIGS.get(candidate);
+    if (resolved?.config.selector === tag || candidate.name === tag) return candidate;
   }
 
-  return GLOBAL_COMPONENTS.get(tag) ?? null;
+  return null;
 }
 
 function getRenderFn(component: ComponentType<unknown>, resolved: ResolvedConfig): RenderFn {
@@ -517,16 +513,24 @@ export function createComponent(
   slots: SlotMap | null,
 ): unknown {
   const component = resolveComponent(parentCtx, tag);
+  if (component) return instantiate(component, { props, events, slots });
 
-  if (!component) {
-    if (tag.includes('-')) return createCustomElement(tag, props, events, slots);
-    throw new Error(
-      `[volt] Unknown component <${tag}>. Add it to the \`imports\` of the ` +
-        'component whose template uses it, or register it globally.',
-    );
+  // Volt selectors are hyphenated too, so "has a hyphen" cannot distinguish a
+  // web component from a forgotten import. The platform's own registry can:
+  // a real custom element has to be defined to work at all.
+  if (tag.includes('-') && globalThis.customElements?.get(tag)) {
+    return createCustomElement(tag, props, events, slots);
   }
 
-  return instantiate(component, { props, events, slots });
+  const owner = (parentCtx as { constructor?: { name: string } } | null)?.constructor?.name;
+  throw new Error(
+    `[volt] Unknown component <${tag}>` +
+      (owner ? ` used by ${owner}` : '') +
+      `. Add it to that component's \`imports\`` +
+      (tag.includes('-')
+        ? ', or define it as a custom element before the component mounts.'
+        : '.'),
+  );
 }
 
 function createCustomElement(
