@@ -1,10 +1,11 @@
 /**
- * What `:key` actually changes.
+ * `:for` keying.
  *
- * Without it, rows are keyed by index: the element at position N is reused
- * for whatever item lands at position N. The rendered text is still correct,
- * so the difference is invisible until something is attached to a specific
- * element — DOM state, focus, a component instance, an animation.
+ * With no `:key`, rows are keyed by **item identity** — the Solid model.
+ * Reordering therefore moves elements and takes their DOM state with them,
+ * which is correct by default. `:key` exists for the case identity cannot
+ * cover: data replaced with equal-but-new objects. `:key="$index"` opts back
+ * into positional keying.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import '@voltjs/core/jit';
@@ -29,118 +30,141 @@ const ITEMS: Item[] = [
 ];
 
 @Component({
-  selector: 'v-keyed',
-  template: `<ul><li :for="item in items.get()" :key="item.id">{{ item.text }}</li></ul>`,
+  selector: 'v-default',
+  template: `<ul><li :for="item in items.get()">{{ item.text }}</li></ul>`,
 })
-class Keyed {
+class ByIdentity {
   items = new Signal.State<Item[]>(ITEMS);
 }
 
 @Component({
-  selector: 'v-unkeyed',
-  template: `<ul><li :for="item in items.get()">{{ item.text }}</li></ul>`,
+  selector: 'v-by-id',
+  template: `<ul><li :for="item in items.get()" :key="item.id">{{ item.text }}</li></ul>`,
 })
-class Unkeyed {
+class ById {
   items = new Signal.State<Item[]>(ITEMS);
 }
 
-describe('rendered output is identical either way', () => {
-  it('keyed and unkeyed both render correctly after a reorder', () => {
-    for (const Component of [Keyed, Unkeyed]) {
-      document.body.innerHTML = '<div id="app"></div>';
-      const el = document.querySelector('#app')!;
-      const handle = mount(Component, el);
+@Component({
+  selector: 'v-by-index',
+  template: `<ul><li :for="item in items.get()" :key="$index">{{ item.text }}</li></ul>`,
+})
+class ByIndex {
+  items = new Signal.State<Item[]>(ITEMS);
+}
 
-      expect(el.textContent).toBe('abc');
-
-      (handle.instance as Keyed).items.set([...ITEMS].reverse());
-      flushSync();
-
-      // Both produce the right text — this is why the difference hides.
-      expect(el.textContent).toBe('cba');
-      handle.unmount();
-    }
-  });
-});
-
-describe('element identity is what differs', () => {
-  it('keyed: reordering moves the existing elements', () => {
-    const handle = mount(Keyed, host);
+describe('default: keyed by item identity', () => {
+  it('reordering moves the existing elements', () => {
+    const handle = mount(ByIdentity, host);
     const [a, b, c] = [...host.querySelectorAll('li')];
 
-    (handle.instance as Keyed).items.set([...ITEMS].reverse());
+    (handle.instance as ByIdentity).items.set([...ITEMS].reverse());
     flushSync();
 
-    // The same three elements, in the new order.
     expect([...host.querySelectorAll('li')]).toEqual([c, b, a]);
+    expect(host.textContent).toBe('cba');
   });
 
-  it('unkeyed: reordering keeps elements in place and rewrites their text', () => {
-    const handle = mount(Unkeyed, host);
-    const [first, second, third] = [...host.querySelectorAll('li')];
+  it('DOM state travels with the item, with no key needed', () => {
+    const handle = mount(ByIdentity, host);
+    // Stands in for focus, a typed-in value, a running transition, or a
+    // child component's internal state.
+    host.querySelectorAll('li')[0]!.setAttribute('data-state', 'belongs-to-a');
 
-    (handle.instance as Unkeyed).items.set([...ITEMS].reverse());
-    flushSync();
-
-    // Positions are unchanged; only the content moved.
-    expect([...host.querySelectorAll('li')]).toEqual([first, second, third]);
-    expect(first.textContent).toBe('c');
-  });
-});
-
-describe('why it matters in practice', () => {
-  it('keyed: DOM state travels with the item', () => {
-    const handle = mount(Keyed, host);
-    const rows = [...host.querySelectorAll('li')];
-    // Stand in for anything attached to an element: focus, scroll offset,
-    // a typed-in value, a running transition, a component instance.
-    rows[0]!.setAttribute('data-state', 'belongs-to-a');
-
-    (handle.instance as Keyed).items.set([...ITEMS].reverse());
+    (handle.instance as ByIdentity).items.set([...ITEMS].reverse());
     flushSync();
 
     const after = [...host.querySelectorAll('li')];
-    // 'a' moved to the end, and its state went with it.
-    expect(after[2]!.getAttribute('data-state')).toBe('belongs-to-a');
     expect(after[2]!.textContent).toBe('a');
+    expect(after[2]!.getAttribute('data-state')).toBe('belongs-to-a');
   });
 
-  it('unkeyed: DOM state is stranded at the old position', () => {
-    const handle = mount(Unkeyed, host);
-    const rows = [...host.querySelectorAll('li')];
-    rows[0]!.setAttribute('data-state', 'belongs-to-a');
-
-    (handle.instance as Unkeyed).items.set([...ITEMS].reverse());
-    flushSync();
-
-    const after = [...host.querySelectorAll('li')];
-    // The state stayed at position 0, which now shows 'c'.
-    expect(after[0]!.getAttribute('data-state')).toBe('belongs-to-a');
-    expect(after[0]!.textContent).toBe('c');
-  });
-
-  it('keyed: removing from the front leaves the surviving rows untouched', () => {
-    const handle = mount(Keyed, host);
+  it('removing from the front leaves the survivors untouched', () => {
+    const handle = mount(ByIdentity, host);
     const [, b, c] = [...host.querySelectorAll('li')];
 
-    (handle.instance as Keyed).items.set(ITEMS.slice(1));
+    (handle.instance as ByIdentity).items.set(ITEMS.slice(1));
     flushSync();
 
-    // One element removed; the other two are the very same nodes.
     expect([...host.querySelectorAll('li')]).toEqual([b, c]);
   });
 
-  it('unkeyed: removing from the front rewrites every row after it', () => {
-    const handle = mount(Unkeyed, host);
-    const [first, second] = [...host.querySelectorAll('li')];
+  it('handles duplicate values by pairing them up in order', () => {
+    @Component({
+      selector: 'v-dupes',
+      template: `<ul><li :for="s in items.get()">{{ s }}</li></ul>`,
+    })
+    class Dupes {
+      items = new Signal.State(['a', 'b', 'a']);
+    }
 
-    (handle.instance as Unkeyed).items.set(ITEMS.slice(1));
+    const handle = mount(Dupes, host);
+    expect(host.textContent).toBe('aba');
+
+    (handle.instance as Dupes).items.set(['a', 'a', 'b']);
+    flushSync();
+    expect(host.textContent).toBe('aab');
+  });
+
+  it('rebuilds a row whose item was replaced by an equal-but-new object', () => {
+    const handle = mount(ByIdentity, host);
+    const first = host.querySelectorAll('li')[0]!;
+
+    // A refetch returning fresh objects: identity changed, so the row is new.
+    // This is the case `:key` exists for.
+    (handle.instance as ByIdentity).items.set(ITEMS.map((i) => ({ ...i })));
     flushSync();
 
-    // The last element is dropped and every remaining row's text is rewritten,
-    // which is O(n) updates for a one-item removal.
-    const after = [...host.querySelectorAll('li')];
-    expect(after).toEqual([first, second]);
-    expect(after[0]!.textContent).toBe('b');
+    expect(host.querySelectorAll('li')[0]!).not.toBe(first);
+    expect(host.textContent).toBe('abc');
+  });
+});
+
+describe(':key="item.id" — identity that survives replacement', () => {
+  it('keeps the same elements when every object is replaced', () => {
+    const handle = mount(ById, host);
+    const before = [...host.querySelectorAll('li')];
+
+    (handle.instance as ById).items.set(ITEMS.map((i) => ({ ...i })));
+    flushSync();
+
+    // Same ids, so the same elements — only the bindings re-ran.
+    expect([...host.querySelectorAll('li')]).toEqual(before);
+  });
+
+  it('still moves elements on reorder', () => {
+    const handle = mount(ById, host);
+    const [a, b, c] = [...host.querySelectorAll('li')];
+
+    (handle.instance as ById).items.set([...ITEMS].reverse());
+    flushSync();
+
+    expect([...host.querySelectorAll('li')]).toEqual([c, b, a]);
+  });
+});
+
+describe(':key="$index" — explicit positional keying', () => {
+  it('keeps elements in place and rewrites their contents', () => {
+    const handle = mount(ByIndex, host);
+    const [first, second, third] = [...host.querySelectorAll('li')];
+
+    (handle.instance as ByIndex).items.set([...ITEMS].reverse());
+    flushSync();
+
+    expect([...host.querySelectorAll('li')]).toEqual([first, second, third]);
+    expect(first.textContent).toBe('c');
+  });
+
+  it('is available alongside a named index binding', () => {
+    @Component({
+      selector: 'v-both',
+      template: `<ul><li :for="(item, i) in items.get()" :key="$index">{{ i }}:{{ item.text }}</li></ul>`,
+    })
+    class Both {
+      items = new Signal.State<Item[]>(ITEMS);
+    }
+
+    mount(Both, host);
+    expect(host.textContent).toBe('0:a1:b2:c');
   });
 });

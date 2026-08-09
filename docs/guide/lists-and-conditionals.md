@@ -54,19 +54,34 @@ it toggles often and is cheap to keep around.
 <li :for="todo in todos.get()" :key="todo.id">{{ todo.text }}</li>
 ```
 
-### Keys matter
+### Keys
 
-`:key` gives each row an identity. A row whose key survives a change is
-**never rebuilt** — its item and index are updated in place, so only the
-bindings that read them re-run.
+Rows are keyed by **item identity** unless you say otherwise, so reordering
+is correct without writing anything:
 
 ```ts
-// Reordering: the same three <li> elements are moved, not recreated.
+// The same three <li> elements move; they are not recreated, and any focus,
+// input value, or running transition moves with them.
 todos.set([...todos.get()].reverse());
 ```
 
-Without `:key`, rows are keyed by index — fine for a list that only ever
-grows or shrinks at the end, wrong for anything reordered or filtered.
+This is deliberate. Frameworks that key by position instead will happily
+render the right text after a reorder while leaving a checkbox ticked on the
+wrong row — a bug that only shows up once rows hold state.
+
+`:key` covers the case identity cannot:
+
+```html
+<li :for="todo in todos.get()" :key="todo.id">{{ todo.text }}</li>
+```
+
+Use it when items are **replaced rather than moved** — an immutable update
+like `todos.map(t => t.id === id ? { ...t, done: !t.done } : t)` produces a
+new object, and without a key that row is torn down and rebuilt. With
+`:key="todo.id"` the row survives and only the changed binding re-runs.
+
+`:key="$index"` opts back into positional keying, which is occasionally what
+you want for a fixed-length list of slots.
 
 ### Index
 

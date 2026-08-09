@@ -940,14 +940,22 @@ class Generator {
     }
 
     // The key function sees raw values, so its scope is plain — no auto-call.
+    // `null` means "key by item identity", which the runtime handles.
     let keyFn = 'null';
     if (keyDir?.exp) {
       const keyNames = patternNames(parsed.item);
       if (parsed.index) keyNames.push(parsed.index);
+
       keyFn = withScope(ctx, keyNames, () => {
         const itemParam = printPattern(parsed.item, ctx);
-        const idx = parsed.index ?? '_k';
-        return this.thunk(printExpression(parseExpression(keyDir.exp!), ctx, 1), `${itemParam}, ${idx}`);
+        const expression = printExpression(parseExpression(keyDir.exp!), ctx, 1);
+
+        // `$index` is always the second parameter, so `:key="$index"` works
+        // whether or not the loop declared an index name of its own.
+        if (parsed.index) {
+          return `(${itemParam}, $index) => { const ${parsed.index} = $index; return (${expression}); }`;
+        }
+        return this.thunk(expression, `${itemParam}, $index`);
       });
     }
 

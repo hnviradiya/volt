@@ -72,7 +72,21 @@ and index update in place, so only the bindings that actually read them
 re-run. Reordering a list moves existing elements rather than recreating
 them.
 
-Without `:key`, rows are keyed by index.
+**`:key` is optional.** With no key, rows are keyed by *item identity*, so
+reordering is correct by default — elements move, and whatever is attached to
+them moves too.
+
+Reach for `:key` when identity alone is not enough:
+
+| | when to use it |
+|---|---|
+| *(omitted)* | the default; items keep their identity across updates |
+| `:key="item.id"` | items are replaced by equal-but-new objects, e.g. after a refetch |
+| `:key="$index"` | you explicitly want positional reuse |
+
+Without a key, replacing every item with a fresh object — `items.map(i => ({...i}))`
+— counts as an entirely new list and rebuilds every row. `:key="item.id"`
+is what keeps the rows.
 
 ### `:show`
 

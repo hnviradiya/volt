@@ -315,6 +315,16 @@ interface Row {
  * `:for`. Rows are keyed, and a row that survives a change is never rebuilt —
  * its item and index signals are updated in place, so only the bindings that
  * actually read them re-run.
+ *
+ * With no `:key`, rows are keyed by **item identity**. That makes reordering
+ * correct by default: the elements move and whatever is attached to them —
+ * focus, input values, a running transition — moves too. Keying by position
+ * instead would leave that state stranded on the wrong row, which is the
+ * failure every framework with an index default shares.
+ *
+ * The trade-off is that replacing an item with an equal-but-new object counts
+ * as a different row. `:key="item.id"` is the answer when data is refetched;
+ * `:key="$index"` opts back into positional keying.
  */
 export function each(
   list: Accessor<unknown>,
@@ -345,7 +355,9 @@ export function each(
 
     const count = items.length;
     const keys = new Array<unknown>(count);
-    for (let i = 0; i < count; i++) keys[i] = keyFn ? keyFn(items[i], i) : i;
+    // No key function means key by the item itself. Duplicates are fine: the
+    // reconciler buckets equal keys and pairs them up in order.
+    for (let i = 0; i < count; i++) keys[i] = keyFn ? keyFn(items[i], i) : items[i];
 
     const rows = new Array<Row>(count);
 

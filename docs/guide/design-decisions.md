@@ -82,6 +82,25 @@ The trade-off is that Volt cannot support patterns that assume re-execution.
 There is no equivalent of calling a component function again to get a fresh
 tree. State lives in signals, and the DOM follows from them.
 
+## `:for` keys by identity, not position
+
+Every framework has to pick what a row's identity is when no key is given,
+and both obvious answers are traps. Keying by **position** is cheap but wrong
+on reorder: the text updates correctly while focus, input values and
+animations stay behind on the wrong row. Keying by **object identity** is
+correct on reorder but rebuilds the whole list when data is refetched as
+equal-but-new objects.
+
+Vue, Svelte and React all default to position. Angular 17 concluded there was
+no safe default and made `track` mandatory. Solid removed the choice by
+keying `<For>` on identity always, with `<Index>` as the separate positional
+primitive.
+
+Volt follows Solid: identity by default, because the reorder bug is silent
+and the refetch cost is not. `:key="item.id"` handles replacement, and
+`:key="$index"` asks for positional explicitly. No mandatory parameter, and
+the default is the one whose failure mode is visible.
+
 ## Keyed rows are updated, not rebuilt
 
 A `:for` row whose key survives is never re-created — its item and index
