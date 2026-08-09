@@ -1,0 +1,9 @@
+# Cloudflare Pages configuration for the documentation site.
+#
+#   Build command:   pnpm install && pnpm docs:build
+#   Output directory: docs/.vitepress/dist
+name = "volt-docs"
+pages_build_output_dir = "docs/.vitepress/dist"
+
+[vars]
+NODE_VERSION = "22"
