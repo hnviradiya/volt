@@ -21,6 +21,7 @@
 import {
   ComputedSignal,
   WatcherNode,
+  disposeComputed,
   markEffectComputed,
   untrack,
   type SignalOptions,
@@ -341,6 +342,9 @@ function createEffect(fn: EffectFn, watcher: WatcherNode, immediate: boolean): D
     if (disposed) return;
     disposed = true;
     watcher.unwatch(computed as ComputedSignal<unknown>);
+    // Unwatching stops it being scheduled; this detaches it from its sources
+    // so they stop retaining and re-marking it.
+    disposeComputed(computed as ComputedSignal<unknown>);
     if (cleanup) {
       try {
         cleanup();

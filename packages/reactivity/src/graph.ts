@@ -104,30 +104,69 @@ function decrementLive(node: Producer): void {
 // Dependency edges
 // ---------------------------------------------------------------------------
 
+/**
+ * Record that the running computed read `producer`.
+ *
+ * Dependencies are almost always identical from one run to the next, so this
+ * walks a cursor through the previous run's list: a source that matches in
+ * position needs no work at all. Only where the sets genuinely diverge is the
+ * tail released and rebuilt. Without this, every re-run costs a hash delete
+ * and a hash insert per edge — multiplied by a thousand rows for something as
+ * ordinary as toggling a selection.
+ */
 function track(producer: Producer): void {
   if (!tracking || currentConsumer === null) return;
   const consumer = currentConsumer;
+  if (!(consumer instanceof ComputedSignal)) return;
 
-  (producer.sinks ??= new Set()).add(consumer);
+  const index = consumer.trackIndex;
+
+  if (consumer.sources[index] === producer) {
+    // Same dependency in the same position — the edge is already in place.
+    consumer.sourceVersions[index] = producer.version;
+    consumer.trackIndex = index + 1;
+    return;
+  }
+
+  // Diverged from the previous run: release the rest, then append. Liveness
+  // is counted per edge, so it travels with the link.
+  if (index < consumer.sources.length) releaseSourcesFrom(consumer, index);
+
+  (producer.sinks ??= new Set()).add(consumer as Consumer);
   consumer.sources.push(producer);
   consumer.sourceVersions.push(producer.version);
-
-  // A live consumer keeps everything it reads alive too. Liveness is counted
-  // per edge — `unlinkSources` walks the same list and releases one each —
-  // so a signal read twice in one body stays balanced.
-  if (consumer instanceof ComputedSignal && consumer.liveCount > 0) {
-    incrementLive(producer);
-  }
+  if (consumer.liveCount > 0) incrementLive(producer);
+  consumer.trackIndex = index + 1;
 }
 
-function unlinkSources(consumer: ComputedSignal<unknown>): void {
+/** Unlink every source from `index` onward. */
+function releaseSourcesFrom(consumer: ComputedSignal<unknown>, index: number): void {
   const wasLive = consumer.liveCount > 0;
-  for (const source of consumer.sources) {
+  for (let i = index; i < consumer.sources.length; i++) {
+    const source = consumer.sources[i]!;
     source.sinks?.delete(consumer as Consumer);
     if (wasLive) decrementLive(source);
   }
-  consumer.sources.length = 0;
-  consumer.sourceVersions.length = 0;
+  consumer.sources.length = index;
+  consumer.sourceVersions.length = index;
+}
+
+/**
+ * Detach a computed from the graph for good.
+ *
+ * Unwatching an effect stops it being scheduled, but its computed stays in
+ * every source's sink set — so a long-lived signal accumulates dead nodes,
+ * propagation walks them on every write, and nothing is collectable. Effects
+ * must call this when they are disposed.
+ */
+export function disposeComputed(node: ComputedSignal<unknown>): void {
+  unlinkSources(node);
+  node.state = CLEAN;
+  node.sinks = null;
+}
+
+function unlinkSources(consumer: ComputedSignal<unknown>): void {
+  releaseSourcesFrom(consumer, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -228,6 +267,7 @@ export class ComputedSignal<T> {
   /** @internal */ sinks: Set<Consumer> | null = null;
   /** @internal */ sources: Producer[] = [];
   /** @internal */ sourceVersions: number[] = [];
+  /** @internal */ trackIndex = 0;
   /** @internal */ liveCount = 0;
   /** @internal */ options: SignalOptions<T> | undefined;
   /** @internal */ computing = false;
@@ -278,9 +318,9 @@ export class ComputedSignal<T> {
   }
 
   private recompute(): void {
-    // Releases liveness held on the old dependency set; `track` re-acquires it
-    // for whatever this run actually reads.
-    unlinkSources(this as ComputedSignal<unknown>);
+    // Edges are kept and re-walked by `track`, which only does work where the
+    // dependency set actually differs from the previous run.
+    this.trackIndex = 0;
 
     const prevConsumer = currentConsumer;
     const prevTracking = tracking;
@@ -308,6 +348,11 @@ export class ComputedSignal<T> {
       !this.equals(this.value as T, nextValue as T);
 
     if (changed) this.version++;
+
+    // Anything the previous run read and this one did not is now stale.
+    if (this.trackIndex < this.sources.length) {
+      releaseSourcesFrom(this as ComputedSignal<unknown>, this.trackIndex);
+    }
 
     this.value = nextValue;
     this.error = nextError;

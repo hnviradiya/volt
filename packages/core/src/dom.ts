@@ -526,9 +526,11 @@ export function delegate(el: Element, name: string, handler: EventListener): voi
     document.addEventListener(name, dispatchDelegated);
   }
 
-  onCleanup(() => {
-    (el as unknown as Record<string, unknown>)[key] = undefined;
-  });
+  // No cleanup is registered on purpose. The handler is a property of the
+  // node, so discarding the node discards it; and a re-run overwrites it in
+  // place. Registering one would allocate a closure and a cleanups array per
+  // handler, which is pure cost in exactly the teardown paths that matter —
+  // a thousand-row table would carry two thousand of them.
 }
 
 function dispatchDelegated(event: Event): void {
