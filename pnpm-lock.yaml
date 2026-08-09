@@ -11,6 +11,9 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
+      '@voltjs/vite-plugin':
+        specifier: workspace:*
+        version: link:packages/vite-plugin
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2

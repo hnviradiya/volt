@@ -1,23 +1,37 @@
 /**
  * In-browser template compilation.
  *
- * Importing this module lets components carry a raw `template` string with no
- * build step — convenient for prototyping, playgrounds, and tests.
+ * Components are authored with `templateUrl`, which `@voltjs/vite-plugin`
+ * resolves and compiles at build time. This entry is the escape hatch for the
+ * cases where there is no build step — tests, playgrounds, REPLs — and it
+ * makes the cost explicit: importing it pulls the compiler in.
  *
- * Production apps should use `@voltjs/vite-plugin` instead, which compiles
- * templates at build time and keeps the compiler out of the bundle entirely.
- * This module exists as a separate entry precisely so that choice is explicit.
+ *   import { compileTemplate } from '@voltjs/core/jit';
+ *
+ *   @Component({
+ *     selector: 'v-greeting',
+ *     render: compileTemplate(`<p>Hello, {{ name.get() }}.</p>`),
+ *   })
+ *   export class Greeting {
+ *     name = new Signal.State('world');
+ *   }
  */
 
 import { compile } from '@voltjs/compiler';
-import { setTemplateCompiler, type RenderFn } from './component.js';
+import type { RenderFn } from './component.js';
 import * as runtime from './runtime.js';
 
-setTemplateCompiler((template: string, filename: string): RenderFn => {
-  const { body } = compile(template, { filename, runtime: '_rt' });
-  // The generated body closes over `_rt` and returns the render function.
+/**
+ * Compile template source into a render function.
+ *
+ * The generated code closes over the runtime namespace and imports nothing,
+ * which is what lets the same compiler output run here through `new Function`
+ * and as a module at build time.
+ */
+export function compileTemplate(source: string, filename = 'template'): RenderFn {
+  const { body } = compile(source, { filename, runtime: '_rt' });
   const factory = new Function('_rt', body) as (rt: unknown) => RenderFn;
   return factory(runtime);
-});
+}
 
 export { compile } from '@voltjs/compiler';

@@ -20,9 +20,11 @@ emits them untouched, and TypeScript 7 is the native Go port with no
 JavaScript transform API. Without this pass, `@Component` reaches the browser
 as a syntax error. The plugin uses esbuild, which does lower them.
 
-**It compiles templates at build time.** `template: \`…\`` inside a
-`@Component` becomes a `render` function with hoisted static markup, so no
-compiler ships to the browser and no template is parsed at runtime.
+**It compiles templates at build time.** `templateUrl` inside a `@Component`
+is resolved, read, and compiled into a `render` function with hoisted static
+markup, so no compiler ships to the browser and no template is parsed at
+runtime. `styleUrl` and `styleUrls` are inlined the same way. Every file it
+reads is registered with the watcher, so editing markup or CSS hot-reloads.
 
 ## Options
 
@@ -44,24 +46,30 @@ interface VoltPluginOptions {
 
 ## What it will not touch
 
-Template precompilation locates `template:` by scanning tokens, not by
-matching source patterns, so it correctly ignores:
+Precompilation locates `templateUrl:` by scanning tokens, not by matching
+source patterns, so it correctly ignores:
 
-- `template:` inside a comment or a string
-- `template:` in an object literal that is not a `@Component` argument
-- interpolated literals — `` template: `<div>${SHARED}</div>` `` cannot be
-  resolved at build time, so it is left for the runtime compiler
+- `templateUrl:` inside a comment or a string
+- `templateUrl:` in an object literal that is not a `@Component` argument
+
+A missing file, or a syntax error inside one, fails the build with the
+**html file's** path and position — not the `.ts` file that referenced it.
 
 ## Without a build step
 
-Import `@voltjs/core/jit` once at startup to compile templates in the
-browser. Useful for prototypes, playgrounds, and tests — but it ships the
-compiler, so prefer the plugin for production.
+`templateUrl` is read from disk, which a browser cannot do. Where there is no
+build step — a test, a playground — supply `render` directly:
 
 ```ts
-import '@voltjs/core/jit';
-import { mount } from '@voltjs/core';
+import { compileTemplate } from '@voltjs/core/jit';
+
+@Component({
+  selector: 'v-greeting',
+  render: compileTemplate(`<p>Hello, {{ name.get() }}.</p>`),
+})
+export class Greeting {}
 ```
 
-A component with a `template` and no compiler available throws with a message
-pointing at both options.
+That entry pulls the compiler into the bundle, which is why it is a separate
+import rather than a config option. A component declaring `templateUrl` with
+no build-time pass throws with a message pointing at both options.

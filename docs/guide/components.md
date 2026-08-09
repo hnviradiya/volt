@@ -4,15 +4,21 @@ A component is a class. It is constructed once per mounted instance and never
 re-run to produce a view.
 
 ```ts
+// greeting.ts
 import { Component, Signal } from '@voltjs/core';
 
 @Component({
   selector: 'v-greeting',
-  template: `<p>Hello, {{ name.get() }}.</p>`,
+  templateUrl: './greeting.html',
 })
 export class Greeting {
   name = new Signal.State('world');
 }
+```
+
+```html
+<!-- greeting.html -->
+<p>Hello, {{ name.get() }}.</p>
 ```
 
 ## Configuration
@@ -27,31 +33,31 @@ export class Greeting {
 | `styles` | Inline CSS, injected once per component |
 | `imports` | Components this template may reference |
 
-### Prefer a separate `.html` file
+Templates always live in a `.html` file. There is no inline form: a real file
+gets syntax highlighting, formatting, Emmet and folding, and one way to write
+a component beats two.
+
+`templateUrl`, `styleUrl` and `styleUrls` are resolved relative to the
+declaring file, compiled at build time, and registered with the watcher, so
+editing markup or CSS hot-reloads without touching the TypeScript.
+
+Where there is no build step — a test, a playground — supply `render`
+directly:
 
 ```ts
+import { compileTemplate } from '@voltjs/core/jit';
+
 @Component({
   selector: 'v-greeting',
-  templateUrl: './greeting.html',
-  styleUrl: './greeting.css',
+  render: compileTemplate(`<p>Hello, {{ name.get() }}.</p>`),
 })
 export class Greeting {
   name = new Signal.State('world');
 }
 ```
 
-```html
-<!-- greeting.html -->
-<p class="greeting">Hello, {{ name.get() }}.</p>
-```
-
-A real `.html` file gets syntax highlighting, formatting, Emmet and folding —
-none of which a template literal does. Both files are resolved and compiled at
-build time, and both are watched, so editing the markup or the CSS
-hot-reloads without touching the TypeScript.
-
-Inline `template` still works, and is the right choice for a two-line
-component or a test.
+That entry pulls the compiler in, which is exactly why it is a separate
+import rather than a config option.
 
 ## Inputs
 
@@ -142,12 +148,7 @@ A template may reference components listed in its `imports`:
 @Component({
   selector: 'v-app',
   imports: [Counter, Todos],
-  template: `
-    <main>
-      <v-counter :step="2"></v-counter>
-      <v-todos></v-todos>
-    </main>
-  `,
+  templateUrl: './app.html',
 })
 export class App {}
 ```
@@ -178,7 +179,7 @@ export const isSignedIn = new Signal.Computed(() => user.get() !== null);
 ```ts
 import { user } from './store.js';
 
-@Component({ selector: 'v-header', template: `<p>{{ user.get()?.name }}</p>` })
+@Component({ selector: 'v-header', templateUrl: './header.html' })
 export class Header {
   user = user;
 }
@@ -219,7 +220,6 @@ For DOM behaviour, mount and flush:
 
 ```ts
 import { flushSync, mount } from '@voltjs/core';
-import '@voltjs/core/jit';
 
 const app = mount(Counter, host);
 host.querySelector('button')!.click();

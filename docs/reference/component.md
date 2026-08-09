@@ -6,7 +6,6 @@
 interface ComponentConfig {
   selector: string;
   templateUrl?: string;
-  template?: string;
   render?: (ctx: unknown) => unknown;
   styleUrl?: string;
   styleUrls?: string[];
@@ -18,8 +17,7 @@ interface ComponentConfig {
 | Option | Description |
 |---|---|
 | `selector` | Tag this component answers to. Required |
-| `templateUrl` | Path to an `.html` file, relative to this file. **Preferred** |
-| `template` | Inline template source, for tiny components and tests |
+| `templateUrl` | Path to an `.html` file, relative to this file |
 | `render` | Pre-compiled render function; the Vite plugin fills this in |
 | `styleUrl` / `styleUrls` | Path(s) to CSS files, relative to this file |
 | `styles` | Inline CSS, injected once per component |
@@ -103,10 +101,23 @@ app.unmount();  // dispose every effect, then clear the host
 Register a component globally so any template can use it without listing it
 in `imports`.
 
-## `setTemplateCompiler(fn)`
+## `compileTemplate(source, filename?)`
 
-Install a compiler for runtime template compilation. `@voltjs/core/jit` calls
-this for you; the Vite plugin makes it unnecessary.
+From `@voltjs/core/jit`. Compiles template source into a render function at
+runtime, for tests and playgrounds:
+
+```ts
+import { compileTemplate } from '@voltjs/core/jit';
+
+@Component({
+  selector: 'v-greeting',
+  render: compileTemplate(`<p>Hello, {{ name.get() }}.</p>`),
+})
+export class Greeting {}
+```
+
+Importing this entry pulls the compiler into the bundle. Production
+components use `templateUrl`, which needs none of it at runtime.
 
 ## Runtime helpers
 

@@ -19,22 +19,7 @@ interface Timing {
 @Component({
   selector: 'v-harness',
   imports: [BenchApp],
-  template: `
-    <div>
-      <div class="controls">
-        <button :click="run(1000)">Create 1,000</button>
-        <button :click="run(10000)">Create 10,000</button>
-        <button :click="append()">Append 1,000</button>
-        <button :click="update()">Update every 10th</button>
-        <button :click="swap()">Swap rows</button>
-        <button :click="clear()">Clear</button>
-      </div>
-
-      <div id="results">{{ report.get() }}</div>
-
-      <v-bench :ref="bench"></v-bench>
-    </div>
-  `,
+  templateUrl: './harness.html',
 })
 export class Harness {
   bench: BenchApp | null = null;

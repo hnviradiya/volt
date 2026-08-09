@@ -5,7 +5,7 @@
 ```ts
 @Component({
   selector: 'v-badge',
-  template: `<span class="badge">{{ count.get() }}</span>`,
+  templateUrl: './badge.html',
 })
 export class Badge {
   @Input() count = new Signal.State(0);

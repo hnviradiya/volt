@@ -10,11 +10,16 @@ popularised: state as fields, behaviour as methods, a template alongside.
 ```ts
 @Component({
   selector: 'v-greeting',
-  template: `<p>Hello, {{ name.get() }}.</p>`,
+  templateUrl: './greeting.html',
 })
 export class Greeting {
   name = new Signal.State('world');
 }
+```
+
+```html
+<!-- greeting.html -->
+<p>Hello, {{ name.get() }}.</p>
 ```
 
 The decorators are **TC39 standard decorators**, not the legacy experimental

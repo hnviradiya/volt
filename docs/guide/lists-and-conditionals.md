@@ -19,7 +19,7 @@ builds it fresh.
 @Component({
   selector: 'v-panel',
   imports: [HeavyChart],
-  template: `<div><v-heavy-chart :if="expanded.get()"></v-heavy-chart></div>`,
+  templateUrl: './panel.html',
 })
 export class Panel {
   expanded = new Signal.State(false);

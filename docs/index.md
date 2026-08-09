@@ -31,15 +31,7 @@ import { Component, Signal } from '@voltjs/core';
 
 @Component({
   selector: 'v-counter',
-  template: `
-    <div>
-      <button :click="decrement()">−</button>
-      <output>{{ count.get() }}</output>
-      <button :click="increment()">+</button>
-
-      <p :if="count.get() > 9">That's a lot.</p>
-    </div>
-  `,
+  templateUrl: './counter.html',
 })
 export class Counter {
   count = new Signal.State(0);
@@ -47,6 +39,17 @@ export class Counter {
   increment() { this.count.set(this.count.get() + 1); }
   decrement() { this.count.set(this.count.get() - 1); }
 }
+```
+
+```html
+<!-- counter.html -->
+<div>
+  <button :click="decrement()">−</button>
+  <output>{{ count.get() }}</output>
+  <button :click="increment()">+</button>
+
+  <p :if="count.get() > 9">That's a lot.</p>
+</div>
 ```
 
 Pressing `+` updates one text node. Not the component, not a subtree — the

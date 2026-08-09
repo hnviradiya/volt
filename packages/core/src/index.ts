@@ -19,7 +19,6 @@ export {
   EventEmitter,
   mount,
   registerComponent,
-  setTemplateCompiler,
   getComponentConfig,
   isComponent,
   createComponent,

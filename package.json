@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "@voltjs/vite-plugin": "workspace:*",
     "esbuild": "^0.28.2",
     "happy-dom": "^20.11.2",
     "terser": "^5.49.2",

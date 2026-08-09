@@ -108,12 +108,11 @@ export default volt;
 // ---------------------------------------------------------------------------
 
 interface TemplateSite {
-  /** Range covering the whole `template:`/`templateUrl:` property. */
+  /** Range covering the whole `templateUrl:` property. */
   start: number;
   end: number;
-  /** `inline` carries markup; `url` carries a path to resolve and read. */
-  kind: 'inline' | 'url';
-  value: string;
+  /** Path to the `.html` file, relative to the declaring module. */
+  path: string;
 }
 
 interface StyleSite {
@@ -154,24 +153,22 @@ async function compileTemplates(
   let index = 0;
 
   for (const site of templates) {
-    let source = site.value;
+    const file = resolvePath(dir, site.path);
+    // Registering the file makes an edit to the markup re-run this transform,
+    // so templates hot-reload like any other source file.
+    watch(file);
 
-    if (site.kind === 'url') {
-      const file = resolvePath(dir, site.value);
-      // Registering the file makes an edit to the markup re-run this
-      // transform, so templates hot-reload like any other source file.
-      watch(file);
-      try {
-        source = await readFile(file, 'utf8');
-      } catch {
-        throw new Error(
-          `[volt] templateUrl "${site.value}" could not be read (resolved to ${file}), referenced by ${id}`,
-        );
-      }
+    let source: string;
+    try {
+      source = await readFile(file, 'utf8');
+    } catch {
+      throw new Error(
+        `[volt] templateUrl "${site.path}" could not be read (resolved to ${file}), referenced by ${id}`,
+      );
     }
 
     const result = compile(source, {
-      filename: site.kind === 'url' ? resolvePath(dir, site.value) : id,
+      filename: file,
       runtime: RUNTIME_NAMESPACE,
       runtimeModule,
     });
@@ -233,33 +230,19 @@ async function compileTemplates(
 }
 
 /**
- * Scan for `template:` / `templateUrl:` properties inside a `@Component(`
- * call, ignoring anything in a comment, a string, or an unrelated object.
+ * Scan for `templateUrl:` properties inside a `@Component(` call, ignoring
+ * anything in a comment, a string, or an unrelated object literal.
  */
 function findTemplateSites(code: string): TemplateSite[] {
   const sites: TemplateSite[] = [];
 
   scanComponentProperties(code, (name, start, valueStart) => {
-    if (name === 'template') {
-      if (code[valueStart] !== '`') return null;
-      const end = skipTemplateLiteral(code, valueStart);
-      const raw = code.slice(valueStart + 1, end - 1);
-      // Host-language interpolation cannot be resolved at build time; leave
-      // it for the runtime compiler.
-      if (/\$\{/.test(raw)) return null;
-      sites.push({ start, end, kind: 'inline', value: unescapeTemplate(raw) });
-      return end;
-    }
-
-    if (name === 'templateUrl') {
-      const quote = code[valueStart];
-      if (quote !== '"' && quote !== "'") return null;
-      const end = skipQuoted(code, valueStart, quote);
-      sites.push({ start, end, kind: 'url', value: code.slice(valueStart + 1, end - 1) });
-      return end;
-    }
-
-    return null;
+    if (name !== 'templateUrl') return null;
+    const quote = code[valueStart];
+    if (quote !== '"' && quote !== "'") return null;
+    const end = skipQuoted(code, valueStart, quote);
+    sites.push({ start, end, path: code.slice(valueStart + 1, end - 1) });
+    return end;
   });
 
   return sites;
@@ -435,11 +418,6 @@ function skipTemplateLiteral(code: string, start: number): number {
     i++;
   }
   return i;
-}
-
-/** Turn the raw literal text back into the string the author wrote. */
-function unescapeTemplate(raw: string): string {
-  return raw.replaceAll('\\`', '`').replaceAll('\\$', '$').replaceAll('\\\\', '\\');
 }
 
 export { compile, CompilerError };

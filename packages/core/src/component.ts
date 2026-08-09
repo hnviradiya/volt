@@ -4,9 +4,7 @@
  *
  *   @Component({
  *     selector: 'v-counter',
- *     template: `
- *       <button :click="increment()">{{ count.get() }}</button>
- *     `,
+ *     templateUrl: './counter.html',
  *   })
  *   export class Counter {
  *     @Input() start = new Signal.State(0);
@@ -73,12 +71,12 @@ export interface ComponentConfig {
   templateUrl?: string;
 
   /**
-   * Inline template source. Useful for tiny components, tests, and
-   * playgrounds; prefer `templateUrl` for anything real.
+   * A pre-compiled render function.
+   *
+   * Normally filled in by `@voltjs/vite-plugin` from `templateUrl`. Supply it
+   * directly with `compileTemplate()` from `@voltjs/core/jit` when there is no
+   * build step — tests and playgrounds.
    */
-  template?: string;
-
-  /** A pre-compiled render function. The Vite plugin fills this in. */
   render?: RenderFn;
 
   /** Path(s) to CSS files, relative to this file. Inlined at build time. */
@@ -147,19 +145,6 @@ const CONFIGS = new WeakMap<ComponentType<unknown>, ResolvedConfig>();
 const RENDERERS = new WeakMap<ComponentType<unknown>, RenderFn>();
 const SLOTS = new WeakMap<object, SlotMap | null>();
 const GLOBAL_COMPONENTS = new Map<string, ComponentType<unknown>>();
-
-/**
- * Compiling a template needs the compiler, which most production apps should
- * not ship. `@voltjs/core/jit` registers it; the Vite plugin makes it
- * unnecessary by emitting `render` at build time.
- */
-let templateCompiler: ((template: string, filename: string) => RenderFn) | null = null;
-
-export function setTemplateCompiler(
-  compile: (template: string, filename: string) => RenderFn,
-): void {
-  templateCompiler = compile;
-}
 
 /** Register a component so any template can use it without importing it. */
 export function registerComponent(component: ComponentType<unknown>): void {
@@ -370,21 +355,12 @@ function getRenderFn(component: ComponentType<unknown>, resolved: ResolvedConfig
     render = config.render;
   } else if (typeof config.templateUrl === 'string') {
     // Reaching here means the build-time pass did not run: `templateUrl` is
-    // resolved from disk, which the browser cannot do.
+    // read from disk, which the browser cannot do.
     throw new Error(
-      `[volt] ${component.name} uses templateUrl "${config.templateUrl}", which is ` +
-        'resolved at build time. Add @voltjs/vite-plugin to your Vite config, or ' +
-        'use an inline `template` if you are running without a build step.',
+      `[volt] ${component.name} declares templateUrl "${config.templateUrl}", which is ` +
+        'resolved at build time. Add @voltjs/vite-plugin to your Vite config, or supply ' +
+        "`render` directly using compileTemplate() from '@voltjs/core/jit'.",
     );
-  } else if (typeof config.template === 'string') {
-    if (!templateCompiler) {
-      throw new Error(
-        `[volt] ${component.name} has a template but no compiler is available. ` +
-          'Use @voltjs/vite-plugin to compile templates at build time, or import ' +
-          "'@voltjs/core/jit' to compile them in the browser.",
-      );
-    }
-    render = templateCompiler(config.template, config.selector);
   } else {
     render = () => null;
   }

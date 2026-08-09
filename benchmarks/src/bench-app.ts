@@ -61,22 +61,7 @@ export function resetIds(): void {
 
 @Component({
   selector: 'v-bench',
-  template: `
-    <table class="table">
-      <tbody>
-        <tr
-          :for="row in rows.get()"
-          :key="row.id"
-          :class="{ danger: row.id === selected.get() }"
-        >
-          <td class="col-id">{{ row.id }}</td>
-          <td class="col-label"><a :click="select(row.id)">{{ row.label }}</a></td>
-          <td class="col-remove"><a :click="remove(row.id)">x</a></td>
-          <td class="col-spacer"></td>
-        </tr>
-      </tbody>
-    </table>
-  `,
+  templateUrl: './bench-app.html',
 })
 export class BenchApp {
   rows = new Signal.State<Row[]>([]);

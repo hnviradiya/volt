@@ -8,7 +8,7 @@
  * into positional keying.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
-import '@voltjs/core/jit';
+import { compileTemplate } from '@voltjs/core/jit';
 import { Component, Signal, flushSync, mount } from '@voltjs/core';
 
 let host: HTMLElement;
@@ -31,7 +31,7 @@ const ITEMS: Item[] = [
 
 @Component({
   selector: 'v-default',
-  template: `<ul><li :for="item in items.get()">{{ item.text }}</li></ul>`,
+  render: compileTemplate(`<ul><li :for="item in items.get()">{{ item.text }}</li></ul>`),
 })
 class ByIdentity {
   items = new Signal.State<Item[]>(ITEMS);
@@ -39,7 +39,7 @@ class ByIdentity {
 
 @Component({
   selector: 'v-by-id',
-  template: `<ul><li :for="item in items.get()" :key="item.id">{{ item.text }}</li></ul>`,
+  render: compileTemplate(`<ul><li :for="item in items.get()" :key="item.id">{{ item.text }}</li></ul>`),
 })
 class ById {
   items = new Signal.State<Item[]>(ITEMS);
@@ -47,7 +47,7 @@ class ById {
 
 @Component({
   selector: 'v-by-index',
-  template: `<ul><li :for="item in items.get()" :key="$index">{{ item.text }}</li></ul>`,
+  render: compileTemplate(`<ul><li :for="item in items.get()" :key="$index">{{ item.text }}</li></ul>`),
 })
 class ByIndex {
   items = new Signal.State<Item[]>(ITEMS);
@@ -92,7 +92,7 @@ describe('default: keyed by item identity', () => {
   it('handles duplicate values by pairing them up in order', () => {
     @Component({
       selector: 'v-dupes',
-      template: `<ul><li :for="s in items.get()">{{ s }}</li></ul>`,
+      render: compileTemplate(`<ul><li :for="s in items.get()">{{ s }}</li></ul>`),
     })
     class Dupes {
       items = new Signal.State(['a', 'b', 'a']);
@@ -158,7 +158,7 @@ describe(':key="$index" — explicit positional keying', () => {
   it('is available alongside a named index binding', () => {
     @Component({
       selector: 'v-both',
-      template: `<ul><li :for="(item, i) in items.get()" :key="$index">{{ i }}:{{ item.text }}</li></ul>`,
+      render: compileTemplate(`<ul><li :for="(item, i) in items.get()" :key="$index">{{ i }}:{{ item.text }}</li></ul>`),
     })
     class Both {
       items = new Signal.State<Item[]>(ITEMS);

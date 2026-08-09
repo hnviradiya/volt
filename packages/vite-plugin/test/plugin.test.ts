@@ -12,11 +12,14 @@ type TransformHook = (
 /** Files the plugin asked Vite to watch, so template edits hot-reload. */
 let watched: string[] = [];
 
+/** A module living beside the fixtures, so relative paths resolve. */
+const FIXTURE_ID = resolve(import.meta.dirname, 'fixtures/component.ts');
+
 /** Invoke a plugin's transform hook with a minimal Rollup-ish context. */
 async function runTransform(
   plugin: Plugin,
   code: string,
-  id = '/src/app.ts',
+  id = FIXTURE_ID,
 ): Promise<string | null> {
   const hook = plugin.transform as unknown as TransformHook;
   watched = [];
@@ -42,7 +45,7 @@ import { Component, Signal } from '@voltjs/core';
 
 @Component({
   selector: 'v-counter',
-  template: \`<button :click="inc()">{{ count.get() }}</button>\`,
+  templateUrl: './counter.html',
 })
 export class Counter {
   count = new Signal.State(0);
@@ -51,22 +54,29 @@ export class Counter {
 `;
 
 describe('template precompilation', () => {
-  it('replaces a template with a compiled render function', async () => {
+  it('reads the html file and replaces templateUrl with a render function', async () => {
     const { templates } = plugins();
     const output = await runTransform(templates, COMPONENT);
 
     expect(output).not.toBeNull();
     expect(output).toContain('render: __volt_render_0');
-    expect(output).not.toContain('template: `');
-    // The static markup is hoisted to module scope, parsed once per module.
+    expect(output).not.toContain('templateUrl');
+    // Static markup hoisted to module scope, parsed once per module.
     expect(output).toContain('__volt_rt.template("<button></button>")');
-    expect(output).toContain("import * as __volt_rt from \"@voltjs/core/runtime\"");
+    expect(output).toContain('import * as __volt_rt from "@voltjs/core/runtime"');
+    // The handler is delegated rather than bound per element.
+    expect(output).toContain('__volt_rt.delegate');
+  });
+
+  it('registers the html file so edits hot-reload', async () => {
+    const { templates } = plugins();
+    await runTransform(templates, COMPONENT);
+    expect(watched.some((f) => f.endsWith('counter.html'))).toBe(true);
   });
 
   it('leaves files without a @Component alone', async () => {
     const { templates } = plugins();
-    const output = await runTransform(templates, `export const x = 1;`);
-    expect(output).toBeNull();
+    expect(await runTransform(templates, `export const x = 1;`)).toBeNull();
   });
 
   it('does nothing when precompilation is disabled', async () => {
@@ -80,41 +90,30 @@ describe('template precompilation', () => {
     expect(output).toBeNull();
   });
 
-  it('ignores `template:` occurrences outside a @Component call', async () => {
+  it('ignores templateUrl outside a @Component call', async () => {
     const source = `
-      const config = { template: \`<div>{{ nope }}</div>\` };
+      const config = { templateUrl: './counter.html' };
       export { config };
     `;
     const { templates } = plugins();
     expect(await runTransform(templates, source)).toBeNull();
   });
 
-  it('is not fooled by the word template inside a string or comment', async () => {
+  it('is not fooled by the word templateUrl in a string or comment', async () => {
     const source = `
-      // template: \`<div></div>\`
-      const s = "template: not a real one";
+      // templateUrl: './counter.html'
+      const s = "templateUrl: './counter.html'";
       export { s };
     `;
     const { templates } = plugins();
     expect(await runTransform(templates, source)).toBeNull();
   });
 
-  it('leaves interpolated template literals to the runtime compiler', async () => {
-    const source = `
-      @Component({ selector: 'v-x', template: \`<div>\${SHARED}</div>\` })
-      export class X {}
-    `;
-    const { templates } = plugins();
-    // Host-language interpolation is not a Volt template; it cannot be
-    // resolved at build time, so it must be left intact.
-    expect(await runTransform(templates, source)).toBeNull();
-  });
-
   it('compiles several components in one module', async () => {
     const source = `
-      @Component({ selector: 'v-a', template: \`<a>{{ x.get() }}</a>\` })
+      @Component({ selector: 'v-a', templateUrl: './a.html' })
       export class A {}
-      @Component({ selector: 'v-b', template: \`<b>{{ y.get() }}</b>\` })
+      @Component({ selector: 'v-b', templateUrl: './b.html' })
       export class B {}
     `;
     const { templates } = plugins();
@@ -123,13 +122,78 @@ describe('template precompilation', () => {
     expect(output).toContain('render: __volt_render_1');
   });
 
-  it('reports template syntax errors against the source file', async () => {
+  it('fails with a useful message when the file is missing', async () => {
     const source = `
-      @Component({ selector: 'v-bad', template: \`<div><span></div>\` })
-      export class Bad {}
+      @Component({ selector: 'v-x', templateUrl: './nope.html' })
+      export class X {}
     `;
     const { templates } = plugins();
-    await expect(runTransform(templates, source)).rejects.toThrow(/volt:compiler/);
+    await expect(runTransform(templates, source)).rejects.toThrow(
+      /templateUrl "\.\/nope\.html" could not be read/,
+    );
+  });
+
+  it('reports template syntax errors against the html file, not the component', async () => {
+    const source = `
+      @Component({ selector: 'v-x', templateUrl: './broken.html' })
+      export class X {}
+    `;
+    const { templates } = plugins();
+    // broken.html exists but has an unclosed tag, so this is a compiler error
+    // rather than a missing-file error — and it must name the html file.
+    await expect(runTransform(templates, source)).rejects.toThrow(
+      /volt:compiler[\s\S]*broken\.html/,
+    );
+  });
+});
+
+describe('styleUrl / styleUrls', () => {
+  it('inlines a single stylesheet', async () => {
+    const source = `
+      @Component({
+        selector: 'v-greeting',
+        templateUrl: './greeting.html',
+        styleUrl: './greeting.css',
+      })
+      export class Greeting {}
+    `;
+    const { templates } = plugins();
+    const output = await runTransform(templates, source);
+
+    expect(output).not.toContain('styleUrl');
+    expect(output).toContain('rebeccapurple');
+  });
+
+  it('concatenates several stylesheets in order', async () => {
+    const source = `
+      @Component({
+        selector: 'v-greeting',
+        templateUrl: './greeting.html',
+        styleUrls: ['./greeting.css', './extra.css'],
+      })
+      export class Greeting {}
+    `;
+    const { templates } = plugins();
+    const output = await runTransform(templates, source);
+
+    expect(output).toContain('rebeccapurple');
+    expect(output).toContain('font-weight');
+    expect(watched.some((f) => f.endsWith('extra.css'))).toBe(true);
+  });
+
+  it('fails with a useful message when a stylesheet is missing', async () => {
+    const source = `
+      @Component({
+        selector: 'v-x',
+        templateUrl: './greeting.html',
+        styleUrl: './nope.css',
+      })
+      export class X {}
+    `;
+    const { templates } = plugins();
+    await expect(runTransform(templates, source)).rejects.toThrow(
+      /styleUrl "\.\/nope\.css" could not be read/,
+    );
   });
 });
 
@@ -146,95 +210,5 @@ describe('decorator lowering', () => {
   it('leaves files with no decorators untouched', async () => {
     const { decorators } = plugins();
     expect(await runTransform(decorators, `export const x = 1;`)).toBeNull();
-  });
-});
-
-describe('templateUrl', () => {
-  const FIXTURE_ID = resolve(import.meta.dirname, 'fixtures/component.ts');
-
-  const withTemplateUrl = `
-    @Component({
-      selector: 'v-greeting',
-      templateUrl: './greeting.html',
-    })
-    export class Greeting {}
-  `;
-
-  it('reads the html file and compiles it', async () => {
-    const { templates } = plugins();
-    const output = await runTransform(templates, withTemplateUrl, FIXTURE_ID);
-
-    expect(output).toContain('render: __volt_render_0');
-    expect(output).not.toContain('templateUrl');
-    // Markup from the file, hoisted and with the interpolation compiled out.
-    expect(output).toContain('__volt_rt.template("<p class=\\"greeting\\"></p>")');
-    expect(output).toContain('_ctx.name.get()');
-  });
-
-  it('registers the html file so edits hot-reload', async () => {
-    const { templates } = plugins();
-    await runTransform(templates, withTemplateUrl, FIXTURE_ID);
-    expect(watched.some((f) => f.endsWith('greeting.html'))).toBe(true);
-  });
-
-  it('fails with a useful message when the file is missing', async () => {
-    const source = `
-      @Component({ selector: 'v-x', templateUrl: './nope.html' })
-      export class X {}
-    `;
-    const { templates } = plugins();
-    await expect(runTransform(templates, source, FIXTURE_ID)).rejects.toThrow(
-      /templateUrl "\.\/nope\.html" could not be read/,
-    );
-  });
-
-  it('reports template syntax errors against the html file, not the component', async () => {
-    const source = `
-      @Component({ selector: 'v-x', templateUrl: './broken.html' })
-      export class X {}
-    `;
-    const { templates } = plugins();
-    // broken.html exists but has an unclosed tag, so this is a compiler
-    // error rather than a missing-file error.
-    await expect(runTransform(templates, source, FIXTURE_ID)).rejects.toThrow(
-      /volt:compiler[\s\S]*broken\.html/,
-    );
-  });
-});
-
-describe('styleUrl / styleUrls', () => {
-  const FIXTURE_ID = resolve(import.meta.dirname, 'fixtures/component.ts');
-
-  it('inlines a single stylesheet', async () => {
-    const source = `
-      @Component({
-        selector: 'v-greeting',
-        templateUrl: './greeting.html',
-        styleUrl: './greeting.css',
-      })
-      export class Greeting {}
-    `;
-    const { templates } = plugins();
-    const output = await runTransform(templates, source, FIXTURE_ID);
-
-    expect(output).not.toContain('styleUrl');
-    expect(output).toContain('rebeccapurple');
-  });
-
-  it('concatenates several stylesheets in order', async () => {
-    const source = `
-      @Component({
-        selector: 'v-greeting',
-        templateUrl: './greeting.html',
-        styleUrls: ['./greeting.css', './extra.css'],
-      })
-      export class Greeting {}
-    `;
-    const { templates } = plugins();
-    const output = await runTransform(templates, source, FIXTURE_ID);
-
-    expect(output).toContain('rebeccapurple');
-    expect(output).toContain('font-weight');
-    expect(watched.some((f) => f.endsWith('extra.css'))).toBe(true);
   });
 });

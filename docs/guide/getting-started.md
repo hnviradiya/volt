@@ -136,12 +136,7 @@ resolution explicit and lets bundlers see the dependency.
 @Component({
   selector: 'v-app',
   imports: [Counter],
-  template: `
-    <main>
-      <h1>Counters</h1>
-      <v-counter></v-counter>
-    </main>
-  `,
+  templateUrl: './app.html',
 })
 export class App {}
 ```
