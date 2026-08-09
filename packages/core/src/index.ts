@@ -14,7 +14,7 @@
 
 export {
   Component,
-  Input,
+  Prop,
   mount,
   getComponentConfig,
   isComponent,
@@ -25,7 +25,7 @@ export {
 export type {
   ComponentConfig,
   ComponentType,
-  InputOptions,
+  PropOptions,
   MountHandle,
   OnDestroy,
   OnInit,

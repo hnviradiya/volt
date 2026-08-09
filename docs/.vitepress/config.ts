@@ -24,7 +24,7 @@ export default defineConfig({
           { text: 'Reactivity', link: '/guide/reactivity' },
           { text: 'Templates', link: '/guide/templates' },
           { text: 'Lists and conditionals', link: '/guide/lists-and-conditionals' },
-          { text: 'Inputs, outputs, slots', link: '/guide/composition' },
+          { text: 'Props, callbacks, slots', link: '/guide/composition' },
         ],
       },
       {

@@ -31,10 +31,10 @@ no filesystem — and Volt throws with a message saying so.
 Applied to a class. Runs after every member decorator, so the input and
 output metadata it reads is complete.
 
-## `@Input(options?)`
+## `@Prop(options?)`
 
 ```ts
-interface InputOptions {
+interface PropOptions {
   alias?: string;    // template-facing name
   required?: boolean;
 }
@@ -43,9 +43,9 @@ interface InputOptions {
 Three forms, differing in reactivity:
 
 ```ts
-@Input() a = new Signal.State(0);  // parent writes call .set() — reactive
-@Input() accessor b = 0;           // signal-backed automatically — reactive
-@Input() c = 0;                    // plain assignment — not reactive
+@Prop() a = new Signal.State(0);  // parent writes call .set() — reactive
+@Prop() accessor b = 0;           // signal-backed automatically — reactive
+@Prop() c = 0;                    // plain assignment — not reactive
 ```
 
 A missing required input throws at construction. Cannot be applied to static
@@ -57,7 +57,7 @@ There is no `@Output` and no `EventEmitter`. A component notifies its parent
 through a callback passed in as an input:
 
 ```ts
-@Input() onChanged?: (value: number) => void;
+@Prop() onChanged?: (value: number) => void;
 
 // somewhere in the class
 this.onChanged?.(next);
@@ -83,7 +83,7 @@ interface OnDestroy { onDestroy(): void }
 
 | Hook | When |
 |---|---|
-| `onInit` | Inputs applied, before the template is built |
+| `onInit` | Props applied, before the template is built |
 | `onMount` | After the DOM is in the document |
 | `onDestroy` | When the component is torn down |
 

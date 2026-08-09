@@ -59,21 +59,21 @@ export class Greeting {
 That entry pulls the compiler in, which is exactly why it is a separate
 import rather than a config option.
 
-## Inputs
+## Props
 
-`@Input()` declares a property the parent can bind to. Which form you choose
+`@Prop()` declares a property the parent can bind to. Which form you choose
 decides whether the child reacts to changes:
 
 ```ts
 export class Counter {
   // Reactive: a parent write flows in through .set()
-  @Input() step = new Signal.State(1);
+  @Prop() step = new Signal.State(1);
 
   // Reactive: signal-backed automatically, read as a plain property
-  @Input() accessor label = 'Counter';
+  @Prop() accessor label = 'Counter';
 
   // Not reactive: plain assignment, fine for values that never change
-  @Input() id = '';
+  @Prop() id = '';
 }
 ```
 
@@ -87,7 +87,7 @@ sees each new value without either component re-rendering.
 Rename or require an input:
 
 ```ts
-@Input({ alias: 'for', required: true }) target = new Signal.State('');
+@Prop({ alias: 'for', required: true }) target = new Signal.State('');
 ```
 
 A missing required input throws at construction.
@@ -99,7 +99,7 @@ in as an ordinary input, and the child calls it:
 
 ```ts
 export class Counter {
-  @Input() onChanged?: (value: number) => void;
+  @Prop() onChanged?: (value: number) => void;
 
   increment() {
     this.count.set(this.count.get() + 1);
@@ -142,7 +142,7 @@ import { type OnInit, type OnMount, type OnDestroy } from '@voltjs/core';
 
 export class Panel implements OnInit, OnMount, OnDestroy {
   onInit() {
-    // Inputs are applied; the template has not been built yet, so writes
+    // Props are applied; the template has not been built yet, so writes
     // here are visible in the first paint.
   }
 

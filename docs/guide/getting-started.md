@@ -151,6 +151,6 @@ export class App {}
 
 ## Next
 
-- [Components](./components) — inputs, outputs, lifecycle
+- [Components](./components) — props, callbacks, lifecycle
 - [Reactivity](./reactivity) — signals, computeds, effects
 - [Templates](./templates) — the `:` syntax in full

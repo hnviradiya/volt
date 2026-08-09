@@ -1,4 +1,4 @@
-# Inputs, outputs, and slots
+# Props, callbacks, and slots
 
 ## Passing data down
 
@@ -8,7 +8,7 @@
   templateUrl: './badge.html',
 })
 export class Badge {
-  @Input() count = new Signal.State(0);
+  @Prop() count = new Signal.State(0);
 }
 ```
 
@@ -19,12 +19,12 @@ export class Badge {
 The binding stays live. When `unread` changes, the badge's text updates —
 neither component re-renders, and no diff runs.
 
-### Choosing an input form
+### Choosing a prop form
 
 ```ts
-@Input() a = new Signal.State(0);  // reactive; read as a.get()
-@Input() accessor b = 0;           // reactive; read as b
-@Input() c = 0;                    // not reactive
+@Prop() a = new Signal.State(0);  // reactive; read as a.get()
+@Prop() accessor b = 0;           // reactive; read as b
+@Prop() c = 0;                    // not reactive
 ```
 
 Use the first when the child passes the signal around, the second when you
@@ -37,7 +37,7 @@ A callback is just an input:
 
 ```ts
 export class Editor {
-  @Input() onSaved?: (text: string) => void;
+  @Prop() onSaved?: (text: string) => void;
 
   save() {
     this.onSaved?.(this.text.get());
@@ -111,9 +111,9 @@ export class Page {
 }
 ```
 
-## When not to use inputs
+## When not to use props
 
-Threading a value through several layers of inputs is a sign it should live
+Threading a value through several layers of props is a sign it should live
 in a module or a context instead:
 
 ```ts

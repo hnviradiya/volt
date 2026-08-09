@@ -7,8 +7,8 @@
  *     templateUrl: './counter.html',
  *   })
  *   export class Counter {
- *     @Input() start = new Signal.State(0);
- *     @Input() onChanged?: (value: number) => void;
+ *     @Prop() start = new Signal.State(0);
+ *     @Prop() onChanged?: (value: number) => void;
  *
  *     count = new Signal.State(0);
  *
@@ -42,7 +42,7 @@ import { insert } from './dom.js';
 // must exist before any decorated class is evaluated.
 (Symbol as { metadata?: symbol }).metadata ??= Symbol('Symbol.metadata');
 
-const INPUTS = Symbol.for('volt.inputs');
+const PROPS = Symbol.for('volt.props');
 
 // ---------------------------------------------------------------------------
 // Types
@@ -89,13 +89,13 @@ export interface ComponentConfig {
   imports?: ComponentType<unknown>[];
 }
 
-export interface InputOptions {
+export interface PropOptions {
   /** Template-facing name, when it differs from the property name. */
   alias?: string;
   required?: boolean;
 }
 
-interface InputDef {
+interface PropDef {
   property: string;
   alias: string;
   required: boolean;
@@ -103,12 +103,12 @@ interface InputDef {
 
 interface ResolvedConfig {
   config: ComponentConfig;
-  inputsByAlias: Map<string, InputDef>;
+  propsByAlias: Map<string, PropDef>;
   stylesInjected: boolean;
 }
 
 export interface OnInit {
-  /** Runs after inputs are applied, before the template is built. */
+  /** Runs after props are applied, before the template is built. */
   onInit(): void;
 }
 
@@ -186,39 +186,41 @@ export function Component(config: ComponentConfig) {
 
     const metadata = context.metadata as MetadataRecord | undefined;
 
-    const inputsByAlias = new Map<string, InputDef>();
-    for (const def of readMetadata<InputDef>(metadata, INPUTS)) {
-      inputsByAlias.set(def.alias, def);
+    const propsByAlias = new Map<string, PropDef>();
+    for (const def of readMetadata<PropDef>(metadata, PROPS)) {
+      propsByAlias.set(def.alias, def);
     }
 
-    CONFIGS.set(target, { config, inputsByAlias, stylesInjected: false });
+    CONFIGS.set(target, { config, propsByAlias, stylesInjected: false });
     return target;
   };
 }
 
 /**
- * Declare a property the parent template can bind to.
+ * Declare something the parent passes in.
  *
- * Three shapes are supported, and which one you pick decides reactivity:
+ * Covers both data and callbacks — a component notifies its parent by calling
+ * a function it was given, so there is no separate event channel.
  *
- *   `@Input() n = new Signal.State(0)`  parent writes call `.set()` — reactive
- *   `@Input() accessor n = 0`           signal-backed automatically — reactive
- *   `@Input() n = 0`                    plain assignment — not reactive
+ *   `@Prop() n = new Signal.State(0)`      parent writes call `.set()` — reactive
+ *   `@Prop() accessor n = 0`               signal-backed automatically — reactive
+ *   `@Prop() n = 0`                        plain assignment — not reactive
+ *   `@Prop() onDone?: (v: T) => void`      a callback the child invokes
  */
-export function Input(options: InputOptions = {}) {
-  return function decorateInput(
+export function Prop(options: PropOptions = {}) {
+  return function decorateProp(
     target: unknown,
     context: ClassFieldDecoratorContext | ClassAccessorDecoratorContext,
   ): unknown {
     if (context.static) {
-      throw new Error(`[volt] @Input cannot be used on a static member (${String(context.name)}).`);
+      throw new Error(`[volt] @Prop cannot be used on a static member (${String(context.name)}).`);
     }
     if (typeof context.name === 'symbol') {
-      throw new Error('[volt] @Input cannot be used on a symbol-named property.');
+      throw new Error('[volt] @Prop cannot be used on a symbol-named property.');
     }
 
     const property = context.name;
-    appendMetadata<InputDef>(context.metadata as MetadataRecord, INPUTS, {
+    appendMetadata<PropDef>(context.metadata as MetadataRecord, PROPS, {
       property,
       alias: options.alias ?? property,
       required: options.required ?? false,
@@ -328,7 +330,7 @@ function injectStyles(resolved: ResolvedConfig): void {
 // Instantiation
 // ---------------------------------------------------------------------------
 
-function applyInputs(
+function applyProps(
   instance: Record<string, unknown>,
   props: Record<string, unknown> | null,
   resolved: ResolvedConfig,
@@ -340,7 +342,7 @@ function applyInputs(
       if (key === '__ref') continue;
       seen.add(key);
 
-      const def = resolved.inputsByAlias.get(key);
+      const def = resolved.propsByAlias.get(key);
       const property = def?.property ?? key;
       const descriptor = Object.getOwnPropertyDescriptor(props, key);
       const current = instance[property];
@@ -365,10 +367,10 @@ function applyInputs(
     }
   }
 
-  for (const def of resolved.inputsByAlias.values()) {
+  for (const def of resolved.propsByAlias.values()) {
     if (def.required && !seen.has(def.alias)) {
       throw new Error(
-        `[volt] <${resolved.config.selector}> requires the input "${def.alias}".`,
+        `[volt] <${resolved.config.selector}> requires the prop "${def.alias}".`,
       );
     }
   }
@@ -395,7 +397,7 @@ function instantiate(
   const instance = new component() as Record<string, unknown> & LifecycleHooks;
   SLOTS.set(instance, options.slots ?? null);
 
-  applyInputs(instance, options.props ?? null, resolved);
+  applyProps(instance, options.props ?? null, resolved);
 
   instance.onInit?.();
   if (instance.onDestroy) onCleanup(() => instance.onDestroy!());
@@ -436,7 +438,7 @@ export function createComponent(
       throw new Error(
         `[volt] <${tag}> is a component, so \`:on-${name}\` does not apply. ` +
           `Pass a callback instead: \`:on${name.charAt(0).toUpperCase()}${name.slice(1)}="..."\`, ` +
-          `declared on the child as an @Input.`,
+          `declared on the child as a @Prop.`,
       );
     }
     return instantiate(component, { props, slots });

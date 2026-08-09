@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { compileTemplate } from '@voltjs/core/jit';
 import {
   Component,
-  Input,
+  Prop,
   Signal,
   flushSync,
   mount,
@@ -304,7 +304,7 @@ describe(':if', () => {
 
     @Component({ selector: 'v-child', render: compileTemplate(`<span>{{ label.get() }}</span>`) })
     class Child implements OnDestroy {
-      @Input() label = new Signal.State('x');
+      @Prop() label = new Signal.State('x');
       onDestroy = cleanup;
     }
 
@@ -427,10 +427,10 @@ describe('components', () => {
       render: compileTemplate(`<button :click="bump()">{{ label.get() }}:{{ n.get() }}</button>`),
     })
     class Child {
-      @Input() label = new Signal.State('');
-      @Input() n = new Signal.State(0);
+      @Prop() label = new Signal.State('');
+      @Prop() n = new Signal.State(0);
       // A component notifies its parent by calling a function it was given.
-      @Input() onBumped?: (value: number) => void;
+      @Prop() onBumped?: (value: number) => void;
 
       bump() {
         this.onBumped?.(this.n.get() + 1);
@@ -466,7 +466,7 @@ describe('components', () => {
       render: compileTemplate(`<button :click="fire()">go</button>`),
     })
     class Child {
-      @Input() onPing?: (value: number) => void;
+      @Prop() onPing?: (value: number) => void;
       fire() {
         this.onPing?.(1);
       }
