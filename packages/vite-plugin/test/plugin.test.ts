@@ -148,12 +148,12 @@ describe('template precompilation', () => {
 });
 
 describe('styleUrl / styleUrls', () => {
-  it('inlines a single stylesheet', async () => {
+  it('compiles a stylesheet from Sass and flattens nesting', async () => {
     const source = `
       @Component({
         selector: 'v-greeting',
         templateUrl: './greeting.html',
-        styleUrl: './greeting.css',
+        styleUrl: './greeting.scss',
       })
       export class Greeting {}
     `;
@@ -161,7 +161,10 @@ describe('styleUrl / styleUrls', () => {
     const output = await runTransform(templates, source);
 
     expect(output).not.toContain('styleUrl');
-    expect(output).toContain('rebeccapurple');
+    // Nesting is resolved at build time, not shipped.
+    expect(output).toContain('.greeting strong{font-weight:700}');
+    // Compressed output, so the colour keyword is emitted as its short hex.
+    expect(output).toContain('#639');
   });
 
   it('concatenates several stylesheets in order', async () => {
@@ -169,16 +172,48 @@ describe('styleUrl / styleUrls', () => {
       @Component({
         selector: 'v-greeting',
         templateUrl: './greeting.html',
-        styleUrls: ['./greeting.css', './extra.css'],
+        styleUrls: ['./greeting.scss', './extra.scss'],
       })
       export class Greeting {}
     `;
     const { templates } = plugins();
     const output = await runTransform(templates, source);
 
-    expect(output).toContain('rebeccapurple');
-    expect(output).toContain('font-weight');
-    expect(watched.some((f) => f.endsWith('extra.css'))).toBe(true);
+    expect(output).toContain('#639');
+    // Pulled in from the partial that extra.scss @uses.
+    expect(output).toContain('#fafafa');
+  });
+
+  it('watches partials pulled in with @use, not just the entry file', async () => {
+    const source = `
+      @Component({
+        selector: 'v-greeting',
+        templateUrl: './greeting.html',
+        styleUrl: './extra.scss',
+      })
+      export class Greeting {}
+    `;
+    const { templates } = plugins();
+    await runTransform(templates, source);
+
+    // Editing the partial has to invalidate the component too.
+    expect(watched.some((f) => f.endsWith('extra.scss'))).toBe(true);
+    expect(watched.some((f) => f.endsWith('_tokens.scss'))).toBe(true);
+  });
+
+  it('rejects a plain .css file', async () => {
+    const source = `
+      @Component({
+        selector: 'v-x',
+        templateUrl: './greeting.html',
+        styleUrl: './greeting.css',
+      })
+      export class X {}
+    `;
+    const { templates } = plugins();
+    await expect(runTransform(templates, source)).rejects.toThrow(
+      /must be a \.scss file/,
+    );
   });
 
   it('fails with a useful message when a stylesheet is missing', async () => {
@@ -186,13 +221,28 @@ describe('styleUrl / styleUrls', () => {
       @Component({
         selector: 'v-x',
         templateUrl: './greeting.html',
-        styleUrl: './nope.css',
+        styleUrl: './nope.scss',
       })
       export class X {}
     `;
     const { templates } = plugins();
     await expect(runTransform(templates, source)).rejects.toThrow(
-      /styleUrl "\.\/nope\.css" could not be read/,
+      /styleUrl "\.\/nope\.scss" could not be read/,
+    );
+  });
+
+  it('reports Sass errors against the stylesheet', async () => {
+    const source = `
+      @Component({
+        selector: 'v-x',
+        templateUrl: './greeting.html',
+        styleUrl: './broken.scss',
+      })
+      export class X {}
+    `;
+    const { templates } = plugins();
+    await expect(runTransform(templates, source)).rejects.toThrow(
+      /Failed to compile[\s\S]*broken\.scss/,
     );
   });
 });

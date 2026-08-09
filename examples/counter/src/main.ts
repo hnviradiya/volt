@@ -1,5 +1,5 @@
 import { mount } from '@voltjs/core';
 import { App } from './app.js';
-import './styles.css';
+import './styles.scss';
 
 mount(App, '#app');

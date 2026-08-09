@@ -6,7 +6,7 @@ import { Todos } from './todos.js';
   selector: 'v-app',
   imports: [Counter, Todos],
   templateUrl: './app.html',
-  styleUrl: './app.css',
+  styleUrl: './app.scss',
 })
 export class App {
   step = new Signal.State(1);

@@ -22,7 +22,8 @@
   },
   "dependencies": {
     "@voltjs/compiler": "workspace:*",
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "sass": "^1.102.0"
   },
   "peerDependencies": {
     "vite": "^8.0.0"

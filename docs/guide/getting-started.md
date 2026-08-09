@@ -70,7 +70,7 @@ import { Component, Signal } from '@voltjs/core';
 @Component({
   selector: 'v-counter',
   templateUrl: './counter.html',
-  styleUrl: './counter.css',
+  styleUrl: './counter.scss',
 })
 export class Counter {
   count = new Signal.State(0);
@@ -94,13 +94,20 @@ export class Counter {
 </div>
 ```
 
-```css
-/* src/counter.css */
-.counter { display: flex; gap: 0.5rem; align-items: center; }
+```scss
+// src/counter.scss
+.counter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
 ```
 
-Both paths are resolved relative to the `.ts` file, compiled at build time,
-and watched — editing the markup or the CSS hot-reloads on its own.
+Stylesheets are **Sass**. `styleUrl` takes a `.scss` file and nothing else —
+a plain `.css` file is rejected with a message saying so. Both paths resolve
+relative to the `.ts` file, are compiled at build time, and are watched, so
+editing the markup or the styles hot-reloads on its own. Partials pulled in
+with `@use` are watched too.
 
 ## Mount it
 

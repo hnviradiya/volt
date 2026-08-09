@@ -19,8 +19,8 @@ interface ComponentConfig {
 | `selector` | Tag this component answers to. Required |
 | `templateUrl` | Path to an `.html` file, relative to this file |
 | `render` | Pre-compiled render function; the Vite plugin fills this in |
-| `styleUrl` / `styleUrls` | Path(s) to CSS files, relative to this file |
-| `styles` | Inline CSS, injected once per component |
+| `styleUrl` / `styleUrls` | Path(s) to `.scss` files, relative to this file |
+| `styles` | Compiled CSS, filled in by the plugin from `styleUrl` |
 | `imports` | Components this template may reference |
 
 `templateUrl`, `styleUrl` and `styleUrls` are resolved **at build time** by

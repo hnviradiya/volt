@@ -29,8 +29,8 @@ export class Greeting {
 | `templateUrl` | Path to an `.html` file, relative to this file |
 | `template` | Inline template source |
 | `render` | A pre-compiled render function (the Vite plugin fills this in) |
-| `styleUrl` / `styleUrls` | Path(s) to CSS files, relative to this file |
-| `styles` | Inline CSS, injected once per component |
+| `styleUrl` / `styleUrls` | Path(s) to `.scss` files, relative to this file |
+| `styles` | Compiled CSS, filled in by the plugin from `styleUrl` |
 | `imports` | Components this template may reference |
 
 Templates always live in a `.html` file. There is no inline form: a real file

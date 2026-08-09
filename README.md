@@ -13,7 +13,7 @@ import { Component, Signal } from '@voltjs/core';
 @Component({
   selector: 'v-counter',
   templateUrl: './counter.html',
-  styleUrl: './counter.css',
+  styleUrl: './counter.scss',
 })
 export class Counter {
   count = new Signal.State(0);

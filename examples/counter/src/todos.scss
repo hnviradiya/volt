@@ -1,0 +1,55 @@
+.todos {
+  display: grid;
+  gap: 1rem;
+
+  .add {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .input {
+    flex: 1;
+  }
+
+  .filters {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .list {
+    display: grid;
+    gap: 0.25rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+
+    li {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 0.4rem 0.6rem;
+      border-radius: 8px;
+      background: var(--surface-2);
+
+      &.done .text {
+        text-decoration: line-through;
+        color: var(--muted);
+      }
+    }
+  }
+
+  label {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    cursor: pointer;
+  }
+
+  .empty,
+  .summary {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+}

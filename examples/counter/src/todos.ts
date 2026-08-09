@@ -18,7 +18,7 @@ type Filter = 'all' | 'active' | 'done';
 @Component({
   selector: 'v-todos',
   templateUrl: './todos.html',
-  styleUrl: './todos.css',
+  styleUrl: './todos.scss',
 })
 export class Todos {
   readonly filters: Filter[] = ['all', 'active', 'done'];

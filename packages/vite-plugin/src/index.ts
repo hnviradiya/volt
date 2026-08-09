@@ -7,14 +7,17 @@
  *     syntax that no engine implements yet, and Vite's oxc transformer does
  *     not lower them. This plugin does, via esbuild.
  *
- *  2. **Template compilation.** `template: \`...\`` in a `@Component` becomes a
- *     `render` function built from hoisted `<template>` clones, so no compiler
- *     ships to production and no template is parsed at runtime.
+ *  2. **Template and style compilation.** `templateUrl` becomes a `render`
+ *     function built from hoisted `<template>` clones, and `styleUrl` is
+ *     compiled from Sass — so no compiler of either kind ships to production
+ *     and nothing is parsed at runtime.
  */
 
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { transform as esbuildTransform } from 'esbuild';
+import { compileStringAsync } from 'sass';
 import { compile, CompilerError } from '@voltjs/compiler';
 import type { Plugin } from 'vite';
 
@@ -118,7 +121,7 @@ interface TemplateSite {
 interface StyleSite {
   start: number;
   end: number;
-  /** One or more paths to CSS files. */
+  /** One or more paths to `.scss` files. */
   paths: string[];
 }
 
@@ -192,13 +195,40 @@ async function compileTemplates(
   for (const site of styles) {
     const collected: string[] = [];
     for (const relative of site.paths) {
+      if (!/\.s[ac]ss$/.test(relative)) {
+        throw new Error(
+          `[volt] styleUrl "${relative}" must be a .scss file (referenced by ${id}). ` +
+            'Volt compiles Sass; plain .css is not a supported input.',
+        );
+      }
+
       const file = resolvePath(dir, relative);
       watch(file);
+
+      let source: string;
       try {
-        collected.push(await readFile(file, 'utf8'));
+        source = await readFile(file, 'utf8');
       } catch {
         throw new Error(
           `[volt] styleUrl "${relative}" could not be read (resolved to ${file}), referenced by ${id}`,
+        );
+      }
+
+      try {
+        const compiled = await compileStringAsync(source, {
+          syntax: relative.endsWith('.sass') ? 'indented' : 'scss',
+          // Resolve @use/@import relative to the stylesheet itself.
+          loadPaths: [dirname(file)],
+          style: 'compressed',
+        });
+        // Anything the stylesheet pulls in must invalidate this module too.
+        for (const url of compiled.loadedUrls) {
+          if (url.protocol === 'file:') watch(fileURLToPath(url));
+        }
+        collected.push(compiled.css);
+      } catch (err) {
+        throw new Error(
+          `[volt] Failed to compile ${file}:\n${(err as Error).message}`,
         );
       }
     }

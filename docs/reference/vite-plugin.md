@@ -23,7 +23,7 @@ as a syntax error. The plugin uses esbuild, which does lower them.
 **It compiles templates at build time.** `templateUrl` inside a `@Component`
 is resolved, read, and compiled into a `render` function with hoisted static
 markup, so no compiler ships to the browser and no template is parsed at
-runtime. `styleUrl` and `styleUrls` are inlined the same way. Every file it
+runtime. `styleUrl` and `styleUrls` are compiled from Sass the same way. Every file it
 reads is registered with the watcher, so editing markup or CSS hot-reloads.
 
 ## Options
