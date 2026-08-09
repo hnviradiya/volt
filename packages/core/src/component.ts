@@ -8,13 +8,13 @@
  *   })
  *   export class Counter {
  *     @Input() start = new Signal.State(0);
- *     @Output() changed = new EventEmitter<number>();
+ *     @Input() onChanged?: (value: number) => void;
  *
  *     count = new Signal.State(0);
  *
  *     increment() {
  *       this.count.set(this.count.get() + 1);
- *       this.changed.emit(this.count.get());
+ *       this.onChanged?.(this.count.get());
  *     }
  *   }
  *
@@ -43,7 +43,6 @@ import { insert } from './dom.js';
 (Symbol as { metadata?: symbol }).metadata ??= Symbol('Symbol.metadata');
 
 const INPUTS = Symbol.for('volt.inputs');
-const OUTPUTS = Symbol.for('volt.outputs');
 
 // ---------------------------------------------------------------------------
 // Types
@@ -102,15 +101,9 @@ interface InputDef {
   required: boolean;
 }
 
-interface OutputDef {
-  property: string;
-  alias: string;
-}
-
 interface ResolvedConfig {
   config: ComponentConfig;
   inputsByAlias: Map<string, InputDef>;
-  outputsByAlias: Map<string, OutputDef>;
   stylesInjected: boolean;
 }
 
@@ -198,12 +191,7 @@ export function Component(config: ComponentConfig) {
       inputsByAlias.set(def.alias, def);
     }
 
-    const outputsByAlias = new Map<string, OutputDef>();
-    for (const def of readMetadata<OutputDef>(metadata, OUTPUTS)) {
-      outputsByAlias.set(def.alias, def);
-    }
-
-    CONFIGS.set(target, { config, inputsByAlias, outputsByAlias, stylesInjected: false });
+    CONFIGS.set(target, { config, inputsByAlias, stylesInjected: false });
     return target;
   };
 }
@@ -256,53 +244,6 @@ export function Input(options: InputOptions = {}) {
 
     return undefined;
   };
-}
-
-/**
- * Declare an event the parent can listen to with `:on-name`.
- * Defaults to a fresh `EventEmitter` when the field has no initialiser.
- */
-export function Output(alias?: string) {
-  return function decorateOutput(
-    _target: unknown,
-    context: ClassFieldDecoratorContext,
-  ): (initial: unknown) => unknown {
-    if (typeof context.name === 'symbol') {
-      throw new Error('[volt] @Output cannot be used on a symbol-named property.');
-    }
-
-    const property = context.name;
-    appendMetadata<OutputDef>(context.metadata as MetadataRecord, OUTPUTS, {
-      property,
-      alias: alias ?? property,
-    });
-
-    return (initial: unknown) => initial ?? new EventEmitter<unknown>();
-  };
-}
-
-// ---------------------------------------------------------------------------
-// EventEmitter
-// ---------------------------------------------------------------------------
-
-export class EventEmitter<T = void> {
-  private readonly listeners = new Set<(value: T) => void>();
-
-  emit(value: T): void {
-    // Copied so a listener that unsubscribes mid-emit cannot skip another.
-    for (const listener of [...this.listeners]) listener(value);
-  }
-
-  subscribe(listener: (value: T) => void): Dispose {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
-  }
-
-  clear(): void {
-    this.listeners.clear();
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -433,33 +374,8 @@ function applyInputs(
   }
 }
 
-function wireOutputs(
-  instance: Record<string, unknown>,
-  events: Record<string, unknown> | null,
-  resolved: ResolvedConfig,
-): void {
-  if (!events) return;
-
-  for (const [alias, handler] of Object.entries(events)) {
-    if (typeof handler !== 'function') continue;
-
-    const def = resolved.outputsByAlias.get(alias);
-    const property = def?.property ?? alias;
-    const emitter = instance[property];
-
-    if (emitter instanceof EventEmitter) {
-      onCleanup(emitter.subscribe(handler as (value: unknown) => void));
-    } else {
-      throw new Error(
-        `[volt] <${resolved.config.selector}> has no @Output named "${alias}".`,
-      );
-    }
-  }
-}
-
 interface InstantiateOptions {
   props?: Record<string, unknown> | null;
-  events?: Record<string, unknown> | null;
   slots?: SlotMap | null;
 }
 
@@ -480,7 +396,6 @@ function instantiate(
   SLOTS.set(instance, options.slots ?? null);
 
   applyInputs(instance, options.props ?? null, resolved);
-  wireOutputs(instance, options.events ?? null, resolved);
 
   instance.onInit?.();
   if (instance.onDestroy) onCleanup(() => instance.onDestroy!());
@@ -513,7 +428,19 @@ export function createComponent(
   slots: SlotMap | null,
 ): unknown {
   const component = resolveComponent(parentCtx, tag);
-  if (component) return instantiate(component, { props, events, slots });
+  if (component) {
+    if (events) {
+      // Components have no event channel: a parent passes a function in as an
+      // ordinary input and the child calls it.
+      const name = Object.keys(events)[0] ?? '';
+      throw new Error(
+        `[volt] <${tag}> is a component, so \`:on-${name}\` does not apply. ` +
+          `Pass a callback instead: \`:on${name.charAt(0).toUpperCase()}${name.slice(1)}="..."\`, ` +
+          `declared on the child as an @Input.`,
+      );
+    }
+    return instantiate(component, { props, slots });
+  }
 
   // Volt selectors are hyphenated too, so "has a hyphen" cannot distinguish a
   // web component from a forgotten import. The platform's own registry can:

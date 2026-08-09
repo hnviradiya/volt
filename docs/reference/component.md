@@ -51,25 +51,24 @@ Three forms, differing in reactivity:
 A missing required input throws at construction. Cannot be applied to static
 or symbol-named members.
 
-## `@Output(alias?)`
+## Notifying the parent
 
-Declares an event the parent listens to with `:on-*`. A field with no
-initialiser is given an `EventEmitter` automatically.
+There is no `@Output` and no `EventEmitter`. A component notifies its parent
+through a callback passed in as an input:
 
 ```ts
-@Output() changed = new EventEmitter<number>();
-@Output('done') finished = new EventEmitter<void>();
+@Input() onChanged?: (value: number) => void;
+
+// somewhere in the class
+this.onChanged?.(next);
 ```
 
-## `EventEmitter<T>`
+```html
+<v-counter :onChanged="(n) => handle(n)"></v-counter>
+```
 
-| Member | Description |
-|---|---|
-| `emit(value: T)` | Notify all listeners |
-| `subscribe(fn)` | Listen; returns an unsubscribe function |
-| `clear()` | Remove all listeners |
-
-Parent subscriptions are released automatically when the parent is disposed.
+`:on-*` remains the syntax for real DOM and custom-element events. Applying
+it to a Volt component throws, naming the callback prop to use instead.
 
 ## Lifecycle
 

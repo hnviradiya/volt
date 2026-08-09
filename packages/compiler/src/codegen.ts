@@ -1106,8 +1106,9 @@ class Generator {
         case 'model': {
           const target = this.genAccessor(dir.exp!, ctx);
           const setter = this.genModelSetter(dir.exp!, ctx, dir);
+          // A value in and a callback out — both ordinary inputs.
           props.push(`get "modelValue"() { return (${target})(); }`);
-          events.push(`"update:modelValue": ${setter}`);
+          props.push(`"onModelValue": ${setter}`);
           break;
         }
         case 'spread': {

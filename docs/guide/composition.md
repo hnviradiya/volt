@@ -31,24 +31,31 @@ Use the first when the child passes the signal around, the second when you
 want the ergonomics of a plain property, the third only for values that never
 change after construction.
 
-## Sending events up
+## Notifying the parent
+
+A callback is just an input:
 
 ```ts
 export class Editor {
-  @Output() saved = new EventEmitter<string>();
+  @Input() onSaved?: (text: string) => void;
 
   save() {
-    this.saved.emit(this.text.get());
+    this.onSaved?.(this.text.get());
   }
 }
 ```
 
 ```html
-<v-editor :on-saved="persist($event)"></v-editor>
+<v-editor :onSaved="(text) => persist(text)"></v-editor>
 ```
 
-`:on-*` is required for component outputs — a bare `:saved` would be read as
-a property binding, since `saved` is not a DOM event.
+The child calls a function it was handed. There is no emitter, no
+subscription, and nothing to tear down — which also means the callback is
+fully typed end to end.
+
+Only one parent can supply a given callback, which is the normal case. When
+several places genuinely need to react to the same change, put the state in a
+signal they all read rather than fanning a notification out.
 
 ## Two-way binding
 

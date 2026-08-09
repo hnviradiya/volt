@@ -69,6 +69,7 @@ resolved in a fixed order so a name always means one thing:
 |---|---|
 | Structure | `:if` `:else-if` `:else` `:for` `:key` `:text` `:html` `:model` `:ref` `:slot` |
 | Events | `:click` `:input` `:submit.prevent` `:keydown.enter` `:on-customEvent` |
+| Callbacks | `:onChanged="(n) => handle(n)"` — a component notifies its parent through a function input |
 | Bindings | `:class` `:style` `:disabled` `:value` `:attr-foo` `:prop-foo` |
 
 ```html

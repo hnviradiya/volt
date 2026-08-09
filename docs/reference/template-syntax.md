@@ -182,12 +182,18 @@ modifiers.
 `:on-*` forces an event listener for names Volt does not recognise:
 
 ```html
-<v-counter :on-changed="onCount($event)"></v-counter>
 <my-element :on-custom-thing="handle($event)"></my-element>
 ```
 
-On a component this subscribes to the matching `@Output`. On a custom element
-it is a real `addEventListener`.
+This is a real `addEventListener`, so it applies to elements and web
+components. Volt components have no event channel — they notify a parent
+through a callback passed in as an input:
+
+```html
+<v-counter :onChanged="(n) => onCount(n)"></v-counter>
+```
+
+Using `:on-*` on a Volt component throws, naming the callback prop to use.
 
 ## Bindings
 

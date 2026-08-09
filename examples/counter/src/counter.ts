@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, Signal, type OnInit } from '@voltjs/core';
+import { Component, Input, Signal, type OnInit } from '@voltjs/core';
 
 /**
  * A counter with a reactive input and an output event.
@@ -16,13 +16,14 @@ export class Counter implements OnInit {
   @Input() step = new Signal.State(1);
   @Input() min = new Signal.State(-Infinity);
 
-  @Output() changed = new EventEmitter<number>();
+  /** Called whenever the count changes. A plain function, passed in. */
+  @Input() onChanged?: (value: number) => void;
 
   count = new Signal.State(0);
 
   onInit(): void {
     // Runs before the template is built, so the first paint already reflects it.
-    this.changed.emit(this.count.get());
+    this.onChanged?.(this.count.get());
   }
 
   increment(): void {
@@ -39,6 +40,6 @@ export class Counter implements OnInit {
 
   private setCount(next: number): void {
     this.count.set(next);
-    this.changed.emit(next);
+    this.onChanged?.(next);
   }
 }

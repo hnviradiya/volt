@@ -12,7 +12,7 @@
         :label="'Steps of ' + step.get()"
         :step="step.get()"
         :min="-10"
-        :on-changed="onCount($event)"
+        :onChanged="(n) => onCount(n)"
       ></v-counter>
 
       <div class="row">

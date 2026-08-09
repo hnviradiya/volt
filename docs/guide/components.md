@@ -92,29 +92,39 @@ Rename or require an input:
 
 A missing required input throws at construction.
 
-## Outputs
+## Notifying the parent
 
-`@Output()` declares an event the parent can listen to with `:on-*`:
+Volt has no separate event channel for components. A parent passes a function
+in as an ordinary input, and the child calls it:
 
 ```ts
-import { EventEmitter, Output } from '@voltjs/core';
-
 export class Counter {
-  @Output() changed = new EventEmitter<number>();
+  @Input() onChanged?: (value: number) => void;
 
   increment() {
     this.count.set(this.count.get() + 1);
-    this.changed.emit(this.count.get());
+    this.onChanged?.(this.count.get());
   }
 }
 ```
 
 ```html
-<v-counter :on-changed="onCount($event)"></v-counter>
+<v-counter :onChanged="(n) => record(n)"></v-counter>
 ```
 
-Subscriptions are released when the parent is disposed. A field with no
-initialiser gets an `EventEmitter` automatically.
+That is the whole mechanism — no emitter to construct, no subscription to
+register, nothing to unsubscribe. The callback is typed like any other
+property, so a wrong argument type is a compile error rather than a runtime
+surprise.
+
+Svelte 5 deprecated its own event dispatcher in favour of exactly this, and
+React never had one.
+
+::: tip `:on-*` is for the DOM
+`:on-*` attaches a real event listener, which is meaningful for elements and
+web components but not for Volt components. Using it on a component is an
+error that names the callback prop you meant.
+:::
 
 ## Lifecycle
 

@@ -6,9 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { compileTemplate } from '@voltjs/core/jit';
 import {
   Component,
-  EventEmitter,
   Input,
-  Output,
   Signal,
   flushSync,
   mount,
@@ -423,7 +421,7 @@ describe(':for', () => {
 });
 
 describe('components', () => {
-  it('passes inputs reactively and emits outputs', () => {
+  it('passes inputs reactively and calls back through a callback prop', () => {
     @Component({
       selector: 'v-child',
       render: compileTemplate(`<button :click="bump()">{{ label.get() }}:{{ n.get() }}</button>`),
@@ -431,10 +429,11 @@ describe('components', () => {
     class Child {
       @Input() label = new Signal.State('');
       @Input() n = new Signal.State(0);
-      @Output() bumped = new EventEmitter<number>();
+      // A component notifies its parent by calling a function it was given.
+      @Input() onBumped?: (value: number) => void;
 
       bump() {
-        this.bumped.emit(this.n.get() + 1);
+        this.onBumped?.(this.n.get() + 1);
       }
     }
 
@@ -442,7 +441,7 @@ describe('components', () => {
       selector: 'v-parent',
       render: compileTemplate(`
         <div>
-          <v-child :label="'count'" :n="value.get()" :on-bumped="onBump($event)"></v-child>
+          <v-child :label="'count'" :n="value.get()" :onBumped="(v) => onBump(v)"></v-child>
         </div>
       `),
       imports: [Child],
@@ -459,6 +458,22 @@ describe('components', () => {
 
     view.click('button');
     expect(view.html).toContain('count:2');
+  });
+
+  it('explains that :on-* does not apply to a component', () => {
+    @Component({ selector: 'v-child', render: compileTemplate(`<span>x</span>`) })
+    class Child {}
+
+    @Component({
+      selector: 'v-parent',
+      imports: [Child],
+      render: compileTemplate(`<div><v-child :on-bumped="noop()"></v-child></div>`),
+    })
+    class Parent {
+      noop() {}
+    }
+
+    expect(() => render(Parent)).toThrow(/Pass a callback instead: `:onBumped/);
   });
 
   it('projects content into slots', () => {

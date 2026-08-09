@@ -15,8 +15,6 @@
 export {
   Component,
   Input,
-  Output,
-  EventEmitter,
   mount,
   getComponentConfig,
   isComponent,
