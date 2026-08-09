@@ -111,6 +111,24 @@ It also means a destructuring binding has to become per-field accessors
 rather than a snapshot, so `{ id, text }` stays reactive. The compiler
 generates those accessors; you write ordinary destructuring.
 
+## Bubbling events are delegated
+
+A handler per element is the obvious implementation and the wrong one at
+scale: ten thousand rows with two handlers each means twenty thousand
+listeners to register on create and unregister on remove.
+
+Volt installs one listener per event type on the document and walks up from
+the target, storing each handler on its node. Creating and destroying rows
+becomes a property assignment rather than a registry mutation.
+
+The cost is that the synthetic walk has to reproduce what the real capture
+and bubble phases would have done. `currentTarget` is null during a
+document-level dispatch, so Volt sets it to the node whose handler is
+running; `stopPropagation` is intercepted so it ends the walk rather than
+only the native phase. Events that do not bubble, and any handler needing
+`.capture`, `.once` or `.passive`, get a real listener instead — delegation
+cannot express those.
+
 ## Markers only where they are needed
 
 Dynamic content needs an anchor so the runtime knows where to insert. A naive

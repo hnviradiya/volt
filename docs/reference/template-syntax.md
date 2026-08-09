@@ -164,6 +164,30 @@ is wrapped so it runs on each event.
 <div :click.self.stop="close()">…</div>
 ```
 
+### How listeners are attached
+
+Events that bubble are **delegated**: Volt installs one listener per event
+type on the document and dispatches by walking up from the target. A
+thousand-row table with two handlers per row costs two listeners, not two
+thousand, and adding or removing rows never touches the listener registry.
+
+This is mostly invisible, with three consequences worth knowing:
+
+- **DevTools shows no listener on the element.** The handler is stored on the
+  node under a `$$click`-style property; the listener lives on `document`.
+- **`event.currentTarget`** is set to the element the handler was attached to
+  during the walk, so `.self` and manual comparisons behave as written.
+- **`stopPropagation()` works**, including from a `.stop` modifier — it halts
+  the walk as well as native bubbling.
+
+Delegation is skipped, and a real listener attached, when:
+
+- the event does not bubble — `focus`, `blur`, media and animation events
+- you use `.capture`, `.once` or `.passive`, which need real listener options
+
+You never choose between them; the compiler picks based on the event name and
+modifiers.
+
 ### Custom and component events
 
 `:on-*` forces an event listener for names Volt does not recognise:
