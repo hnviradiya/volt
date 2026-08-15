@@ -15,6 +15,11 @@ export default defineConfig({
   build: {
     target: 'esnext',
     minify: 'terser',
+    terserOptions: {
+      compress: { passes: 3, unsafe_arrows: true, unsafe_methods: true, booleans_as_integers: true },
+      mangle: { toplevel: true },
+      format: { comments: false },
+    },
     outDir: resolve(import.meta.dirname, 'dist'),
     emptyOutDir: true,
     rollupOptions: {

@@ -289,12 +289,16 @@ function resolveComponent(parentCtx: unknown, tag: string): ComponentType<unknow
   // `imports` — the class binding does not exist yet when its own decorator
   // runs — and a tree or menu rendering itself is ordinary enough that it
   // should not need a workaround.
-  if (resolved.config.selector === tag || parentClass.name === tag) return parentClass;
+  //
+  // Matching is on the selector alone. A class name would be a second way to
+  // name the same thing, and it does not survive minification: a bundler that
+  // mangles top-level names would silently stop resolving those tags.
+  if (resolved.config.selector === tag) return parentClass;
 
   const imports = (resolved.resolvedImports ??= resolveImports(resolved.config.imports));
   for (const candidate of imports) {
     const candidateConfig = CONFIGS.get(candidate);
-    if (candidateConfig?.config.selector === tag || candidate.name === tag) return candidate;
+    if (candidateConfig?.config.selector === tag) return candidate;
   }
 
   return null;
