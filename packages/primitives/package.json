@@ -1,0 +1,31 @@
+{
+  "name": "@voltjs/primitives",
+  "version": "0.1.0",
+  "description": "Headless, accessible component behaviour for Volt. No styles.",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "vite build && tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@voltjs/core": "workspace:*"
+  },
+  "keywords": ["volt", "headless", "accessibility", "components"],
+  "engines": {
+    "node": ">=22"
+  }
+}

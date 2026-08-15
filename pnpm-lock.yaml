@@ -82,7 +82,31 @@ importers:
         specifier: workspace:*
         version: link:../reactivity
 
+  packages/editor:
+    dependencies:
+      '@voltjs/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/grid:
+    dependencies:
+      '@voltjs/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/primitives:
+    dependencies:
+      '@voltjs/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/reactivity: {}
+
+  packages/ui:
+    dependencies:
+      '@voltjs/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/vite-plugin:
     dependencies:
