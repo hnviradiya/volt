@@ -577,13 +577,54 @@ class Generator {
       const hasTextDirective = node.directives.some(
         (d) => d.kind === 'text' || d.kind === 'html',
       );
-      if (!hasTextDirective && !this.tryTextOnlyChildren(node, block, selfPath, ctx)) {
+      const handled =
+        !hasTextDirective &&
+        (this.tryTextOnlyChildren(node, block, selfPath, ctx) ||
+          this.trySingleDynamicChild(node, block, selfPath, ctx));
+
+      if (!handled && !hasTextDirective) {
         block.enter(index);
         this.buildChildren(node.children, block, ctx);
         block.exit();
       }
       block.html.push(`</${tag}>`);
     }
+  }
+
+  /**
+   * An element whose only child is dynamic needs no marker.
+   *
+   * The binding owns the element's entire content, so it can insert without an
+   * anchor — which keeps a stray `<!---->` out of the DOM for the very common
+   * `<ul>` wrapping a single `:for`, or a `<div>` wrapping a single `:if`.
+   */
+  private trySingleDynamicChild(
+    node: ElementNode,
+    block: Block,
+    selfPath: number[],
+    ctx: PrintContext,
+  ): boolean {
+    const children = node.children.filter(
+      (c) => c.type !== 'comment' && !(c.type === 'text' && !c.content.trim()),
+    );
+    if (children.length !== 1) return false;
+
+    const only = children[0]!;
+    const isDynamic =
+      only.type === 'slot-outlet' ||
+      (only.type === 'element' &&
+        (only.isComponent ||
+          only.isTemplate ||
+          findDirective(only, 'if') !== undefined ||
+          findDirective(only, 'for') !== undefined));
+    if (!isDynamic) return false;
+
+    const accessor = this.genChildrenExpression([only], ctx);
+    this.stats.effects++;
+    block.effects.push((resolve) => [
+      `${this.rt}.insert(${resolve(selfPath)}, ${accessor});`,
+    ]);
+    return true;
   }
 
   /**
@@ -905,7 +946,20 @@ class Generator {
    */
   private genFor(node: ElementNode, ctx: PrintContext): string {
     const dir = findDirective(node, 'for')!;
-    const parsed = parseForExpression(dir.exp!);
+
+    let parsed;
+    try {
+      parsed = parseForExpression(dir.exp!);
+    } catch (err) {
+      // The expression parser cannot know what it was parsing; say so here.
+      this.error(
+        `\`:for="${dir.exp}"\` is not a loop.\n` +
+          '  It reads as `:for="item in items()"`, optionally with an index:\n' +
+          '  `:for="(item, i) in items()"`.\n' +
+          `  ${(err as Error).message}`,
+        dir,
+      );
+    }
     const keyDir = findDirective(node, 'key');
 
     // `:key` is mandatory. Neither possible default is safe — keying by
@@ -1269,8 +1323,18 @@ function toDisplayString(value: unknown): string {
   return String(value);
 }
 
+/**
+ * Escape text for embedding in the cloned markup.
+ *
+ * A bare `&` must become `&amp;`, but an `&` that already begins an entity
+ * must not — escaping it would double-encode, so `&amp;` in a template would
+ * render as the literal text "&amp;" instead of "&".
+ */
 function escapeHtmlText(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return text
+    .replaceAll(/&(?![a-zA-Z][a-zA-Z0-9]*;|#\d+;|#[xX][0-9a-fA-F]+;)/g, '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }
 
 function escapeHtmlAttr(value: string): string {
