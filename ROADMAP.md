@@ -1,5 +1,38 @@
 # Roadmap
 
+## Scope
+
+**V1** is a complete, accessible, production-usable component library on a
+framework that is fast and small. **V2** is the specialist surfaces — each of
+which is a product in its own right, and none of which an application needs
+before the ordinary components exist.
+
+Deferred to V2, deliberately and not for lack of interest:
+
+| deferred | why it waits |
+| --- | --- |
+| Charts and gauges | ~70 series types plus axes, legends, interaction and accessibility. Its own package and its own timeline. |
+| Spreadsheet and formula engine | A formula parser, evaluator, dependency graph and recalculation order — a product, not a component. |
+| Scheduler / event calendar | Recurrence, timezones, overlap layout and drag-resize are each their own problem. |
+| Gantt / project timeline | Dependency graphs and critical-path layout. |
+| Kanban board | Once drag-and-drop exists in V1, this becomes ordinary composition. |
+| File manager | |
+| PDF viewer and annotator | Needs a PDF rendering engine. |
+| Maps and geospatial | Needs a tile and projection engine. |
+| Code editor | Needs its own text engine, distinct from the rich text editor's. |
+| Diagram / node canvas | |
+
+V1 keeps everything an ordinary application needs: overlays, forms,
+navigation, data display, feedback, layout, the application shell, the data
+grid, the rich text editor, chat, and the cross-cutting systems below.
+
+The two largest remaining V1 items are the **data grid** and the **rich text
+editor**. Both are still large — the editor especially, since the decision was
+to write its engine rather than bind ProseMirror or Lexical. They are
+comparable in scale to some of what has just been deferred, and worth
+revisiting if V1 needs to land sooner.
+
+
 Two tracks. The framework has to be finished enough to build on before the
 component library starts, and the component library is what the framework is
 ultimately for.
@@ -191,9 +224,10 @@ and built in batches rather than one at a time.
 
 ## Flagship components
 
-Three of the components on that list are not components in the usual sense —
-they are products, and each needs its own package, timeline and decisions.
-Naming their real feature surface here so it is not discovered later.
+Not components in the usual sense — products, each needing its own package,
+timeline and decisions. The grid, the editor and the date components are V1;
+everything under "Scope" above is V2, with its feature surface recorded here
+so it is not rediscovered later.
 
 ### Data grid — the AG Grid bar
 
