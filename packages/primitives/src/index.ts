@@ -12,3 +12,14 @@
  */
 
 export { createPresence, type Presence, type PresenceState } from './presence.js';
+export {
+  createDismiss,
+  dismissStackSize,
+  type DismissOptions,
+  type DismissReason,
+} from './dismiss.js';
+export {
+  createFocusScope,
+  focusableWithin,
+  type FocusScopeOptions,
+} from './focus-scope.js';
