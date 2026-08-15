@@ -85,6 +85,8 @@ export interface CompileStats {
   delegatedEvents: number;
   hoistedHandlers: number;
   staticNodes: number;
+  /** `:class` object keys compiled to independent per-class toggles. */
+  classToggles: number;
 }
 
 interface Resolver {
@@ -163,6 +165,7 @@ class Generator {
     delegatedEvents: 0,
     hoistedHandlers: 0,
     staticNodes: 0,
+    classToggles: 0,
   };
 
   constructor(options: CodegenOptions) {
@@ -724,6 +727,15 @@ class Generator {
       }
 
       case 'class': {
+        const toggles = this.genClassToggles(dir.exp!, ctx);
+        if (toggles) {
+          for (const [name, accessor] of toggles) {
+            push((el) => [
+              `${this.rt}.bindClassToggle(${el}, ${JSON.stringify(name)}, ${accessor});`,
+            ]);
+          }
+          return;
+        }
         const accessor = this.genAccessor(dir.exp!, ctx);
         push((el) => [`${this.rt}.bindClass(${el}, ${accessor});`]);
         return;
@@ -899,6 +911,54 @@ class Generator {
       return JSON.stringify(toDisplayString(evaluateStatic(parsed)));
     }
     return this.thunk(printExpression(parsed, ctx, 1));
+  }
+
+  /**
+   * Split `:class="{ a: x, b: y }"` into one toggle per class.
+   *
+   * The general binding has to allocate the object, normalise it to a list,
+   * and ask the element what it already has. When the keys are written
+   * literally — nearly always — each class is really an independent boolean,
+   * and compiling it that way means an update compares a boolean and usually
+   * touches nothing.
+   *
+   * Returns null for any shape where the set of class names is not known
+   * here: a string, an array, a spread, or a computed key. Those keep the
+   * general binding, which stays correct for everything.
+   */
+  private genClassToggles(exp: string, ctx: PrintContext): [string, string][] | null {
+    let parsed;
+    try {
+      parsed = parseExpression(exp);
+    } catch {
+      return null;
+    }
+    if (parsed.type !== 'Object' || parsed.properties.length === 0) return null;
+
+    const toggles: [string, string][] = [];
+    for (const prop of parsed.properties) {
+      if (prop.type !== 'Property' || prop.computed) return null;
+
+      const key = prop.key;
+      let name: string;
+      if (key.type === 'Identifier') name = key.name;
+      else if (key.type === 'Literal' && typeof key.value === 'string') name = key.value;
+      else return null;
+
+      // A name with whitespace would be several classes, which `classList`
+      // cannot toggle as one token.
+      if (name === '' || /\s/.test(name)) return null;
+
+      toggles.push([name, this.thunk(printExpression(prop.value, ctx, 1))]);
+    }
+
+    // Two properties writing the same class would race, and which one wins
+    // would depend on effect ordering rather than on the object's semantics.
+    const names = new Set(toggles.map(([name]) => name));
+    if (names.size !== toggles.length) return null;
+
+    this.stats.classToggles += toggles.length;
+    return toggles;
   }
 
   private genAccessor(exp: string, ctx: PrintContext): string {

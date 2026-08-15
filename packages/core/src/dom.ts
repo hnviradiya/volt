@@ -663,6 +663,34 @@ function setAttribute(el: Element, name: string, value: unknown): void {
   else el.setAttribute(name, value === true ? '' : String(value));
 }
 
+/**
+ * Toggle a single class from a boolean.
+ *
+ * What `:class="{ danger: expr }"` compiles to when every key is written
+ * literally, which is the overwhelmingly common shape. The general binding has
+ * to allocate an object, normalise it to an array, and ask the element which
+ * classes it already has; this compares one boolean and touches the DOM only
+ * when the answer changes. In a list where one shared signal drives a class on
+ * every row, that is the difference between every row doing DOM work on every
+ * update and only the two rows that actually changed doing any.
+ */
+export function bindClassToggle(
+  el: Element,
+  name: string,
+  accessor: MaybeAccessor<unknown>,
+): void {
+  // Undefined rather than false, so the first run always writes — the class
+  // may be present in the template's own markup.
+  let applied: boolean | undefined;
+
+  bind(accessor, (value) => {
+    const next = Boolean(value);
+    if (next === applied) return;
+    applied = next;
+    el.classList.toggle(name, next);
+  });
+}
+
 export function bindClass(el: Element, accessor: MaybeAccessor<unknown>): void {
   // Only the classes this binding added are ever removed, so classes written
   // literally in the template survive every update.

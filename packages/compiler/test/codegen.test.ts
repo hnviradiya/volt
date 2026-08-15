@@ -61,3 +61,38 @@ describe('generated code shape', () => {
     expect(code).not.toMatch(/_ctx\.item\b/);
   });
 });
+
+describe(':class object literals compile to per-class toggles', () => {
+  it('splits static keys into independent toggles', () => {
+    const code = gen(`<div :class="{ danger: sel.get() === id, bold: on.get() }"></div>`);
+    expect(code).toContain('_rt.bindClassToggle(_el1, "danger", () => (_ctx.sel.get() === _ctx.id))');
+    expect(code).toContain('_rt.bindClassToggle(_el1, "bold", () => (_ctx.on.get()))');
+    // No object is built, so nothing has to be normalised at runtime.
+    expect(code).not.toContain('bindClass(');
+  });
+
+  it('accepts string-literal keys, including ones needing quoting', () => {
+    const code = gen(`<div :class="{ 'is-open': open.get() }"></div>`);
+    expect(code).toContain('_rt.bindClassToggle(_el1, "is-open", () => (_ctx.open.get()))');
+  });
+
+  it('counts the split in compile stats', () => {
+    const { stats } = compile(`<div :class="{ a: x.get(), b: y.get() }"></div>`);
+    expect(stats.classToggles).toBe(2);
+  });
+
+  for (const [why, expression] of [
+    ['a plain string', `cls.get()`],
+    ['an array', `[a.get(), b.get()]`],
+    ['a spread', `{ ...base.get(), a: x.get() }`],
+    ['a computed key', `{ [name.get()]: true }`],
+    ['a key holding two classes', `{ 'a b': x.get() }`],
+    ['duplicate keys', `{ a: x.get(), a: y.get() }`],
+  ] as const) {
+    it(`keeps the general binding for ${why}`, () => {
+      const code = gen(`<div :class="${expression}"></div>`);
+      expect(code).toContain('_rt.bindClass(');
+      expect(code).not.toContain('bindClassToggle');
+    });
+  }
+});

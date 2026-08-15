@@ -693,3 +693,92 @@ describe('component resolution', () => {
     expect(() => render(Typo)).toThrow(/Unknown component <v-buton> used by Typo/);
   });
 });
+
+describe(':class object bindings', () => {
+  it('toggles a class without disturbing the template\'s own classes', () => {
+    @Component({
+      selector: 'v-cls',
+      render: compileTemplate(`<div class="base pad" :class="{ danger: on.get() }"></div>`),
+    })
+    class Cls {
+      on = new Signal.State(false);
+    }
+
+    const handle = mount(Cls, host);
+    const el = host.querySelector('div')!;
+    expect([...el.classList].sort()).toEqual(['base', 'pad']);
+
+    (handle.instance as Cls).on.set(true);
+    flushSync();
+    expect([...el.classList].sort()).toEqual(['base', 'danger', 'pad']);
+
+    (handle.instance as Cls).on.set(false);
+    flushSync();
+    expect([...el.classList].sort()).toEqual(['base', 'pad']);
+  });
+
+  it('keeps several classes independent', () => {
+    @Component({
+      selector: 'v-multi',
+      render: compileTemplate(`<div :class="{ a: x.get(), b: y.get() }"></div>`),
+    })
+    class Multi {
+      x = new Signal.State(true);
+      y = new Signal.State(false);
+    }
+
+    const handle = mount(Multi, host);
+    const el = host.querySelector('div')!;
+    expect([...el.classList].sort()).toEqual(['a']);
+
+    (handle.instance as Multi).y.set(true);
+    flushSync();
+    expect([...el.classList].sort()).toEqual(['a', 'b']);
+
+    (handle.instance as Multi).x.set(false);
+    flushSync();
+    expect([...el.classList].sort()).toEqual(['b']);
+  });
+
+  it('treats any truthy value as present, matching the object form', () => {
+    @Component({
+      selector: 'v-truthy',
+      render: compileTemplate(`<div :class="{ on: v.get() }"></div>`),
+    })
+    class Truthy {
+      v = new Signal.State<unknown>(0);
+    }
+
+    const handle = mount(Truthy, host);
+    const el = host.querySelector('div')!;
+    const inst = handle.instance as Truthy;
+
+    expect(el.classList.contains('on')).toBe(false);
+    for (const truthy of ['x', 1, {}, []]) {
+      inst.v.set(truthy);
+      flushSync();
+      expect(el.classList.contains('on'), `${JSON.stringify(truthy)}`).toBe(true);
+      inst.v.set(null);
+      flushSync();
+      expect(el.classList.contains('on')).toBe(false);
+    }
+  });
+
+  it('still supports string and array forms', () => {
+    @Component({
+      selector: 'v-str',
+      render: compileTemplate(`<div :class="cls.get()"></div>`),
+    })
+    class Str {
+      cls = new Signal.State('one two');
+    }
+
+    const handle = mount(Str, host);
+    const el = host.querySelector('div')!;
+    expect([...el.classList].sort()).toEqual(['one', 'two']);
+
+    (handle.instance as Str).cls.set('two three');
+    flushSync();
+    expect([...el.classList].sort()).toEqual(['three', 'two']);
+  });
+});
