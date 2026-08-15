@@ -11,4 +11,4 @@
  * alone, because that is the part which cannot be retrofitted.
  */
 
-export const VERSION = '0.1.0';
+export { createPresence, type Presence, type PresenceState } from './presence.js';

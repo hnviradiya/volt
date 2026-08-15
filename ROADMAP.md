@@ -47,8 +47,13 @@ leaning it found nothing: removing a per-write allocation made writes slower
       contexts. Context and disposal follow the reactive scope, so portalled
       content still sees its providers and is still torn down with the
       component that declared it.
-- [ ] **Transitions** — enter/leave. Requires coordinating node removal with
-      animation completion; the runtime removes immediately today.
+- [x] **Transitions** — done, and *not* in the runtime. Coordinating removal
+      with animation completion turned out to need no framework support at
+      all: `:if` already removes a node when its condition turns false, so
+      `createPresence` in @voltjs/primitives simply holds that condition true
+      until the element reports its exit animation finished. Keeping this out
+      of the core is the better outcome — CSS stays the source of truth for
+      duration, and a library that never animates pays nothing.
 - [ ] **`:show`** — removed as redundant with `:class`. A component library
       wants DOM kept alive while hidden, to preserve state and allow CSS to
       animate. Worth reopening as a decision, not reintroducing silently.
@@ -127,7 +132,25 @@ stepper, navigation menu, scroll spy
 **Feedback** — alert, progress, circular progress, skeleton, spinner, empty
 state
 
-**Layout** — resizable, scroll area, separator, aspect ratio, portal *(done)*
+**Layout** — resizable, scroll area, separator, aspect ratio, portal *(done)*,
+box, flex, stack, grid, container, center, spacer, masonry, sticky, affix
+
+**Application shell** — what a production application needs beyond
+components, and the part most libraries leave to the consumer to reinvent:
+
+- app shell — header, sidebar, content, footer, with the content region
+  scrolling independently
+- sidebar — collapsible, mini-rail, and a responsive drawer below a breakpoint
+- app bar, toolbar, command palette (`Cmd`/`Ctrl`+`K`)
+- theme provider — light, dark and system colour modes, density scale
+- breakpoint utilities — a reactive breakpoint, and show/hide by breakpoint
+- **z-index layering** — a managed stack for nested overlays. Every library
+  that skips this leaves applications hard-coding magic numbers, and a dialog
+  opened from a popover is where it shows.
+- skip links and landmark regions, so keyboard and screen-reader users can
+  actually navigate an application shell
+- error and loading boundaries with real fallback UI
+- page templates — dashboard, list-detail, settings, wizard, auth, blank
 
 **Display** — avatar, badge, card, chip, image, kbd, code, typography
 

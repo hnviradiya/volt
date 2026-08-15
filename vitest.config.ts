@@ -52,6 +52,7 @@ export default defineConfig({
     alias: {
       '@voltjs/reactivity': resolve(root, 'packages/reactivity/src/index.ts'),
       '@voltjs/compiler': resolve(root, 'packages/compiler/src/index.ts'),
+      '@voltjs/primitives': resolve(root, 'packages/primitives/src/index.ts'),
       // Longest first — '@voltjs/core' would otherwise shadow its subpaths.
       '@voltjs/core/runtime': resolve(root, 'packages/core/src/runtime.ts'),
       '@voltjs/core/jit': resolve(root, 'packages/core/src/jit.ts'),
