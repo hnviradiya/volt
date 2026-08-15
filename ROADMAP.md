@@ -42,7 +42,7 @@ leaning it found nothing: removing a per-write allocation made writes slower
 
 ### Runtime gaps blocking the component library
 
-- [ ] **Portal** — hard blocker. Dialog, dropdown, tooltip, popover, select,
+- [x] **Portal** — done. `:portal`, with context and disposal following the reactive scope. Dialog, dropdown, tooltip, popover, select,
       combobox and toast all have to escape `overflow: hidden` and stacking
       contexts. Nothing overlay-shaped can be built without it.
 - [ ] **Transitions** — enter/leave. Requires coordinating node removal with
@@ -90,24 +90,76 @@ Both models, each where it fits:
 | Mantine | DX, and which components people actually reach for |
 | Material, Vuetify | mostly what to avoid |
 
-### v1 scope
+### Shared behaviours
 
-The six hard components, because they exercise every primitive. Breadth is
-mechanical once these are right.
+Roughly fifty components are assembled from about eight behaviours. These are
+the real work; the components are mostly composition once these exist and are
+correct.
 
-- [ ] Dialog — portal, focus trap, escape, scroll lock
-- [ ] Dropdown Menu — portal, positioning, roving focus, typeahead
-- [ ] Select / Combobox — the above plus form integration
-- [ ] Tooltip — portal, positioning, delay, pointer and keyboard
-- [ ] Tabs — roving tabindex, ARIA
-- [ ] Accordion — transitions, height animation
+| behaviour | used by |
+| --- | --- |
+| Presence — mount/unmount coordinated with a transition | every overlay, collapsible, toast |
+| Dismissal — outside pointer, escape, focus leaving | dialog, popover, menu, tooltip, combobox |
+| Focus scope — trap, restore, sentinels | dialog, drawer, menu, popover |
+| Roving focus — arrow keys over a collection, typeahead | menu, tabs, radio group, toolbar, tree |
+| Collection — registration and DOM-order traversal of parts | menu, select, combobox, tabs, accordion |
+| Anchoring — position against a trigger, flip, collide | popover, tooltip, menu, select, combobox |
+| Form field — label, description, error wiring, native submission | every input |
+| Virtualization — windowed rendering of long collections | select, combobox, table, tree, list |
 
-The bar is WAI-ARIA Authoring Practices conformance, with automated `axe`
-checks in CI. Accessibility is where nearly every component library quietly
-fails, and it is the part that cannot be retrofitted.
+### Component inventory
 
-### Open question
+**Overlays** — dialog, alert dialog, drawer, popover, tooltip, hover card,
+dropdown menu, context menu, menubar, toast
 
-Everyone ships Floating UI (~5 kB) for anchor positioning. Native CSS anchor
-positioning may remove that dependency entirely, which fits this project's
-no-legacy stance. Verify current browser support before committing.
+**Forms** — button, input, textarea, number input, password input, checkbox,
+checkbox group, radio group, switch, select, multi-select, combobox, slider,
+range slider, date picker, date range picker, time picker, color picker, file
+upload, pin/OTP input, tags input, rating, form field, fieldset
+
+**Navigation** — tabs, accordion, collapsible, breadcrumb, pagination,
+stepper, navigation menu, scroll spy
+
+**Data** — table, data table, tree, virtual list, calendar, carousel, timeline
+
+**Feedback** — alert, progress, circular progress, skeleton, spinner, empty
+state
+
+**Layout** — resizable, scroll area, separator, aspect ratio, portal *(done)*
+
+**Display** — avatar, badge, card, chip, image, kbd, code, typography
+
+**Utility** — visually hidden, focus scope, presence, toggle, toggle group,
+slot
+
+### What "full feature support" means
+
+Per component, and enforced by tests rather than asserted in a README:
+
+- **Controlled and uncontrolled.** Every stateful component works both with an
+  external signal and on its own.
+- **WAI-ARIA Authoring Practices conformance** — roles, states, and the full
+  keyboard interaction map, not just `role=`.
+- **Composable parts.** `Root` / `Trigger` / `Content`, so consumers can
+  restructure markup without forking the behaviour.
+- **RTL.** Arrow-key direction and anchoring both flip.
+- **Native form integration.** Inputs submit in a plain `<form>` and
+  participate in constraint validation.
+- **Theming via CSS custom properties**, never inline styles that cannot be
+  overridden.
+- **Virtualization** wherever a collection can be long.
+- **SSR-safe** once SSR exists — no DOM access during construction.
+
+### Sequencing
+
+The six that force every shared behaviour into existence, in order:
+
+- [ ] **Dialog** — presence, focus scope, dismissal
+- [ ] **Dropdown Menu** — collection, roving focus, anchoring, typeahead
+- [ ] **Combobox** — all of the above, plus form field and virtualization
+- [ ] **Tooltip** — anchoring under pointer *and* keyboard, delay grouping
+- [ ] **Tabs** — roving focus, automatic vs manual activation
+- [ ] **Accordion** — presence with height animation
+
+After those, the remaining components are grouped by the behaviour they reuse
+and built in batches rather than one at a time.
