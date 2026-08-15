@@ -165,3 +165,68 @@ The six that force every shared behaviour into existence, in order:
 
 After those, the remaining components are grouped by the behaviour they reuse
 and built in batches rather than one at a time.
+
+## Flagship components
+
+Three of the components on that list are not components in the usual sense —
+they are products, and each needs its own package, timeline and decisions.
+Naming their real feature surface here so it is not discovered later.
+
+### Data grid — the AG Grid bar
+
+The single largest thing on this roadmap. Its own package, `@voltjs/grid`.
+
+- **Rendering** — row and column virtualization, variable row height, pinned
+  top/bottom rows, pinned left/right columns, auto-height, RTL
+- **Columns** — resize, reorder, hide, pin, auto-size, column groups,
+  multi-row headers
+- **Data** — multi-column sort with custom comparators, per-type filters
+  (text, number, date, set), quick filter, external filter, row grouping with
+  aggregation, pivoting, tree data, master/detail
+- **Editing** — cell editors per type, full-row editing, validation, undo and
+  redo, fill handle, copy and paste against the system clipboard
+- **Selection** — cell, range, row, header-driven; keyboard extension
+- **Data sources** — client-side, infinite scroll, server-side with grouping
+  and sorting pushed to the server
+- **Interaction** — full keyboard navigation across cells, accessible grid
+  semantics, drag and drop of rows and columns
+- **Export** — CSV and Excel, with styling
+- **State** — save and restore column, sort, filter and group state
+
+Volt's fine-grained reactivity should suit this unusually well: a cell can own
+its own binding, so a value change writes one text node without the grid
+re-rendering anything around it.
+
+### Rich text editor
+
+Robustness here means schema-constrained documents, collaborative editing,
+input-method support for non-Latin scripts, undo grouping, paste sanitisation,
+and tables *inside* content. That is a specialist engine, not a component.
+
+Two ways to get it, and this is a decision rather than a detail:
+
+- **Bind a proven engine** — ProseMirror or Lexical, both framework-agnostic.
+  Volt supplies the view layer and the UI. This is how Tiptap, and every
+  serious editor in every framework, is actually built.
+- **Write the engine** — years of work, and the failure modes (IME, selection
+  across browsers, collaborative conflict resolution) are exactly the ones
+  that are invisible until they are in production.
+
+### Date and time
+
+- Range, multi-month, presets, min/max, disabled and highlighted dates
+- Locale-aware month and weekday names, configurable first day of week
+- Time selection, timezone handling
+- Keyboard grid navigation per APG, screen-reader announcements
+- Masked text entry alongside the calendar
+
+Dates need a library decision. **`Temporal`** is the modern answer and fits the
+no-legacy stance — real timezone and calendar support, no `Date` foot-guns, no
+`date-fns`/`luxon` dependency.
+
+### Splitter
+
+- Horizontal and vertical, arbitrarily nested
+- Min, max and collapsible panels, collapse to a handle
+- Keyboard resize with arrow keys, `separator` role per APG
+- Persisted layout, percentage and pixel constraints
