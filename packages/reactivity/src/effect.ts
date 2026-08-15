@@ -24,7 +24,6 @@ import {
   disposeComputed,
   markEffectComputed,
   untrack,
-  type SignalOptions,
 } from './graph.js';
 
 export type Dispose = () => void;
@@ -335,11 +334,12 @@ function createEffect(fn: EffectFn, watcher: WatcherNode, immediate: boolean): D
   let cleanup: CleanupFn | null = null;
   let disposed = false;
 
-  const options: SignalOptions<void> = {
-    // An effect must re-run on every notification, never dedupe on its result.
-    equals: () => false,
-  };
-
+  // No options object. An effect must re-run on every notification rather than
+  // dedupe on its result, which used to be said with `equals: () => false` —
+  // three allocations per effect (the object, that arrow, and the wrapper the
+  // constructor builds around it) for a comparison that is never reached,
+  // because a node marked as an effect skips the equality path entirely. Row
+  // creation is dominated by effect construction, so this is not incidental.
   const computed = new ComputedSignal<void>(function effectBody() {
     // Each run starts from a clean slate: children disposed, cleanups run.
     clearScope(scope);
@@ -354,7 +354,7 @@ function createEffect(fn: EffectFn, watcher: WatcherNode, immediate: boolean): D
     }
     const result = runInScope(scope, fn);
     if (typeof result === 'function') cleanup = result;
-  }, options);
+  });
 
   markEffectComputed(computed as ComputedSignal<unknown>);
 
