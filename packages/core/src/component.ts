@@ -86,8 +86,15 @@ export interface ComponentConfig {
   /** Component-scoped CSS, injected once per component. */
   styles?: string | string[];
 
-  /** Components this template is allowed to reference. */
-  imports?: ComponentType<unknown>[];
+  /**
+   * Components this template is allowed to reference.
+   *
+   * A function form defers evaluation, which is what mutually recursive
+   * components need: `imports: () => [Other]` where a plain array would read
+   * `Other` before its class binding exists. A component never needs to list
+   * itself — self-recursion resolves automatically.
+   */
+  imports?: ComponentType<unknown>[] | (() => ComponentType<unknown>[]);
 }
 
 export interface PropOptions {
@@ -106,6 +113,8 @@ interface ResolvedConfig {
   config: ComponentConfig;
   propsByAlias: Map<string, PropDef>;
   stylesInjected: boolean;
+  /** Lazily resolved once, since a function form must not run per instance. */
+  resolvedImports?: ComponentType<unknown>[];
 }
 
 /**
@@ -271,15 +280,31 @@ export function isComponent(value: unknown): value is ComponentType<unknown> {
 function resolveComponent(parentCtx: unknown, tag: string): ComponentType<unknown> | null {
   const parentClass = (parentCtx as { constructor?: ComponentType<unknown> } | null)
     ?.constructor;
-  const imports = parentClass ? CONFIGS.get(parentClass)?.config.imports : undefined;
-  if (!imports) return null;
+  if (!parentClass) return null;
 
+  const resolved = CONFIGS.get(parentClass);
+  if (!resolved) return null;
+
+  // A component always resolves itself. Recursion cannot be expressed through
+  // `imports` — the class binding does not exist yet when its own decorator
+  // runs — and a tree or menu rendering itself is ordinary enough that it
+  // should not need a workaround.
+  if (resolved.config.selector === tag || parentClass.name === tag) return parentClass;
+
+  const imports = (resolved.resolvedImports ??= resolveImports(resolved.config.imports));
   for (const candidate of imports) {
-    const resolved = CONFIGS.get(candidate);
-    if (resolved?.config.selector === tag || candidate.name === tag) return candidate;
+    const candidateConfig = CONFIGS.get(candidate);
+    if (candidateConfig?.config.selector === tag || candidate.name === tag) return candidate;
   }
 
   return null;
+}
+
+function resolveImports(
+  imports: ComponentConfig['imports'],
+): ComponentType<unknown>[] {
+  if (!imports) return [];
+  return typeof imports === 'function' ? imports() : imports;
 }
 
 function getRenderFn(component: ComponentType<unknown>, resolved: ResolvedConfig): RenderFn {

@@ -108,11 +108,14 @@ function insertExpression(
 
   const type = typeof resolved;
 
-  if (resolved === null || resolved === undefined || type === 'boolean') {
+  // Only null and undefined render as nothing. Everything else stringifies,
+  // matching `toDisplayString` — the text-only compile path uses that, and an
+  // optimisation must not change what a template displays.
+  if (resolved === null || resolved === undefined) {
     return replaceContent(parent, previous, marker, null);
   }
 
-  if (type === 'string' || type === 'number' || type === 'bigint') {
+  if (type === 'string' || type === 'number' || type === 'bigint' || type === 'boolean') {
     const text = String(resolved);
     // Reuse the existing text node so a changing value never re-creates DOM.
     if (previous instanceof Text) {
@@ -178,7 +181,7 @@ function flattenToNodes(value: unknown[], out: Node[] = []): Node[] {
   for (const entry of value) {
     let item = entry;
     while (typeof item === 'function') item = (item as Accessor<unknown>)();
-    if (item === null || item === undefined || typeof item === 'boolean') continue;
+    if (item === null || item === undefined) continue;
     if (item instanceof Node) out.push(item);
     else if (Array.isArray(item)) flattenToNodes(item, out);
     else out.push(document.createTextNode(String(item)));
@@ -470,7 +473,7 @@ function materializeBlock(value: unknown): MountedBlock {
     };
   }
 
-  if (value === null || value === undefined || typeof value === 'boolean') {
+  if (value === null || value === undefined) {
     const empty = [document.createTextNode('') as Node];
     return { nodes: () => empty };
   }

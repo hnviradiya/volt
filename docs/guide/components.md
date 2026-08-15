@@ -216,7 +216,40 @@ There is no global registry, so a tag either appears in the using component's
 source and lets a bundler see it.
 
 A hyphenated tag that matches nothing in `imports` is treated as a real custom
-element, so web components work without any registration at all.
+element **if it has been defined** with `customElements.define`. Otherwise it
+is an error naming the tag and the component that used it — Volt selectors are
+hyphenated too, so a forgotten import must not be mistaken for a web
+component and silently render nothing.
+
+### Recursion
+
+A component always resolves its own selector, so a tree, menu, or comment
+thread can render itself with no import:
+
+```html
+<!-- tree-node.html -->
+<li>
+  <span>{{ node.label }}</span>
+  <ul>
+    <v-tree-node :for="child in node.children" :key="child.id" :node="child"></v-tree-node>
+  </ul>
+</li>
+```
+
+It could not be expressed through `imports` in any case: the class binding
+does not exist yet when its own decorator runs.
+
+For **mutual** recursion, where two components reference each other, give
+`imports` a function so the reference is read later:
+
+```ts
+@Component({
+  selector: 'v-branch',
+  templateUrl: './branch.html',
+  imports: () => [Leaf],
+})
+export class Branch {}
+```
 
 ## Sharing state
 
