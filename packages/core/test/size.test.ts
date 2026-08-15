@@ -25,7 +25,10 @@ function gzipped(relative: string): number | null {
  * The compiler is excluded — it runs at build time and never ships.
  */
 const BUDGETS: Record<string, number> = {
-  'packages/reactivity/dist/index.js': 6_500,
+  // Raised from 6,500 when Watcher.unwatch stopped searching and splicing its
+  // source list. The index bookkeeping costs ~280 B gzipped and took tearing
+  // down 8,000 effects from 1,848 ms to 14.7 ms — it was quadratic.
+  'packages/reactivity/dist/index.js': 6_700,
   'packages/core/dist/runtime.js': 1_100,
   'packages/core/dist/index.js': 400,
 };

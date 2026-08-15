@@ -419,7 +419,17 @@ export class WatcherNode {
   /** @internal */ sourceSlots: number[] = [];
   /** @internal */ liveCount = 1;
   /** @internal */ notified = false;
-  /** @internal */ watching = new Set<Producer>();
+  /**
+   * Watched producers, mapped to their index in `sources`.
+   *
+   * A set would do for membership, but `unwatch` also has to find the source
+   * to unlink. Searching for it made dropping N watched signals one at a time
+   * quadratic — which is what a keyed list does every time it clears, since
+   * every render effect in the app is watched by one shared watcher.
+   *
+   * @internal
+   */
+  watching = new Map<Producer, number>();
   /** @internal */ pending = new Set<Producer>();
 
   constructor(notify: (this: WatcherNode) => void) {
@@ -435,7 +445,8 @@ export class WatcherNode {
     for (const signal of signals) {
       const producer = signal as Producer;
       if (this.watching.has(producer)) continue;
-      this.watching.add(producer);
+      // `link` appends, so the index it will land at is the current length.
+      this.watching.set(producer, this.sources.length);
       link(producer, this as Consumer);
       incrementLive(producer);
     }
@@ -445,21 +456,30 @@ export class WatcherNode {
   unwatch(...signals: (StateSignal<unknown> | ComputedSignal<unknown>)[]): void {
     for (const signal of signals) {
       const producer = signal as Producer;
-      if (!this.watching.has(producer)) continue;
+      const index = this.watching.get(producer);
+      if (index === undefined) continue;
       this.watching.delete(producer);
       this.pending.delete(producer);
 
-      const index = this.sources.indexOf(producer);
-      if (index !== -1) {
-        unlinkEdge(this as Consumer, index);
-        // Splicing shifts every later source, so their recorded slots move too.
-        this.sources.splice(index, 1);
-        this.sourceSlots.splice(index, 1);
-        for (let i = index; i < this.sources.length; i++) {
-          const later = this.sources[i]!;
-          later.sinkSlots![this.sourceSlots[i]!] = i;
-        }
+      unlinkEdge(this as Consumer, index);
+
+      // Order among sources carries no meaning, so the last one fills the hole
+      // rather than shifting everything after it. It has to be told where it
+      // landed, both here and in the back-reference its producer holds.
+      const last = this.sources.length - 1;
+      if (index < last) {
+        const moved = this.sources[last]!;
+        const movedSlot = this.sourceSlots[last]!;
+        this.sources[index] = moved;
+        this.sourceVersions[index] = this.sourceVersions[last]!;
+        this.sourceSlots[index] = movedSlot;
+        moved.sinkSlots![movedSlot] = index;
+        this.watching.set(moved, index);
       }
+      this.sources.pop();
+      this.sourceVersions.pop();
+      this.sourceSlots.pop();
+
       decrementLive(producer);
     }
   }

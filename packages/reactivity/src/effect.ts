@@ -45,6 +45,14 @@ export interface Scope {
    * the bulk of the cost of clearing a large tree.
    */
   children: Scope[] | null;
+  /**
+   * This scope's index in `parent.children`, or -1 when it has no parent.
+   *
+   * Kept so a scope can detach itself without searching for its own slot. A
+   * keyed list disposes rows one at a time, so a linear search here would make
+   * clearing a list quadratic in its length.
+   */
+  slot: number;
   /** Allocated on first cleanup; most scopes never register one. */
   cleanups: CleanupFn[] | null;
   contexts: Map<symbol, unknown> | null;
@@ -57,11 +65,16 @@ function createScope(parent: Scope | null): Scope {
   const scope: Scope = {
     parent,
     children: null,
+    slot: -1,
     cleanups: null,
     contexts: null,
     disposed: false,
   };
-  if (parent) (parent.children ??= []).push(scope);
+  if (parent) {
+    const siblings = (parent.children ??= []);
+    scope.slot = siblings.length;
+    siblings.push(scope);
+  }
   return scope;
 }
 
@@ -115,15 +128,20 @@ export function disposeScope(scope: Scope, detach = true): void {
 
   if (detach && scope.parent?.children) {
     const siblings = scope.parent.children;
-    const index = siblings.indexOf(scope);
-    if (index !== -1) {
+    const index = scope.slot;
+    if (index >= 0 && siblings[index] === scope) {
       // Order between siblings carries no meaning, so the last one fills the
-      // hole rather than shifting everything after it.
+      // hole rather than shifting everything after it — and it is told where
+      // it landed, so it can still detach itself in constant time.
       const last = siblings.pop()!;
-      if (index < siblings.length) siblings[index] = last;
+      if (index < siblings.length) {
+        siblings[index] = last;
+        last.slot = index;
+      }
     }
   }
 
+  scope.slot = -1;
   scope.contexts = null;
 }
 
