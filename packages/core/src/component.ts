@@ -24,6 +24,7 @@
  */
 
 import {
+  Signal,
   createRoot,
   flushSync,
   getScope,
@@ -506,6 +507,127 @@ function instantiate(
   return dom;
 }
 
+// ---------------------------------------------------------------------------
+// Lazy components
+// ---------------------------------------------------------------------------
+
+export interface LazyOptions {
+  /** Rendered while the chunk is in flight. */
+  fallback?: () => unknown;
+  /**
+   * Rendered if the chunk fails to load, given the error and a way to try
+   * again. Worth supplying: the commonest cause in production is a deploy
+   * that removed the chunk a still-open tab is asking for.
+   */
+  error?: (error: unknown, retry: () => void) => unknown;
+}
+
+interface LazyRecord {
+  loader: () => Promise<unknown>;
+  options: LazyOptions;
+  component: Signal.State<ComponentType<unknown> | null>;
+  failure: Signal.State<unknown>;
+  inFlight: Promise<void> | null;
+}
+
+const LAZY = new WeakMap<ComponentType<unknown>, LazyRecord>();
+
+/**
+ * A component fetched on first use, so it lands in its own chunk.
+ *
+ *   const Chart = lazy('v-chart', () => import('./chart.js'), {
+ *     fallback: () => 'Loading…',
+ *   });
+ *
+ *   @Component({ selector: 'v-page', imports: [Chart], templateUrl: './page.html' })
+ *
+ * The selector is given here rather than read from the component, because a
+ * template mentioning `<v-chart>` has to resolve it before the chunk that
+ * defines it exists. Everything else is unchanged: it goes in `imports` and is
+ * written in a template like any other component.
+ */
+export function lazy<T = unknown>(
+  selector: string,
+  loader: () => Promise<ComponentType<T> | { default: ComponentType<T> }>,
+  options: LazyOptions = {},
+): ComponentType<T> {
+  const placeholder = class LazyComponent {} as unknown as ComponentType<unknown>;
+  defineComponent(placeholder, { selector });
+
+  LAZY.set(placeholder, {
+    loader: loader as () => Promise<unknown>,
+    options,
+    component: new Signal.State<ComponentType<unknown> | null>(null),
+    failure: new Signal.State<unknown>(undefined),
+    inFlight: null,
+  });
+
+  return placeholder as unknown as ComponentType<T>;
+}
+
+/**
+ * Start fetching a lazy component before it is rendered.
+ *
+ * What a router calls on hover or on route match, so the chunk is already
+ * there when the view mounts. Safe to call repeatedly — the load happens once.
+ */
+export function preload(component: ComponentType<unknown>): Promise<void> {
+  const record = LAZY.get(component);
+  return record ? startLoad(record) : Promise.resolve();
+}
+
+function startLoad(record: LazyRecord): Promise<void> {
+  record.inFlight ??= Promise.resolve()
+    .then(record.loader)
+    .then((module) => {
+      // Accept a module namespace or the component itself, so both
+      // `import('./x.js')` and a loader returning the class work.
+      const resolved =
+        module && typeof module === 'object' && 'default' in module
+          ? (module as { default: ComponentType<unknown> }).default
+          : (module as ComponentType<unknown>);
+      record.component.set(resolved);
+    })
+    .catch((error: unknown) => {
+      record.failure.set(error ?? new Error('[volt] lazy component failed to load'));
+    });
+
+  return record.inFlight;
+}
+
+/**
+ * A lazy component renders as an accessor rather than nodes.
+ *
+ * `insert` already treats a function as a reactive source, so the placeholder,
+ * the loaded component and a failure all flow through the same path that any
+ * other changing value would — no separate suspension machinery, and no
+ * compiler support.
+ */
+function createLazyComponent(
+  record: LazyRecord,
+  props: Record<string, unknown> | null,
+  slots: SlotMap | null,
+): unknown {
+  void startLoad(record);
+
+  return () => {
+    const failure = record.failure.get();
+    if (failure !== undefined) {
+      const retry = () => {
+        record.inFlight = null;
+        record.failure.set(undefined);
+        void startLoad(record);
+      };
+      return record.options.error?.(failure, retry) ?? null;
+    }
+
+    const component = record.component.get();
+    if (!component) return record.options.fallback?.() ?? null;
+
+    return instantiate(component, { props, slots });
+  };
+}
+
 /**
  * Called by compiled templates for every component tag.
  *
@@ -521,6 +643,9 @@ export function createComponent(
 ): unknown {
   const component = resolveComponent(parentCtx, tag);
   if (component) {
+    const lazyRecord = LAZY.get(component);
+    if (lazyRecord) return createLazyComponent(lazyRecord, props, slots);
+
     if (__VOLT_DEV__ && events) {
       // Components have no event channel: a parent passes a function in as an
       // ordinary input and the child calls it. Purely an authoring mistake, so
