@@ -23,3 +23,10 @@ export {
   focusableWithin,
   type FocusScopeOptions,
 } from './focus-scope.js';
+export { createId, resetIdCounter } from './id.js';
+export {
+  createDialog,
+  type Dialog,
+  type DialogOptions,
+  type DialogProps,
+} from './dialog.js';
