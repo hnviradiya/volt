@@ -311,7 +311,8 @@ interface Row {
   block: MountedBlock;
   dispose: () => void;
   item: Signal.State<unknown>;
-  index: Signal.State<number>;
+  /** Record a new position, waking the index signal only if one was made. */
+  setIndex(index: number): void;
 }
 
 /**
@@ -385,7 +386,7 @@ export function each(
           rows[i] = row;
           // Refresh in place; the row's DOM stays exactly where it is.
           row.item.set(items[i]);
-          row.index.set(i);
+          row.setIndex(i);
           continue;
         }
 
@@ -417,17 +418,36 @@ function createRow(
   index: number,
 ): Row {
   const itemSignal = new Signal.State<unknown>(item);
-  const indexSignal = new Signal.State(index);
+
+  // The index signal is created only if the row body actually reads `$index`,
+  // which most templates never do. Otherwise every row in every list pays for
+  // a signal at creation and a write on every reconcile that nothing observes.
+  let indexSignal: Signal.State<number> | null = null;
+  let indexValue = index;
+
   let block: MountedBlock = { nodes: () => [] };
 
   // Rows are rooted at the scope that created the list, not at the reconciling
   // effect — otherwise every recompute would dispose the rows we mean to keep.
   const dispose = createRoot((disposeRow) => {
-    block = materializeBlock(rowFn(() => itemSignal.get(), () => indexSignal.get()));
+    block = materializeBlock(
+      rowFn(
+        () => itemSignal.get(),
+        () => (indexSignal ??= new Signal.State(indexValue)).get(),
+      ),
+    );
     return disposeRow;
   }, scope);
 
-  return { block, dispose, item: itemSignal, index: indexSignal };
+  return {
+    block,
+    dispose,
+    item: itemSignal,
+    setIndex(next: number) {
+      indexValue = next;
+      indexSignal?.set(next);
+    },
+  };
 }
 
 /**
