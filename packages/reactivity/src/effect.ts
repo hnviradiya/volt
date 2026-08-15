@@ -37,8 +37,14 @@ export type EffectFn = () => void | CleanupFn;
 
 export interface Scope {
   parent: Scope | null;
-  /** Allocated on first child; most scopes never have one. */
-  children: Set<Scope> | null;
+  /**
+   * Allocated on first child; most scopes never have one.
+   *
+   * An array rather than a set: teardown walks the whole list and discards it,
+   * which needs no membership test, and hashing every scope on the way out is
+   * the bulk of the cost of clearing a large tree.
+   */
+  children: Scope[] | null;
   /** Allocated on first cleanup; most scopes never register one. */
   cleanups: CleanupFn[] | null;
   contexts: Map<symbol, unknown> | null;
@@ -55,7 +61,7 @@ function createScope(parent: Scope | null): Scope {
     contexts: null,
     disposed: false,
   };
-  if (parent) (parent.children ??= new Set()).add(scope);
+  if (parent) (parent.children ??= []).push(scope);
   return scope;
 }
 
@@ -79,10 +85,13 @@ export function runWithScope<T>(scope: Scope | null, fn: () => T): T {
 
 /** Tear down a scope's children and cleanups without disposing the scope. */
 function clearScope(scope: Scope): void {
-  if (scope.children !== null) {
-    // Copied first: disposeScope removes each child from this same set.
-    for (const child of [...scope.children]) disposeScope(child);
-    scope.children.clear();
+  const children = scope.children;
+  if (children !== null) {
+    // Children are told not to detach themselves: the whole list is discarded
+    // straight after, so each one searching for its own slot would make
+    // clearing a large tree quadratic.
+    for (let i = children.length - 1; i >= 0; i--) disposeScope(children[i]!, false);
+    children.length = 0;
   }
 
   const cleanups = scope.cleanups;
@@ -99,11 +108,22 @@ function clearScope(scope: Scope): void {
   }
 }
 
-export function disposeScope(scope: Scope): void {
+export function disposeScope(scope: Scope, detach = true): void {
   if (scope.disposed) return;
   scope.disposed = true;
   clearScope(scope);
-  scope.parent?.children?.delete(scope);
+
+  if (detach && scope.parent?.children) {
+    const siblings = scope.parent.children;
+    const index = siblings.indexOf(scope);
+    if (index !== -1) {
+      // Order between siblings carries no meaning, so the last one fills the
+      // hole rather than shifting everything after it.
+      const last = siblings.pop()!;
+      if (index < siblings.length) siblings[index] = last;
+    }
+  }
+
   scope.contexts = null;
 }
 

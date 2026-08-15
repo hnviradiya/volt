@@ -132,23 +132,65 @@ function track(producer: Producer): void {
   // is counted per edge, so it travels with the link.
   if (index < consumer.sources.length) releaseSourcesFrom(consumer, index);
 
-  (producer.sinks ??= new Set()).add(consumer as Consumer);
-  consumer.sources.push(producer);
-  consumer.sourceVersions.push(producer.version);
+  link(producer, consumer as Consumer);
   if (consumer.liveCount > 0) incrementLive(producer);
   consumer.trackIndex = index + 1;
+}
+
+/**
+ * Record a dependency edge in both directions.
+ *
+ * Each side stores the other's index, which is what makes removal O(1)
+ * without hashing: a set would have to hash the consumer on every unlink, and
+ * teardown unlinks every edge in the tree.
+ */
+function link(producer: Producer, consumer: Consumer): void {
+  const sinkIndex = producer.sinks ? producer.sinks.length : 0;
+  const sourceIndex = consumer.sources.length;
+
+  (producer.sinks ??= []).push(consumer);
+  (producer.sinkSlots ??= []).push(sourceIndex);
+
+  consumer.sources.push(producer);
+  consumer.sourceVersions.push(producer.version);
+  consumer.sourceSlots.push(sinkIndex);
+}
+
+/**
+ * Remove one edge by swapping the last sink into the hole it leaves.
+ *
+ * The moved sink's back-pointer has to be corrected, which is the whole
+ * reason both indices are kept.
+ */
+function unlinkEdge(consumer: Consumer, index: number): void {
+  const source = consumer.sources[index]!;
+  const sinks = source.sinks;
+  if (!sinks) return;
+
+  const slot = consumer.sourceSlots[index]!;
+  const slots = source.sinkSlots!;
+
+  const lastSink = sinks.pop()!;
+  const lastSlot = slots.pop()!;
+
+  if (slot < sinks.length) {
+    sinks[slot] = lastSink;
+    slots[slot] = lastSlot;
+    // The sink that moved now sits at `slot`; tell it where it went.
+    lastSink.sourceSlots[lastSlot] = slot;
+  }
 }
 
 /** Unlink every source from `index` onward. */
 function releaseSourcesFrom(consumer: ComputedSignal<unknown>, index: number): void {
   const wasLive = consumer.liveCount > 0;
   for (let i = index; i < consumer.sources.length; i++) {
-    const source = consumer.sources[i]!;
-    source.sinks?.delete(consumer as Consumer);
-    if (wasLive) decrementLive(source);
+    unlinkEdge(consumer, i);
+    if (wasLive) decrementLive(consumer.sources[i]!);
   }
   consumer.sources.length = index;
   consumer.sourceVersions.length = index;
+  consumer.sourceSlots.length = index;
 }
 
 /**
@@ -163,6 +205,7 @@ export function disposeComputed(node: ComputedSignal<unknown>): void {
   unlinkSources(node);
   node.state = CLEAN;
   node.sinks = null;
+  node.sinkSlots = null;
 }
 
 function unlinkSources(consumer: ComputedSignal<unknown>): void {
@@ -210,7 +253,9 @@ function propagate(node: Producer, direct: boolean, pending: Set<WatcherNode>): 
 export class StateSignal<T> {
   /** @internal */ value: T;
   /** @internal */ version = 0;
-  /** @internal */ sinks: Set<Consumer> | null = null;
+  /** @internal */ sinks: Consumer[] | null = null;
+  /** @internal Index of this producer inside each sink's `sources`. */
+  /** @internal */ sinkSlots: number[] | null = null;
   /** @internal */ liveCount = 0;
   /** @internal */ options: SignalOptions<T> | undefined;
   /** @internal */ readonly equals: (a: T, b: T) => boolean;
@@ -239,7 +284,7 @@ export class StateSignal<T> {
     this.value = value;
     this.version++;
 
-    if (this.sinks === null || this.sinks.size === 0) return;
+    if (this.sinks === null || this.sinks.length === 0) return;
 
     const pending = new Set<WatcherNode>();
     propagate(this as Producer, true, pending);
@@ -264,9 +309,12 @@ export class ComputedSignal<T> {
   /** @internal */ error: unknown = UNSET;
   /** @internal */ version = 0;
   /** @internal */ state: NodeState = DIRTY;
-  /** @internal */ sinks: Set<Consumer> | null = null;
+  /** @internal */ sinks: Consumer[] | null = null;
+  /** @internal */ sinkSlots: number[] | null = null;
   /** @internal */ sources: Producer[] = [];
   /** @internal */ sourceVersions: number[] = [];
+  /** @internal Index of this consumer inside each source's `sinks`. */
+  /** @internal */ sourceSlots: number[] = [];
   /** @internal */ trackIndex = 0;
   /** @internal */ liveCount = 0;
   /** @internal */ options: SignalOptions<T> | undefined;
@@ -368,6 +416,7 @@ export class WatcherNode {
   /** @internal */ readonly notifyCallback: (this: WatcherNode) => void;
   /** @internal */ sources: Producer[] = [];
   /** @internal */ sourceVersions: number[] = [];
+  /** @internal */ sourceSlots: number[] = [];
   /** @internal */ liveCount = 1;
   /** @internal */ notified = false;
   /** @internal */ watching = new Set<Producer>();
@@ -387,8 +436,7 @@ export class WatcherNode {
       const producer = signal as Producer;
       if (this.watching.has(producer)) continue;
       this.watching.add(producer);
-      (producer.sinks ??= new Set()).add(this as Consumer);
-      this.sources.push(producer);
+      link(producer, this as Consumer);
       incrementLive(producer);
     }
     this.notified = false;
@@ -400,9 +448,18 @@ export class WatcherNode {
       if (!this.watching.has(producer)) continue;
       this.watching.delete(producer);
       this.pending.delete(producer);
-      producer.sinks?.delete(this as Consumer);
+
       const index = this.sources.indexOf(producer);
-      if (index !== -1) this.sources.splice(index, 1);
+      if (index !== -1) {
+        unlinkEdge(this as Consumer, index);
+        // Splicing shifts every later source, so their recorded slots move too.
+        this.sources.splice(index, 1);
+        this.sourceSlots.splice(index, 1);
+        for (let i = index; i < this.sources.length; i++) {
+          const later = this.sources[i]!;
+          later.sinkSlots![this.sourceSlots[i]!] = i;
+        }
+      }
       decrementLive(producer);
     }
   }
@@ -459,7 +516,7 @@ export function introspectSinks(
 }
 
 export function hasSinks(node: StateSignal<unknown> | ComputedSignal<unknown>): boolean {
-  return (node.sinks?.size ?? 0) > 0;
+  return (node.sinks?.length ?? 0) > 0;
 }
 
 export function hasSources(node: ComputedSignal<unknown> | WatcherNode): boolean {
