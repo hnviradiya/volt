@@ -338,3 +338,29 @@ it hard.
   with retry, offline queueing
 - **Accessibility** — new messages announced in a live region without
   interrupting, and full keyboard access to per-message actions
+
+## Modern platform only
+
+No support for old browsers, old JavaScript or old CSS. This is not only a
+policy about what to drop — it decides what to build, because several things
+libraries hand-roll are now platform features. Using them is smaller, faster
+and more correct than reimplementing them.
+
+| use the platform | instead of |
+| --- | --- |
+| `inert` | manually setting `aria-hidden` on siblings, which hides from assistive technology but leaves the page behind focusable and clickable |
+| CSS anchor positioning | Floating UI, ~5 kB, for popover and tooltip placement |
+| `popover` attribute and the top layer | a z-index registry, and the stacking-context bugs it exists to work around |
+| View Transitions | hand-written FLIP animation for list reordering |
+| `field-sizing: content` | measuring a mirror element to auto-size a textarea |
+| `content-visibility`, CSS containment | manual occlusion culling for long lists |
+| Container queries | JavaScript resize observers driving breakpoint classes |
+| `:has()` | parent-state classes toggled from JavaScript |
+| `scrollend` | debouncing `scroll` to guess when it stopped |
+| `Temporal` | date-fns or luxon, and `Date`'s timezone behaviour |
+| `Intl.*` | bundled locale data for dates, numbers, lists and plurals |
+| `structuredClone` | a deep-clone utility |
+| CSS `@layer` | specificity wars in theming |
+
+Already applied: Dialog uses `inert` for the page behind rather than
+`aria-hidden` alone.

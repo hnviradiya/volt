@@ -141,7 +141,7 @@ export function createDialog(options: DialogOptions): Dialog {
     if (modal) {
       createFocusScope(() => options.content(), { restoreFocus: true });
       lockScroll();
-      hideFromScreenReaders(content);
+      makeRestInert(content);
     }
   });
 
@@ -213,28 +213,44 @@ function lockScroll(): void {
 }
 
 /**
- * Mark everything except the dialog inert to assistive technology.
+ * Make everything except the dialog inert while it is open.
  *
- * A focus trap stops Tab leaving, but a screen reader's own cursor is not
- * bound by focus — without this, the page behind can still be read straight
- * through a "modal" dialog.
+ * `inert` is the right tool and Volt targets browsers that all have it. It
+ * does three things `aria-hidden` cannot: it removes the subtree from the tab
+ * order, it stops pointer events reaching it, and it hides it from assistive
+ * technology. A focus trap only covers the first of those, and a screen
+ * reader's own cursor is not bound by focus at all — so with `aria-hidden`
+ * alone the page behind is still clickable, and with a trap alone it is still
+ * readable straight through the dialog.
+ *
+ * `aria-hidden` goes on beside it because some assistive technology still
+ * honours it more reliably than `inert`, and the pair does no harm.
  */
-function hideFromScreenReaders(content: Element): void {
+function makeRestInert(content: Element): void {
   if (typeof document === 'undefined') return;
 
-  const changed: { el: Element; previous: string | null }[] = [];
+  const changed: { el: Element; inert: boolean; hidden: string | null }[] = [];
 
   for (const el of document.body.children) {
     if (el === content || el.contains(content)) continue;
+    // A live region must keep announcing — a toast raised while a dialog is
+    // open is exactly the case that matters.
     if (el.hasAttribute('aria-live')) continue;
-    changed.push({ el, previous: el.getAttribute('aria-hidden') });
+
+    changed.push({
+      el,
+      inert: (el as HTMLElement).inert,
+      hidden: el.getAttribute('aria-hidden'),
+    });
+    (el as HTMLElement).inert = true;
     el.setAttribute('aria-hidden', 'true');
   }
 
   onCleanup(() => {
-    for (const { el, previous } of changed) {
-      if (previous === null) el.removeAttribute('aria-hidden');
-      else el.setAttribute('aria-hidden', previous);
+    for (const { el, inert, hidden } of changed) {
+      (el as HTMLElement).inert = inert;
+      if (hidden === null) el.removeAttribute('aria-hidden');
+      else el.setAttribute('aria-hidden', hidden);
     }
   });
 }
