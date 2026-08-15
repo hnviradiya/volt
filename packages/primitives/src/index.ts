@@ -25,6 +25,18 @@ export {
 } from './focus-scope.js';
 export { createId, resetIdCounter } from './id.js';
 export {
+  createCollection,
+  ITEM_ATTRIBUTE,
+  type Collection,
+  type CollectionOptions,
+} from './collection.js';
+export {
+  createRovingFocus,
+  type Orientation,
+  type RovingFocus,
+  type RovingFocusOptions,
+} from './roving-focus.js';
+export {
   createDialog,
   type Dialog,
   type DialogOptions,
