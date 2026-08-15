@@ -396,6 +396,21 @@ export class ComputedSignal<T> {
       tracking = prevTracking;
     }
 
+    // An effect produces no value: it is compared with `equals: () => false`,
+    // and the only thing linked to it is the watcher that schedules it, which
+    // never reads a value or a version. Running the comparison and storing the
+    // result is pure overhead on the framework's hottest path — one write to a
+    // shared signal re-runs an effect per row.
+    if (this.isEffect) {
+      this.version++;
+      if (this.trackIndex < this.sources.length) {
+        releaseSourcesFrom(this as ComputedSignal<unknown>, this.trackIndex);
+      }
+      this.error = nextError;
+      this.state = CLEAN;
+      return;
+    }
+
     const changed =
       nextError !== UNSET ||
       this.error !== UNSET ||
