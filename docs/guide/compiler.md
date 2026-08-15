@@ -27,7 +27,7 @@ payoff is that two things become reliable:
 `:for` binding or arrow parameter of the same name stays local.
 
 ```html
-<li :for="item in items.get()">{{ item.name }} of {{ items.get().length }}</li>
+<li :for="item in items.get()">{ item.name } of { items.get().length }</li>
 ```
 
 ```js
@@ -69,7 +69,7 @@ Both branches clone from a single `_tmpl0`.
 ### Constant bindings are folded into markup
 
 ```html
-<div :class="'btn'" :disabled="1 > 0">{{ 2 + 3 }}</div>
+<div :class="'btn'" :disabled="1 > 0">{ 2 + 3 }</div>
 ```
 
 ```js
@@ -84,7 +84,7 @@ single text binding over one text node, instead of one insertion marker per
 hole:
 
 ```html
-<p>Hi, {{ name.get() }}! You have {{ count.get() }} messages.</p>
+<p>Hi, { name.get() }! You have { count.get() } messages.</p>
 ```
 
 ```js
@@ -113,7 +113,7 @@ There is no `querySelector`, no id lookup, and no traversal at runtime.
 ## What the generated code looks like
 
 ```html
-<span>{{ count.get() }}</span>
+<span>{ count.get() }</span>
 ```
 
 ```js

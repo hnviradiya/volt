@@ -7,11 +7,11 @@ import { compile } from '@voltjs/compiler';
  */
 describe.skip('codegen output', () => {
   const cases: [string, string][] = [
-    ['click', `<button :click="inc()">{{ count.get() }}</button>`],
-    ['mixed', `<p>Hi, {{ name.get() }}! You have {{ count.get() }} messages.</p>`],
-    ['for', `<ul><li :for="(item, i) in items.get()" :key="item">{{ i }}:{{ item }}</li></ul>`],
+    ['click', `<button :click="inc()">{ count.get() }</button>`],
+    ['mixed', `<p>Hi, { name.get() }! You have { count.get() } messages.</p>`],
+    ['for', `<ul><li :for="(item, i) in items.get()" :key="item">{ i }:{ item }</li></ul>`],
     ['if', `<div><span :if="a.get()">x</span><span :else>y</span></div>`],
-    ['model', `<div><input :model="text"><span>{{ text.get() }}</span></div>`],
+    ['model', `<div><input :model="text"><span>{ text.get() }</span></div>`],
   ];
 
   for (const [name, template] of cases) {

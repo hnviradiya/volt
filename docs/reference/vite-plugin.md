@@ -92,7 +92,7 @@ import { compileTemplate } from '@voltjs/core/jit';
 
 @Component({
   selector: 'v-greeting',
-  render: compileTemplate(`<p>Hello, {{ name.get() }}.</p>`),
+  render: compileTemplate(`<p>Hello, { name.get() }.</p>`),
 })
 export class Greeting {}
 ```

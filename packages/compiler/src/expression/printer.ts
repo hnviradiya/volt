@@ -39,7 +39,7 @@ export interface Scope {
    * Names bound to accessor functions rather than plain values. `:for` binds
    * its item and index this way so a keyed row that moves or is re-supplied
    * updates in place instead of being rebuilt — the compiler appends the call
-   * so templates still read `{{ item.name }}`, not `{{ item().name }}`.
+   * so templates still read `{ item.name }`, not `{ item().name }`.
    */
   accessors: boolean;
 }

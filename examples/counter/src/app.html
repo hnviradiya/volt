@@ -18,10 +18,10 @@
       <div class="row">
         <label for="step">Step size</label>
         <input id="step" type="range" min="1" max="10" :model.number="step" />
-        <span class="value">{{ step.get() }}</span>
+        <span class="value">{ step.get() }</span>
       </div>
 
-      <p class="log">Last value seen by the parent: <strong>{{ lastCount.get() }}</strong></p>
+      <p class="log">Last value seen by the parent: <strong>{ lastCount.get() }</strong></p>
     </article>
 
     <article class="card">

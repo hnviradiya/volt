@@ -20,7 +20,7 @@ beforeEach(() => {
   host = document.querySelector('#app')!;
 });
 
-@Component({ selector: 'v-real', render: compileTemplate(`<span>loaded {{ label }}</span>`) })
+@Component({ selector: 'v-real', render: compileTemplate(`<span>loaded { label }</span>`) })
 class Real {
   @Prop() label = '';
 }
@@ -201,7 +201,7 @@ describe('props and reactivity', () => {
   it('passes reactive props through to the loaded component', async () => {
     @Component({
       selector: 'v-live',
-      render: compileTemplate(`<span>{{ n.get() }}</span>`),
+      render: compileTemplate(`<span>{ n.get() }</span>`),
     })
     class Live {
       @Prop() n = new Signal.State(0);

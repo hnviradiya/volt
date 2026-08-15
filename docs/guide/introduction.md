@@ -19,7 +19,7 @@ export class Greeting {
 
 ```html
 <!-- greeting.html -->
-<p>Hello, {{ name.get() }}.</p>
+<p>Hello, { name.get() }.</p>
 ```
 
 The decorators are **TC39 standard decorators**, not the legacy experimental

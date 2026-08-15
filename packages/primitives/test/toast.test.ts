@@ -31,11 +31,11 @@ let toasterOptions: Omit<ToasterOptions<Message>, 'region'> = {};
       <div class="region" :ref="region" :spread="toaster.regionProps()">
         <div class="toast" :for="toast in toaster.visible()" :key="toast.id"
              :spread="toaster.toastProps(toast)">
-          <span class="title">{{ toast.data().title }}</span>
+          <span class="title">{ toast.data().title }</span>
           <button class="close" :spread="toaster.closeProps()" :click="toast.dismiss()">close</button>
         </div>
       </div>
-      <span class="queued">{{ toaster.queued().length }}</span>
+      <span class="queued">{ toaster.queued().length }</span>
     </div>
   `),
 })
@@ -53,7 +53,7 @@ class Toasts {
 
 beforeEach(() => {
   vi.useFakeTimers();
-  document.body.innerHTML = '<div id="app"></div><button id="outside">outside</button>';
+  document.body.innerHTML = '<div id="app"></div>';
   host = document.querySelector('#app')!;
   toasterOptions = {};
 });
@@ -74,7 +74,6 @@ function setup(options: Omit<ToasterOptions<Message>, 'region'> = {}) {
 
   return {
     handle,
-    instance,
     toaster: instance.toaster,
     region: () => host.querySelector('.region')!,
     toasts: () => [...host.querySelectorAll('.toast')] as HTMLElement[],
@@ -249,6 +248,16 @@ describe('the queue', () => {
     expect(titles()).toEqual(['two', 'three']);
   });
 
+  it('reports everything live, on screen and waiting alike', () => {
+    const { toaster } = setup({ max: 2, duration: 0 });
+    for (const title of ['one', 'two', 'three']) toaster.add({ title });
+    flushSync();
+
+    expect(toaster.toasts()).toHaveLength(3);
+    expect(toaster.visible().map((toast) => toast.data().title)).toEqual(['one', 'two']);
+    expect(toaster.queued().map((toast) => toast.data().title)).toEqual(['three']);
+  });
+
   it('does not count down while queued', () => {
     const { toaster, titles } = setup({ max: 1, duration: 1000 });
     toaster.add({ title: 'one' });
@@ -297,6 +306,15 @@ describe('the clock', () => {
     flushSync();
 
     // A toast carrying an action cannot time out mid-reach.
+    advance(60_000);
+    expect(toasts()).toHaveLength(1);
+  });
+
+  it('stays up for ever when the duration is infinite', () => {
+    const { toaster, toasts } = setup();
+    toaster.add({ title: 'Uploading…' }, { duration: Infinity });
+    flushSync();
+
     advance(60_000);
     expect(toasts()).toHaveLength(1);
   });
@@ -419,20 +437,28 @@ describe('pausing', () => {
     expect(region().hasAttribute('data-paused')).toBe(false);
   });
 
-  it('lets go of a pointer pause when the last toast leaves under it', () => {
+  it('holds a toast that arrives under a pointer already resting there', () => {
     const { toaster, toasts, region } = setup({ duration: 1000 });
+    pointer(region(), 'pointerenter');
+
+    toaster.add({ title: 'Saved' });
+    advance(60_000);
+    expect(toasts()).toHaveLength(1);
+  });
+
+  it('lets go of a focus pause when the toast holding it is dismissed', () => {
+    const { toaster, toasts, closeButtons } = setup({ duration: 1000 });
     toaster.add({ title: 'one' });
     flushSync();
 
-    pointer(region(), 'pointerenter');
-    toaster.dismissAll();
+    closeButtons()[0]!.focus();
+    closeButtons()[0]!.click();
     flushSync();
 
-    // `pointerleave` never fires for a node that stops existing, and a pause
-    // stranded that way would hold every later toast open for ever.
+    // A node removed while focused does not reliably report `focusout`, and a
+    // pause stranded that way would hold every later toast open for ever.
     expect(toaster.isPaused()).toBe(false);
     toaster.add({ title: 'two' });
-    flushSync();
     advance(1001);
     expect(toasts()).toHaveLength(0);
   });
@@ -574,6 +600,31 @@ describe('the keyboard', () => {
 
     key('t', { altKey: true });
     expect(document.activeElement).toBe(region());
+  });
+
+  it('cannot be shut out by an application key handler', () => {
+    const { toaster, region, raiseButton } = setup({ duration: 0 });
+    toaster.add({ title: 'Saved' });
+    flushSync();
+
+    // Listening in the capture phase is what makes this hold: the only
+    // keyboard route to a toast cannot be at the mercy of the page.
+    host.addEventListener('keydown', (event) => event.stopPropagation());
+    raiseButton().focus();
+    key('F6');
+
+    expect(document.activeElement).toBe(region());
+  });
+
+  it('moves focus to the region on demand, for a consumer with a button of their own', () => {
+    const { toaster, region } = setup({ duration: 0 });
+    toaster.add({ title: 'Saved' });
+    flushSync();
+
+    toaster.focusRegion();
+    flushSync();
+    expect(document.activeElement).toBe(region());
+    expect(toaster.isPaused()).toBe(true);
   });
 
   it('leaves Escape alone when focus is outside the region', () => {

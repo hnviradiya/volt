@@ -34,7 +34,7 @@ function render(component: Parameters<typeof mount>[0]) {
 
 describe('rendering non-string values', () => {
   function textFor(initial: unknown) {
-    @Component({ selector: 'v-val', render: compileTemplate(`<p>[{{ v.get() }}]</p>`) })
+    @Component({ selector: 'v-val', render: compileTemplate(`<p>[{ v.get() }]</p>`) })
     class Val {
       v = new Signal.State<unknown>(initial);
     }
@@ -68,7 +68,7 @@ describe('rendering non-string values', () => {
 
     @Component({
       selector: 'v-marker-path',
-      render: compileTemplate(`<p>[{{ v.get() }}]<b>x</b></p>`),
+      render: compileTemplate(`<p>[{ v.get() }]<b>x</b></p>`),
     })
     class MarkerPath {
       v = new Signal.State<unknown>(false);
@@ -101,7 +101,7 @@ describe('rendering non-string values', () => {
   it('renders adjacent interpolations with no separator', () => {
     @Component({
       selector: 'v-adj',
-      render: compileTemplate(`<p>{{ a.get() }}{{ b.get() }}</p>`),
+      render: compileTemplate(`<p>{ a.get() }{ b.get() }</p>`),
     })
     class Adjacent {
       a = new Signal.State('x');
@@ -218,7 +218,7 @@ describe('event edge cases', () => {
       render: compileTemplate(`
         <ul>
           <li :for="n in items.get()" :key="n">
-            <button :click="drop(n)">{{ n }}</button>
+            <button :click="drop(n)">{ n }</button>
           </li>
         </ul>
       `),
@@ -410,7 +410,7 @@ describe('recursive components', () => {
       selector: 'v-node',
       render: compileTemplate(`
         <li>
-          <span>{{ node.label }}</span>
+          <span>{ node.label }</span>
           <ul>
             <v-node :for="child in node.children" :key="child.label" :node="child"></v-node>
           </ul>
@@ -454,7 +454,7 @@ describe('errors in user code', () => {
 
     @Component({
       selector: 'v-throwing',
-      render: compileTemplate(`<div><span>{{ boom() }}</span><b>sibling</b></div>`),
+      render: compileTemplate(`<div><span>{ boom() }</span><b>sibling</b></div>`),
     })
     class Throwing {
       boom(): string {
@@ -473,7 +473,7 @@ describe('errors in user code', () => {
 
     @Component({
       selector: 'v-throwhandler',
-      render: compileTemplate(`<div><button :click="boom()">go</button><b>{{ n.get() }}</b></div>`),
+      render: compileTemplate(`<div><button :click="boom()">go</button><b>{ n.get() }</b></div>`),
     })
     class ThrowHandler {
       n = new Signal.State(1);

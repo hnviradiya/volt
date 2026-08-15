@@ -300,7 +300,7 @@ const ACCORDION_TEMPLATE = `
     <div :for="item in items.get()" :key="item"
          class="item" :attr-data-item="item" :spread="a.itemProps(item)">
       <h3>
-        <button :spread="a.triggerProps(item)" :click="a.toggle(item)">{{ item }}</button>
+        <button :spread="a.triggerProps(item)" :click="a.toggle(item)">{ item }</button>
       </h3>
       <div :if="a.isPresent(item)" class="panel" :spread="a.contentProps(item)">
         <input :attr-data-field="item">

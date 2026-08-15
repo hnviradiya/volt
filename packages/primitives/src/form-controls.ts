@@ -398,7 +398,7 @@ export interface RadioGroup {
  *   <div :ref="group" :spread="plans.groupProps()" :keydown="plans.onKeyDown($event)">
  *     <label :for="option in options" :key="option.value" :click="plans.select(option.value)">
  *       <input :spread="plans.inputProps(option.value, option.disabled)">
- *       <span :spread="plans.itemProps(option.value, option.disabled)">{{ option.label }}</span>
+ *       <span :spread="plans.itemProps(option.value, option.disabled)">{ option.label }</span>
  *     </label>
  *   </div>
  */

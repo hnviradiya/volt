@@ -394,9 +394,9 @@ export interface Accordion {
  *   <div :ref="root" :spread="a.rootProps()" :keydown="a.onTriggerKeyDown($event)">
  *     <div :for="s in sections" :key="s.id" :spread="a.itemProps(s.id)">
  *       <h3>
- *         <button :spread="a.triggerProps(s.id)" :click="a.toggle(s.id)">{{ s.title }}</button>
+ *         <button :spread="a.triggerProps(s.id)" :click="a.toggle(s.id)">{ s.title }</button>
  *       </h3>
- *       <div :if="a.isPresent(s.id)" :spread="a.contentProps(s.id)">{{ s.body }}</div>
+ *       <div :if="a.isPresent(s.id)" :spread="a.contentProps(s.id)">{ s.body }</div>
  *     </div>
  *   </div>
  *

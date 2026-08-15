@@ -715,7 +715,7 @@ describe('items rendered from a loop', () => {
              :keydown="menu.onContentKeyDown($event)">
           <button :for="option in options" :key="option.value"
                   :spread="menu.itemProps({ value: option.value, disabled: option.disabled, textValue: option.text })">
-            {{ option.label }}
+            { option.label }
           </button>
         </div>
       </div>

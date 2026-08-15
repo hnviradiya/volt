@@ -54,7 +54,7 @@ describe('static templates', () => {
 
 describe('interpolation', () => {
   it('renders a signal and updates it in place', () => {
-    @Component({ selector: 'v-count', render: compileTemplate(`<span>{{ count.get() }}</span>`) })
+    @Component({ selector: 'v-count', render: compileTemplate(`<span>{ count.get() }</span>`) })
     class Counter {
       count = new Signal.State(1);
     }
@@ -73,7 +73,7 @@ describe('interpolation', () => {
   });
 
   it('folds a constant expression into the markup at build time', () => {
-    @Component({ selector: 'v-const', render: compileTemplate(`<span>{{ 2 + 3 }}</span>`) })
+    @Component({ selector: 'v-const', render: compileTemplate(`<span>{ 2 + 3 }</span>`) })
     class Constant {}
 
     expect(render(Constant).html).toBe('<span>5</span>');
@@ -82,7 +82,7 @@ describe('interpolation', () => {
   it('mixes static text with dynamic parts', () => {
     @Component({
       selector: 'v-mixed',
-      render: compileTemplate(`<p>Hello, {{ name.get() }}! You have {{ count.get() }} messages.</p>`),
+      render: compileTemplate(`<p>Hello, { name.get() }! You have { count.get() } messages.</p>`),
     })
     class Mixed {
       name = new Signal.State('Ada');
@@ -190,7 +190,7 @@ describe('events', () => {
   it('handles :click as an inline statement', () => {
     @Component({
       selector: 'v-click',
-      render: compileTemplate(`<button :click="inc()">{{ count.get() }}</button>`),
+      render: compileTemplate(`<button :click="inc()">{ count.get() }</button>`),
     })
     class Clicker {
       count = new Signal.State(0);
@@ -294,7 +294,7 @@ describe(':if', () => {
   it('disposes the effects of a branch it leaves', () => {
     const cleanup = vi.fn();
 
-    @Component({ selector: 'v-child', render: compileTemplate(`<span>{{ label.get() }}</span>`) })
+    @Component({ selector: 'v-child', render: compileTemplate(`<span>{ label.get() }</span>`) })
     class Child {
       @Prop() label = new Signal.State('x');
       // Teardown sits beside the setup it undoes.
@@ -325,7 +325,7 @@ describe(':for', () => {
       selector: 'v-list',
       render: compileTemplate(`
         <ul>
-          <li :for="item in items.get()" :key="item.id">{{ item.text }}</li>
+          <li :for="item in items.get()" :key="item.id">{ item.text }</li>
         </ul>
       `),
     })
@@ -359,7 +359,7 @@ describe(':for', () => {
   it('exposes a reactive index', () => {
     @Component({
       selector: 'v-indexed',
-      render: compileTemplate(`<ul><li :for="(item, i) in items.get()" :key="item">{{ i }}:{{ item }}</li></ul>`),
+      render: compileTemplate(`<ul><li :for="(item, i) in items.get()" :key="item">{ i }:{ item }</li></ul>`),
     })
     class Indexed {
       items = new Signal.State(['a', 'b']);
@@ -377,7 +377,7 @@ describe(':for', () => {
   it('adds and removes rows', () => {
     @Component({
       selector: 'v-grow',
-      render: compileTemplate(`<ul><li :for="n in items.get()" :key="n">{{ n }}</li></ul>`),
+      render: compileTemplate(`<ul><li :for="n in items.get()" :key="n">{ n }</li></ul>`),
     })
     class Grow {
       items = new Signal.State([1, 2]);
@@ -403,7 +403,7 @@ describe(':for', () => {
   it('supports destructuring bindings', () => {
     @Component({
       selector: 'v-destructure',
-      render: compileTemplate(`<ul><li :for="{ id, name } in rows.get()" :key="id">{{ id }}-{{ name }}</li></ul>`),
+      render: compileTemplate(`<ul><li :for="{ id, name } in rows.get()" :key="id">{ id }-{ name }</li></ul>`),
     })
     class Destructured {
       rows = new Signal.State([{ id: 1, name: 'one' }]);
@@ -417,7 +417,7 @@ describe('components', () => {
   it('passes inputs reactively and calls back through a callback prop', () => {
     @Component({
       selector: 'v-child',
-      render: compileTemplate(`<button :click="bump()">{{ label.get() }}:{{ n.get() }}</button>`),
+      render: compileTemplate(`<button :click="bump()">{ label.get() }:{ n.get() }</button>`),
     })
     class Child {
       @Prop() label = new Signal.State('');
@@ -547,7 +547,7 @@ describe('lifecycle', () => {
   it('a field effect sees props, and onCleanup tears down', () => {
     const order: string[] = [];
 
-    @Component({ selector: 'v-life', render: compileTemplate(`<span>{{ value.get() }}</span>`) })
+    @Component({ selector: 'v-life', render: compileTemplate(`<span>{ value.get() }</span>`) })
     class Life {
       @Prop() seed = new Signal.State('default');
       value = new Signal.State('initial');
@@ -599,7 +599,7 @@ describe('two-way binding', () => {
   it(':model syncs an input with a signal', () => {
     @Component({
       selector: 'v-model',
-      render: compileTemplate(`<div><input :model="text"><span>{{ text.get() }}</span></div>`),
+      render: compileTemplate(`<div><input :model="text"><span>{ text.get() }</span></div>`),
     })
     class Modelled {
       text = new Signal.State('a');

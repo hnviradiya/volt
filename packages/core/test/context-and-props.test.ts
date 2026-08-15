@@ -31,7 +31,7 @@ beforeEach(() => {
 
 const Theme = createContext('light');
 
-@Component({ selector: 'v-reader', render: compileTemplate(`<span>{{ theme }}</span>`) })
+@Component({ selector: 'v-reader', render: compileTemplate(`<span>{ theme }</span>`) })
 class Reader {
   theme = useContext(Theme);
 }
@@ -131,7 +131,7 @@ describe('context', () => {
   it('carries a signal through context so consumers stay reactive', () => {
     const Live = createContext(new Signal.State('a'));
 
-    @Component({ selector: 'v-live', render: compileTemplate(`<span>{{ v.get() }}</span>`) })
+    @Component({ selector: 'v-live', render: compileTemplate(`<span>{ v.get() }</span>`) })
     class LiveReader {
       v = useContext(Live);
     }
@@ -157,7 +157,7 @@ describe('context', () => {
 
 describe('prop names', () => {
   it('matches a camelCase prop written as camelCase', () => {
-    @Component({ selector: 'v-camel', render: compileTemplate(`<span>{{ maxCount.get() }}</span>`) })
+    @Component({ selector: 'v-camel', render: compileTemplate(`<span>{ maxCount.get() }</span>`) })
     class Camel {
       @Prop() maxCount = new Signal.State(0);
     }
@@ -174,7 +174,7 @@ describe('prop names', () => {
   });
 
   it('rejects a kebab-cased spelling and names the prop meant', () => {
-    @Component({ selector: 'v-kebab', render: compileTemplate(`<span>{{ maxCount.get() }}</span>`) })
+    @Component({ selector: 'v-kebab', render: compileTemplate(`<span>{ maxCount.get() }</span>`) })
     class Kebab {
       @Prop() maxCount = new Signal.State(0);
     }
@@ -194,7 +194,7 @@ describe('prop names', () => {
   });
 
   it('rejects an outright unknown prop and lists what is declared', () => {
-    @Component({ selector: 'v-known', render: compileTemplate(`<span>{{ a.get() }}</span>`) })
+    @Component({ selector: 'v-known', render: compileTemplate(`<span>{ a.get() }</span>`) })
     class Known {
       @Prop() a = new Signal.State(0);
     }
@@ -212,7 +212,7 @@ describe('prop names', () => {
   it('passes a valueless attribute as true', () => {
     @Component({
       selector: 'v-flag',
-      render: compileTemplate(`<span>{{ String(active) }}</span>`),
+      render: compileTemplate(`<span>{ String(active) }</span>`),
     })
     class Flag {
       @Prop() active = false;
@@ -230,7 +230,7 @@ describe('prop names', () => {
   });
 
   it('leaves a declared prop at its default when not passed', () => {
-    @Component({ selector: 'v-dflt', render: compileTemplate(`<span>{{ label.get() }}</span>`) })
+    @Component({ selector: 'v-dflt', render: compileTemplate(`<span>{ label.get() }</span>`) })
     class Dflt {
       @Prop() label = new Signal.State('fallback');
     }

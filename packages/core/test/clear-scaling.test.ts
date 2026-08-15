@@ -23,7 +23,7 @@ interface Item {
 @Component({
   selector: 'v-row',
   render: compileTemplate(
-    `<tr :class="{ danger: selected.get() === id }"><td>{{ label.get() }}</td></tr>`,
+    `<tr :class="{ danger: selected.get() === id }"><td>{ label.get() }</td></tr>`,
   ),
 })
 class Row {

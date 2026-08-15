@@ -245,7 +245,7 @@ export function Component(config: ComponentConfig) {
  *
  * A prop is reactive because it holds a signal, never because the decorator
  * rewrote the property behind your back. That is why `accessor` is rejected:
- * it would make `{{ label }}` a tracked read while looking like a plain field,
+ * it would make `{ label }` a tracked read while looking like a plain field,
  * which is the one thing Volt's reactivity does not do.
  */
 export function Prop(options: PropOptions = {}) {

@@ -30,7 +30,7 @@
  *
  *   <div :ref="group" :spread="align.groupProps()">
  *     <button :for="opt in options" :key="opt.value"
- *             :spread="align.itemProps(opt.value, opt)">{{ opt.text }}</button>
+ *             :spread="align.itemProps(opt.value, opt)">{ opt.text }</button>
  *   </div>
  *
  * Items are addressed by value, not by element. A list rendered with `:for`

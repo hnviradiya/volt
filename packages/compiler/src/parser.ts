@@ -47,8 +47,8 @@ export interface ParserOptions {
   filename?: string;
 }
 
-const OPEN_DELIM = '{{';
-const CLOSE_DELIM = '}}';
+const OPEN_DELIM = '{';
+const CLOSE_DELIM = '}';
 
 export function parse(source: string, options: ParserOptions = {}): RootNode {
   return new Parser(source, options).parseRoot();
@@ -220,6 +220,15 @@ class Parser {
     while (!this.atEnd()) {
       if (this.startsWith('<') && /[a-zA-Z!/]/.test(this.source[this.pos + 1] ?? '')) break;
 
+      // `\{` is how a literal brace is written. Only the brace needs it: a
+      // lone `}` in text is unambiguous, since nothing opens on it.
+      if (this.startsWith('\\{') || this.startsWith('\\}')) {
+        if (!buffer) bufferStart = this.loc();
+        this.advance(1);
+        buffer += this.advance(1);
+        continue;
+      }
+
       if (this.startsWith(OPEN_DELIM) && !preserve) {
         flush();
         nodes.push(this.parseInterpolation());
@@ -238,12 +247,74 @@ class Parser {
   private parseInterpolation(): InterpolationNode {
     const start = this.loc();
     this.advance(OPEN_DELIM.length);
-    const end = this.source.indexOf(CLOSE_DELIM, this.pos);
-    if (end === -1) this.error('Unclosed interpolation — missing `}}`');
+
+    const end = this.findInterpolationEnd();
+    if (end === -1) this.error('Unclosed interpolation — missing `}`');
+
     const exp = this.advance(end - this.pos).trim();
     this.advance(CLOSE_DELIM.length);
-    if (!exp) this.error('Empty interpolation `{{ }}`');
+    if (!exp) this.error('Empty interpolation `{}`');
     return { type: 'interpolation', exp, loc: this.finishLoc(start) };
+  }
+
+  /**
+   * Index of the `}` that closes the interpolation opened at `pos`.
+   *
+   * Scanning for the first `}` would be wrong: an expression can contain them,
+   * in an object literal, a function body, or a template literal's `${}`. With
+   * a two-character delimiter that was merely unlikely; with one character it
+   * is ordinary, so braces are counted and strings are skipped.
+   */
+  private findInterpolationEnd(): number {
+    let depth = 1;
+    let i = this.pos;
+
+    while (i < this.source.length) {
+      const ch = this.source[i]!;
+
+      if (ch === '\'' || ch === '"' || ch === '`') {
+        i = this.skipStringLiteral(i, ch);
+        continue;
+      }
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) return i;
+      }
+      i++;
+    }
+    return -1;
+  }
+
+  /** Index just past the string literal opening at `start`. */
+  private skipStringLiteral(start: number, quote: string): number {
+    let i = start + 1;
+    while (i < this.source.length) {
+      const ch = this.source[i];
+      if (ch === '\\') {
+        i += 2;
+        continue;
+      }
+      // A template literal's `${...}` may itself contain braces and strings.
+      if (quote === '`' && ch === '$' && this.source[i + 1] === '{') {
+        let depth = 1;
+        i += 2;
+        while (i < this.source.length && depth > 0) {
+          const inner = this.source[i];
+          if (inner === '\'' || inner === '"' || inner === '`') {
+            i = this.skipStringLiteral(i, inner);
+            continue;
+          }
+          if (inner === '{') depth++;
+          else if (inner === '}') depth--;
+          i++;
+        }
+        continue;
+      }
+      if (ch === quote) return i + 1;
+      i++;
+    }
+    return i;
   }
 
   // -------------------------------------------------------------------------

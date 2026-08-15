@@ -453,7 +453,7 @@ function createRow(
 /**
  * Turn any block result into DOM with a stable identity.
  *
- * A block that is just an accessor (`{{ item }}`, a bare `:if`, a nested
+ * A block that is just an accessor (`{ item }`, a bare `:if`, a nested
  * `:for`) has no element of its own, so it gets a zero-width anchor and keeps
  * its content immediately before it. Reading `nodes()` reports whatever the
  * block currently occupies rather than what it occupied when it was built.

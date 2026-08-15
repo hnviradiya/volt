@@ -10,7 +10,7 @@
  *
  *   @Component({
  *     selector: 'v-greeting',
- *     render: compileTemplate(`<p>Hello, {{ name.get() }}.</p>`),
+ *     render: compileTemplate(`<p>Hello, { name.get() }.</p>`),
  *   })
  *   export class Greeting {
  *     name = new Signal.State('world');

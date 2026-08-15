@@ -19,7 +19,7 @@
       :class="{ active: filter.get() === option }"
       :click="filter.set(option)"
     >
-      {{ option }}
+      { option }
     </button>
   </div>
 
@@ -27,7 +27,7 @@
     <li :for="todo in visible.get()" :key="todo.id" :class="{ done: todo.done }">
       <label>
         <input type="checkbox" :checked="todo.done" :change="toggle(todo.id)" />
-        <span class="text">{{ todo.text }}</span>
+        <span class="text">{ todo.text }</span>
       </label>
       <button class="link" :click="remove(todo.id)" aria-label="Remove">×</button>
     </li>
@@ -36,6 +36,6 @@
   <p class="empty" :if="visible.get().length === 0">Nothing here.</p>
 
   <footer class="summary">
-    {{ remaining.get() }} of {{ todos.get().length }} remaining
+    { remaining.get() } of { todos.get().length } remaining
   </footer>
 </section>

@@ -27,7 +27,7 @@ export class Counter {
 <!-- counter.html -->
 <div>
   <button :click="decrement()">−</button>
-  <output>{{ count.get() }}</output>
+  <output>{ count.get() }</output>
   <button :click="increment()">+</button>
 
   <p :if="count.get() > 9">That's a lot.</p>
@@ -78,7 +78,7 @@ resolved in a fixed order so a name always means one thing:
 
   <ul>
     <li :for="todo in visible.get()" :key="todo.id" :class="{ done: todo.done }">
-      {{ todo.text }}
+      { todo.text }
     </li>
   </ul>
 </form>

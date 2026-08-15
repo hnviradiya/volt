@@ -110,7 +110,7 @@ describe('markup edge cases', () => {
   it('renders a multi-root template', () => {
     @Component({
       selector: 'v-multi',
-      render: compileTemplate(`<h1>{{ a.get() }}</h1><p>{{ b.get() }}</p>`),
+      render: compileTemplate(`<h1>{ a.get() }</h1><p>{ b.get() }</p>`),
     })
     class Multi {
       a = new Signal.State('one');
@@ -135,7 +135,7 @@ describe('expression coverage', () => {
     @Component({
       selector: 'v-expr',
       render: compileTemplate(
-        `<p>{{ user.get()?.name ?? 'anonymous' }}|{{ n.get() > 2 ? 'big' : 'small' }}</p>`,
+        `<p>{ user.get()?.name ?? 'anonymous' }|{ n.get() > 2 ? 'big' : 'small' }</p>`,
       ),
     })
     class Expr {
@@ -155,7 +155,7 @@ describe('expression coverage', () => {
   it('handles template literals and method calls in an expression', () => {
     @Component({
       selector: 'v-tpl',
-      render: compileTemplate(`<p>{{ \`\${name.get().toUpperCase()} (\${count.get()})\` }}</p>`),
+      render: compileTemplate(`<p>{ \`\${name.get().toUpperCase()} (\${count.get()})\` }</p>`),
     })
     class Tpl {
       name = new Signal.State('ada');
@@ -168,7 +168,7 @@ describe('expression coverage', () => {
   it('resolves globals without prefixing them to the component', () => {
     @Component({
       selector: 'v-globals',
-      render: compileTemplate(`<p>{{ Math.max(1, n.get()) }}|{{ JSON.stringify(o.get()) }}</p>`),
+      render: compileTemplate(`<p>{ Math.max(1, n.get()) }|{ JSON.stringify(o.get()) }</p>`),
     })
     class Globals {
       n = new Signal.State(7);
@@ -205,7 +205,7 @@ describe('expression coverage', () => {
 describe('list reconciliation', () => {
   @Component({
     selector: 'v-list',
-    render: compileTemplate(`<ul><li :for="n in items.get()" :key="n">{{ n }}</li></ul>`),
+    render: compileTemplate(`<ul><li :for="n in items.get()" :key="n">{ n }</li></ul>`),
   })
   class List {
     items = new Signal.State<number[]>([1, 2, 3]);
@@ -246,8 +246,8 @@ describe('list reconciliation', () => {
       render: compileTemplate(`
         <ul>
           <li :for="group in groups.get()" :key="group.id">
-            <span>{{ group.id }}</span>
-            <em :for="child in group.children" :key="child">{{ child }}</em>
+            <span>{ group.id }</span>
+            <em :for="child in group.children" :key="child">{ child }</em>
           </li>
         </ul>
       `),
@@ -271,7 +271,7 @@ describe('list reconciliation', () => {
   it('iterates a Set as well as an array', () => {
     @Component({
       selector: 'v-set',
-      render: compileTemplate(`<ul><li :for="v in items.get()" :key="v">{{ v }}</li></ul>`),
+      render: compileTemplate(`<ul><li :for="v in items.get()" :key="v">{ v }</li></ul>`),
     })
     class FromSet {
       items = new Signal.State<Set<string>>(new Set(['x', 'y']));
@@ -283,7 +283,7 @@ describe('list reconciliation', () => {
   it('survives a null list', () => {
     @Component({
       selector: 'v-null-list',
-      render: compileTemplate(`<ul><li :for="v in items.get()" :key="v">{{ v }}</li></ul>`),
+      render: compileTemplate(`<ul><li :for="v in items.get()" :key="v">{ v }</li></ul>`),
     })
     class NullList {
       items = new Signal.State<string[] | null>(null);
@@ -298,8 +298,8 @@ describe('list reconciliation', () => {
       render: compileTemplate(`
         <ul>
           <li :for="n in items.get()" :key="n">
-            <b :if="n % 2 === 0">{{ n }} even</b>
-            <i :else>{{ n }} odd</i>
+            <b :if="n % 2 === 0">{ n } even</b>
+            <i :else>{ n } odd</i>
           </li>
         </ul>
       `),
@@ -331,7 +331,7 @@ describe('slots', () => {
       selector: 'v-loop-slots',
       imports: [Item],
       render: compileTemplate(
-        `<ul><v-item :for="n in items.get()" :key="n">n = {{ n }}</v-item></ul>`,
+        `<ul><v-item :for="n in items.get()" :key="n">n = { n }</v-item></ul>`,
       ),
     })
     class LoopSlots {
@@ -351,7 +351,7 @@ describe('slots', () => {
     @Component({
       selector: 'v-owner',
       imports: [Box],
-      render: compileTemplate(`<v-box>{{ label.get() }}</v-box>`),
+      render: compileTemplate(`<v-box>{ label.get() }</v-box>`),
     })
     class Owner {
       label = new Signal.State('before');
@@ -372,7 +372,7 @@ describe('slots', () => {
 
 describe('props', () => {
   it('throws when a required prop is missing', () => {
-    @Component({ selector: 'v-req', render: compileTemplate(`<p>{{ id.get() }}</p>`) })
+    @Component({ selector: 'v-req', render: compileTemplate(`<p>{ id.get() }</p>`) })
     class Req {
       @Prop({ required: true }) id = new Signal.State('');
     }
@@ -388,7 +388,7 @@ describe('props', () => {
   });
 
   it('honours an alias', () => {
-    @Component({ selector: 'v-alias', render: compileTemplate(`<p>{{ target.get() }}</p>`) })
+    @Component({ selector: 'v-alias', render: compileTemplate(`<p>{ target.get() }</p>`) })
     class Aliased {
       @Prop({ alias: 'labelledBy' }) target = new Signal.State('none');
     }
@@ -412,7 +412,7 @@ describe('props', () => {
   });
 
   it('keeps a prop live across parent updates', () => {
-    @Component({ selector: 'v-echo', render: compileTemplate(`<p>{{ value.get() }}</p>`) })
+    @Component({ selector: 'v-echo', render: compileTemplate(`<p>{ value.get() }</p>`) })
     class Echo {
       @Prop() value = new Signal.State(0);
     }
@@ -522,7 +522,7 @@ describe(':model', () => {
 
 describe('nesting and teardown', () => {
   it('renders deeply nested components', () => {
-    @Component({ selector: 'v-leaf', render: compileTemplate(`<span>{{ n.get() }}</span>`) })
+    @Component({ selector: 'v-leaf', render: compileTemplate(`<span>{ n.get() }</span>`) })
     class Leaf {
       @Prop() n = new Signal.State(0);
     }

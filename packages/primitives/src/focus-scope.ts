@@ -66,11 +66,25 @@ export function createFocusScope(
   if (container) {
     if (options.autoFocus !== false) focusFirst(container, options.initialFocus?.());
 
+    // Guards against the trap re-entering itself. Moving focus fires `blur` on
+    // whatever held it and `focusin` on whatever takes it, so a container with
+    // nothing focusable inside — or an element that refuses focus — bounces
+    // between the two until the stack runs out. The flag makes one recovery
+    // attempt per escape, which is all a recovery can usefully be.
+    let recovering = false;
+
     const onFocusIn = (event: FocusEvent) => {
+      if (recovering) return;
       const target = event.target;
       if (!(target instanceof Node) || container.contains(target)) return;
-      // Focus escaped — pull it back to the first thing inside.
-      focusFirst(container, options.initialFocus?.());
+
+      recovering = true;
+      try {
+        // Focus escaped — pull it back to the first thing inside.
+        focusFirst(container, options.initialFocus?.());
+      } finally {
+        recovering = false;
+      }
     };
     document.addEventListener('focusin', onFocusIn, true);
     onCleanup(() => document.removeEventListener('focusin', onFocusIn, true));

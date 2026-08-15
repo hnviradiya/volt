@@ -31,7 +31,7 @@ second only for values that never change.
 
 There is no third form that is reactive but reads like a plain property. A
 property is reactive because it holds a signal, and nothing else — so
-`{{ a.get() }}` in a template means exactly what it means in a method.
+`{ a.get() }` in a template means exactly what it means in a method.
 
 ## Notifying the parent
 

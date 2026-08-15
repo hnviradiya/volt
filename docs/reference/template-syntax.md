@@ -22,7 +22,7 @@ component, a property that shares a name with an event — use the escape.
 ## Interpolation
 
 ```html
-<p>Hello, {{ name.get() }}.</p>
+<p>Hello, { name.get() }.</p>
 ```
 
 Expressions are real JavaScript, parsed to an AST. Free identifiers resolve
@@ -30,7 +30,7 @@ to the component instance; loop bindings and a fixed set of globals
 (`Math`, `JSON`, `Date`, `console`, …) do not.
 
 A constant interpolation is evaluated at build time and baked into the
-markup: <code v-pre>{{ 2 + 3 }}</code> compiles to the text `5` with no effect
+markup: <code v-pre>{ 2 + 3 }</code> compiles to the text `5` with no effect
 at all.
 
 ## Structure
@@ -51,20 +51,20 @@ built. Leaving a branch disposes its effects and removes its DOM.
 ### `:for` and `:key`
 
 ```html
-<li :for="todo in todos.get()" :key="todo.id">{{ todo.text }}</li>
+<li :for="todo in todos.get()" :key="todo.id">{ todo.text }</li>
 ```
 
 With an index:
 
 ```html
-<li :for="(todo, i) in todos.get()" :key="todo.id">{{ i }}. {{ todo.text }}</li>
+<li :for="(todo, i) in todos.get()" :key="todo.id">{ i }. { todo.text }</li>
 ```
 
 Destructuring works, and stays reactive — each bound name becomes its own
 accessor rather than a snapshot:
 
 ```html
-<li :for="{ id, text } in todos.get()" :key="id">{{ text }}</li>
+<li :for="{ id, text } in todos.get()" :key="id">{ text }</li>
 ```
 
 Rows are keyed. A row that survives a change is **never rebuilt** — its item

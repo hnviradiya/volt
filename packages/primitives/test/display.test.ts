@@ -59,7 +59,7 @@ function mountAvatar(overrides: Partial<AvatarOptions> = {}) {
       <span :spread="avatar.rootProps()">
         <img :ref="image" :spread="avatar.imageProps()">
         <span :if="avatar.isFallbackVisible()" class="fallback"
-              :ref="fallback" :spread="avatar.fallbackProps()">{{ avatar.initials() }}</span>
+              :ref="fallback" :spread="avatar.fallbackProps()">{ avatar.initials() }</span>
       </span>
     `),
   })

@@ -89,7 +89,7 @@ export class Counter {
 <!-- src/counter.html -->
 <div class="counter">
   <button :click="decrement()">−</button>
-  <output>{{ count.get() }}</output>
+  <output>{ count.get() }</output>
   <button :click="increment()">+</button>
 </div>
 ```

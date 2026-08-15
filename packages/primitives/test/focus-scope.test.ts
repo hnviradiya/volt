@@ -135,3 +135,37 @@ describe('restoring', () => {
     }).not.toThrow();
   });
 });
+
+describe('recovering from an escape cannot recurse', () => {
+  it('survives a container with nothing focusable inside', () => {
+    // Moving focus fires blur on the old holder and focusin on the new one, so
+    // a trap that recovers inside its own focusin handler can bounce between
+    // them until the stack runs out. A review probe found exactly that.
+    scope(el('empty'));
+
+    expect(() => {
+      el('page-btn').focus();
+      el('page-btn').focus();
+    }).not.toThrow();
+  });
+
+  it('survives an element that refuses focus', () => {
+    const stubborn = el('layer');
+    // An element whose focus() does nothing is indistinguishable from one the
+    // browser declined to focus, which is the real-world version of this.
+    const original = HTMLElement.prototype.focus;
+    let calls = 0;
+    HTMLElement.prototype.focus = function patched(this: HTMLElement) {
+      calls += 1;
+      if (calls > 500) throw new Error('runaway focus recovery');
+    };
+
+    try {
+      scope(stubborn);
+      expect(() => el('page-btn').dispatchEvent(new Event('focusin', { bubbles: true })))
+        .not.toThrow();
+    } finally {
+      HTMLElement.prototype.focus = original;
+    }
+  });
+});

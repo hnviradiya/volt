@@ -1,15 +1,15 @@
 <div class="counter">
-  <h2>{{ label.get() }}</h2>
+  <h2>{ label.get() }</h2>
 
   <div class="row">
     <button class="btn" :click="decrement()" :disabled="count.get() <= min.get()">−</button>
-    <output class="value" :class="{ negative: count.get() < 0 }">{{ count.get() }}</output>
+    <output class="value" :class="{ negative: count.get() < 0 }">{ count.get() }</output>
     <button class="btn" :click="increment()">+</button>
   </div>
 
   <p class="hint" :if="count.get() === 0">Nothing counted yet.</p>
   <p class="hint" :else-if="count.get() < 0">Below zero.</p>
-  <p class="hint" :else>Counted {{ count.get() }} so far.</p>
+  <p class="hint" :else>Counted { count.get() } so far.</p>
 
   <button class="link" :click="reset()" :if="count.get() !== 0">Reset</button>
 </div>

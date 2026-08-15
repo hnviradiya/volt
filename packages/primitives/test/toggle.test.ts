@@ -66,7 +66,7 @@ const groupTemplate = (tag: string) =>
   compileTemplate(
     `<div :ref="group" :spread="toggles.groupProps()">` +
       `<${tag} :for="item in items.get()" :key="item.value"` +
-      ` :spread="toggles.itemProps(item.value, item)">{{ item.text }}</${tag}>` +
+      ` :spread="toggles.itemProps(item.value, item)">{ item.text }</${tag}>` +
       `</div>`,
   );
 

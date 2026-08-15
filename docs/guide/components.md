@@ -18,7 +18,7 @@ export class Greeting {
 
 ```html
 <!-- greeting.html -->
-<p>Hello, {{ name.get() }}.</p>
+<p>Hello, { name.get() }.</p>
 ```
 
 ## Configuration
@@ -49,7 +49,7 @@ import { compileTemplate } from '@voltjs/core/jit';
 
 @Component({
   selector: 'v-greeting',
-  render: compileTemplate(`<p>Hello, {{ name.get() }}.</p>`),
+  render: compileTemplate(`<p>Hello, { name.get() }.</p>`),
 })
 export class Greeting {
   name = new Signal.State('world');
@@ -226,7 +226,7 @@ thread can render itself with no import:
 ```html
 <!-- tree-node.html -->
 <li>
-  <span>{{ node.label }}</span>
+  <span>{ node.label }</span>
   <ul>
     <v-tree-node :for="child in node.children" :key="child.id" :node="child"></v-tree-node>
   </ul>

@@ -105,7 +105,7 @@ describe('the properties a dialog depends on', () => {
   it('resolves context from where the content was declared, not where it lands', () => {
     const Theme = createContext('light');
 
-    @Component({ selector: 'v-reader', render: compileTemplate(`<span>{{ theme }}</span>`) })
+    @Component({ selector: 'v-reader', render: compileTemplate(`<span>{ theme }</span>`) })
     class Reader {
       theme = useContext(Theme);
     }
@@ -127,7 +127,7 @@ describe('the properties a dialog depends on', () => {
   it('stays reactive after being moved', () => {
     @Component({
       selector: 'v-live',
-      render: compileTemplate(`<div><span :portal>{{ n.get() }}</span></div>`),
+      render: compileTemplate(`<div><span :portal>{ n.get() }</span></div>`),
     })
     class Live {
       n = new Signal.State(1);

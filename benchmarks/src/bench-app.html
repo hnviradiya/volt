@@ -5,8 +5,8 @@
       :key="row.id"
       :class="{ danger: row.id === selected.get() }"
     >
-      <td class="col-id">{{ row.id }}</td>
-      <td class="col-label"><a :click="select(row.id)">{{ row.label }}</a></td>
+      <td class="col-id">{ row.id }</td>
+      <td class="col-label"><a :click="select(row.id)">{ row.label }</a></td>
       <td class="col-remove"><a :click="remove(row.id)">x</a></td>
       <td class="col-spacer"></td>
     </tr>

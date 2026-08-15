@@ -686,7 +686,7 @@ class Generator {
    * When an element's children are only text and interpolations, compile them
    * to a single text binding instead of one marker per hole.
    *
-   * `<p>Hi, {{ a }}! You have {{ b }}.</p>` becomes one effect writing one
+   * `<p>Hi, { a }! You have { b }.</p>` becomes one effect writing one
    * text node — no comment markers in the output, and no per-hole insert.
    * Returns false when the children contain anything structural.
    */

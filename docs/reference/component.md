@@ -49,7 +49,7 @@ Two forms, differing in reactivity:
 
 A prop is reactive because it holds a signal, never because the decorator
 rewrote the property. `@Prop() accessor` is rejected for that reason: it would
-make `{{ b }}` a tracked read while looking like a plain field.
+make `{ b }` a tracked read while looking like a plain field.
 
 A missing required prop throws at construction.
 
@@ -129,7 +129,7 @@ import { compileTemplate } from '@voltjs/core/jit';
 
 @Component({
   selector: 'v-greeting',
-  render: compileTemplate(`<p>Hello, {{ name.get() }}.</p>`),
+  render: compileTemplate(`<p>Hello, { name.get() }.</p>`),
 })
 export class Greeting {}
 ```

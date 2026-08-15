@@ -4,8 +4,8 @@
 
 ```html
 <p :if="status.get() === 'loading'">Loading…</p>
-<p :else-if="error.get()">{{ error.get() }}</p>
-<p :else>{{ result.get() }}</p>
+<p :else-if="error.get()">{ error.get() }</p>
+<p :else>{ result.get() }</p>
 ```
 
 Conditions are tested in order and short-circuit. Only the winning branch is
@@ -53,15 +53,15 @@ built.
 
 ```html
 <template :if="ready.get()">
-  <h2>{{ title.get() }}</h2>
-  <p>{{ body.get() }}</p>
+  <h2>{ title.get() }</h2>
+  <p>{ body.get() }</p>
 </template>
 ```
 
 ## Lists
 
 ```html
-<li :for="todo in todos.get()" :key="todo.id">{{ todo.text }}</li>
+<li :for="todo in todos.get()" :key="todo.id">{ todo.text }</li>
 ```
 
 ### Keys
@@ -76,7 +76,7 @@ candidate is safe:
   list when data is refetched as equal-but-new objects
 
 ```html
-<li :for="todo in todos.get()" :key="todo.id">{{ todo.text }}</li>
+<li :for="todo in todos.get()" :key="todo.id">{ todo.text }</li>
 ```
 
 With a stable key, reordering moves the existing elements and takes their DOM
@@ -101,7 +101,7 @@ list of slots that is never reordered.
 ### Index
 
 ```html
-<li :for="(todo, i) in todos.get()" :key="todo.id">{{ i }}. {{ todo.text }}</li>
+<li :for="(todo, i) in todos.get()" :key="todo.id">{ i }. { todo.text }</li>
 ```
 
 The index is reactive. When a keyed row moves, its DOM is reused and its
@@ -111,7 +111,7 @@ index binding updates on its own.
 
 ```html
 <li :for="{ id, text, done } in todos.get()" :key="id" :class="{ done }">
-  {{ text }}
+  { text }
 </li>
 ```
 
@@ -136,7 +136,7 @@ export class Todos {
 ```
 
 ```html
-<li :for="todo in visible.get()" :key="todo.id">{{ todo.text }}</li>
+<li :for="todo in visible.get()" :key="todo.id">{ todo.text }</li>
 ```
 
 The computed re-evaluates only when the todos or the filter actually change,

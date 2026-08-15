@@ -100,7 +100,7 @@ export interface Avatar {
  *   <span :spread="avatar.rootProps()">
  *     <img :ref="img" :spread="avatar.imageProps()">
  *     <span :if="avatar.isFallbackVisible()" :ref="fallback"
- *           :spread="avatar.fallbackProps()">{{ avatar.initials() }}</span>
+ *           :spread="avatar.fallbackProps()">{ avatar.initials() }</span>
  *   </span>
  *
  * The `<img>` stays mounted throughout, because an element that is not in the

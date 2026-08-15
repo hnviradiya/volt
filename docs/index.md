@@ -45,7 +45,7 @@ export class Counter {
 <!-- counter.html -->
 <div>
   <button :click="decrement()">−</button>
-  <output>{{ count.get() }}</output>
+  <output>{ count.get() }</output>
   <button :click="increment()">+</button>
 
   <p :if="count.get() > 9">That's a lot.</p>

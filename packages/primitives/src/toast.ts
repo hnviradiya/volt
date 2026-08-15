@@ -19,7 +19,7 @@
  *   <div :ref="region" :spread="toaster.regionProps()">
  *     <div :for="toast in toaster.visible()" :key="toast.id"
  *          :spread="toaster.toastProps(toast)">
- *       <p>{{ toast.data().title }}</p>
+ *       <p>{ toast.data().title }</p>
  *       <button :spread="toaster.closeProps()" :click="toast.dismiss()">×</button>
  *     </div>
  *   </div>
@@ -381,20 +381,23 @@ export function createToaster<T = unknown>(options: ToasterOptions<T>): Toaster<
   // ---------------------------------------------------------------------
 
   /**
-   * Put the pause flags back in step with the DOM.
+   * Put the focus pause back in step with the DOM.
    *
-   * Focus and the pointer can both be stranded by a toast removed from under
-   * them: a node removed while focused does not reliably report `focusout`, and
-   * `pointerleave` never fires for a node that stops existing. One stranded
-   * flag would hold every later toast open for ever, so focus is asked of the
-   * DOM again rather than trusted to have said so, and an empty region drops
-   * the pointer — at the cost of a toast that appears under a resting pointer
-   * and counts down until it moves.
+   * A node removed while it holds focus does not reliably report `focusout`,
+   * and a toast dismissed from its own close button is exactly that — so the
+   * flag can be stranded, and a stranded pause holds every later toast open
+   * for ever. Focus is a fact the document can be asked for, so it is asked
+   * rather than trusted.
+   *
+   * The pointer gets no such repair, because there is no equivalent question
+   * to ask, and the obvious guess — that an empty queue means the pointer has
+   * gone — is wrong: the region stays mounted whether or not it holds any
+   * toasts, so a pointer resting on it is still resting on it, and a toast
+   * that arrives underneath must not start counting down unread.
    */
-  const repairPauses = (list: Toast<T>[]): void => {
+  const repairFocusPause = (): void => {
     const region = options.region();
     focusInside.set(region ? containsFocus(region) : false);
-    if (list.length === 0) pointerInside.set(false);
   };
 
   /**
@@ -425,7 +428,7 @@ export function createToaster<T = unknown>(options: ToasterOptions<T>): Toaster<
     // Repaired before the flags are read, not after: a signal written by the
     // effect that reads it does not run that effect again, so this pass has to
     // be the one that acts on the repair.
-    repairPauses(list);
+    repairFocusPause();
     releaseOrphans(list);
 
     const paused = isPaused();

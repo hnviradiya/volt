@@ -30,7 +30,7 @@ const ITEMS: Item[] = [
 
 @Component({
   selector: 'v-by-id',
-  render: compileTemplate(`<ul><li :for="item in items.get()" :key="item.id">{{ item.text }}</li></ul>`),
+  render: compileTemplate(`<ul><li :for="item in items.get()" :key="item.id">{ item.text }</li></ul>`),
 })
 class ById {
   items = new Signal.State<Item[]>(ITEMS);
@@ -38,7 +38,7 @@ class ById {
 
 @Component({
   selector: 'v-by-index',
-  render: compileTemplate(`<ul><li :for="item in items.get()" :key="$index">{{ item.text }}</li></ul>`),
+  render: compileTemplate(`<ul><li :for="item in items.get()" :key="$index">{ item.text }</li></ul>`),
 })
 class ByIndex {
   items = new Signal.State<Item[]>(ITEMS);
@@ -46,7 +46,7 @@ class ByIndex {
 
 describe(':key is required', () => {
   it('refuses to compile a `:for` without one', () => {
-    expect(() => compileTemplate(`<ul><li :for="x in xs.get()">{{ x }}</li></ul>`)).toThrow(
+    expect(() => compileTemplate(`<ul><li :for="x in xs.get()">{ x }</li></ul>`)).toThrow(
       /`:for` requires `:key`/,
     );
   });
@@ -54,7 +54,7 @@ describe(':key is required', () => {
   it('names both remedies in the error', () => {
     let message = '';
     try {
-      compileTemplate(`<ul><li :for="x in xs.get()">{{ x }}</li></ul>`);
+      compileTemplate(`<ul><li :for="x in xs.get()">{ x }</li></ul>`);
     } catch (err) {
       message = (err as Error).message;
     }
@@ -102,7 +102,7 @@ describe(':key="item.id" — identity that survives replacement', () => {
   it('pairs duplicate keys up in order', () => {
     @Component({
       selector: 'v-dupes',
-      render: compileTemplate(`<ul><li :for="s in items.get()" :key="s">{{ s }}</li></ul>`),
+      render: compileTemplate(`<ul><li :for="s in items.get()" :key="s">{ s }</li></ul>`),
     })
     class Dupes {
       items = new Signal.State(['a', 'b', 'a']);
@@ -132,7 +132,7 @@ describe(':key="$index" — explicit positional keying', () => {
   it('is available alongside a named index binding', () => {
     @Component({
       selector: 'v-both',
-      render: compileTemplate(`<ul><li :for="(item, i) in items.get()" :key="$index">{{ i }}:{{ item.text }}</li></ul>`),
+      render: compileTemplate(`<ul><li :for="(item, i) in items.get()" :key="$index">{ i }:{ item.text }</li></ul>`),
     })
     class Both {
       items = new Signal.State<Item[]>(ITEMS);

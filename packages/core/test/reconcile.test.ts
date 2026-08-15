@@ -20,7 +20,7 @@ beforeEach(() => {
 
 @Component({
   selector: 'v-rows',
-  render: compileTemplate(`<ul><li :for="n in items.get()" :key="n">{{ n }}</li></ul>`),
+  render: compileTemplate(`<ul><li :for="n in items.get()" :key="n">{ n }</li></ul>`),
 })
 class Rows {
   items = new Signal.State<number[]>([]);
@@ -173,7 +173,7 @@ describe('surrounding content is not disturbed', () => {
       render: compileTemplate(`
         <div>
           <header>top</header>
-          <ul><li :for="n in items.get()" :key="n">{{ n }}</li></ul>
+          <ul><li :for="n in items.get()" :key="n">{ n }</li></ul>
           <footer>bottom</footer>
         </div>
       `),
@@ -199,8 +199,8 @@ describe('surrounding content is not disturbed', () => {
       selector: 'v-two',
       render: compileTemplate(`
         <div>
-          <ul class="a"><li :for="n in a.get()" :key="n">{{ n }}</li></ul>
-          <ul class="b"><li :for="n in b.get()" :key="n">{{ n }}</li></ul>
+          <ul class="a"><li :for="n in a.get()" :key="n">{ n }</li></ul>
+          <ul class="b"><li :for="n in b.get()" :key="n">{ n }</li></ul>
         </div>
       `),
     })
