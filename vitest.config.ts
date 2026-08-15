@@ -44,6 +44,10 @@ function decorators(): Plugin {
 
 export default defineConfig({
   plugins: [decorators()],
+  // Tests assert on the developer diagnostics, so they run with them on. In a
+  // production build @voltjs/vite-plugin defines this as false and the
+  // minifier removes every guarded block.
+  define: { __VOLT_DEV__: 'true' },
   resolve: {
     alias: {
       '@voltjs/reactivity': resolve(root, 'packages/reactivity/src/index.ts'),

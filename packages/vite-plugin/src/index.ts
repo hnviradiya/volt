@@ -132,7 +132,22 @@ export function volt(options: VoltPluginOptions = {}): Plugin[] {
     },
   };
 
-  return [templatePlugin, decoratorPlugin];
+  const envPlugin: Plugin = {
+    name: 'volt:env',
+    config(_config, env) {
+      return {
+        define: {
+          // Volt guards its explanatory error messages with this so a
+          // production bundle carries none of them. Defined here rather than
+          // left to the app, because forgetting it would mean either shipping
+          // every diagnostic or crashing on an undefined identifier.
+          __VOLT_DEV__: JSON.stringify(env.mode !== 'production'),
+        },
+      };
+    },
+  };
+
+  return [envPlugin, templatePlugin, decoratorPlugin];
 }
 
 export default volt;

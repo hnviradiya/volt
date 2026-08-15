@@ -195,7 +195,7 @@ export function defineComponent<T extends ComponentType<unknown>>(
   config: ComponentConfig,
   props?: readonly PropDefinition[] | null,
 ): T {
-  if (!config.selector) {
+  if (__VOLT_DEV__ && !config.selector) {
     throw new Error(`[volt] @Component on ${target.name || '(anonymous class)'} needs a selector.`);
   }
 
@@ -345,12 +345,16 @@ function getRenderFn(component: ComponentType<unknown>, resolved: ResolvedConfig
     render = config.render;
   } else if (typeof config.templateUrl === 'string') {
     // Reaching here means the build-time pass did not run: `templateUrl` is
-    // read from disk, which the browser cannot do.
-    throw new Error(
-      `[volt] ${component.name} declares templateUrl "${config.templateUrl}", which is ` +
-        'resolved at build time. Add @voltjs/vite-plugin to your Vite config, or supply ' +
-        "`render` directly using compileTemplate() from '@voltjs/core/jit'.",
-    );
+    // read from disk, which the browser cannot do. A production bundle was
+    // built by the plugin by definition, so only the short form ships.
+    if (__VOLT_DEV__) {
+      throw new Error(
+        `[volt] ${component.name} declares templateUrl "${config.templateUrl}", which is ` +
+          'resolved at build time. Add @voltjs/vite-plugin to your Vite config, or supply ' +
+          "`render` directly using compileTemplate() from '@voltjs/core/jit'.",
+      );
+    }
+    throw new Error('[volt] templateUrl was not compiled');
   } else {
     render = () => null;
   }
@@ -393,33 +397,47 @@ function closestProp(name: string, declared: string[]): string | undefined {
   return declared.find((candidate) => normalise(candidate) === target);
 }
 
+/**
+ * Report a name that matches no declared prop.
+ *
+ * Volt has no fall-through for undeclared attributes, so such a name can only
+ * be a mistake — and silently doing nothing is the worst way to report one.
+ * The commonest is a kebab-cased spelling of a camelCase prop.
+ */
+function reportUnknownProp(key: string, resolved: ResolvedConfig): never {
+  const declared = [...resolved.propsByAlias.keys()];
+  const suggestion = closestProp(key, declared);
+  throw new Error(
+    `[volt] <${resolved.config.selector}> has no prop "${key}".` +
+      (suggestion ? ` Did you mean "${suggestion}"?` : '') +
+      (declared.length ? ` Declared props: ${declared.join(', ')}.` : ' It declares no props.'),
+  );
+}
+
+function checkRequiredProps(
+  props: Record<string, unknown> | null,
+  resolved: ResolvedConfig,
+): void {
+  for (const def of resolved.propsByAlias.values()) {
+    if (def.required && !(props && Object.hasOwn(props, def.alias))) {
+      throw new Error(`[volt] <${resolved.config.selector}> requires the prop "${def.alias}".`);
+    }
+  }
+}
+
 function applyProps(
   instance: Record<string, unknown>,
   props: Record<string, unknown> | null,
   resolved: ResolvedConfig,
 ): void {
-  const seen = new Set<string>();
-
   if (props) {
     for (const key of Object.keys(props)) {
       if (key === '__ref') continue;
-      seen.add(key);
 
       const def = resolved.propsByAlias.get(key);
       if (!def) {
-        // Volt has no fall-through for undeclared attributes, so a name that
-        // matches no prop can only be a mistake — and silently doing nothing
-        // is the worst way to report one. The commonest is a kebab-cased
-        // spelling of a camelCase prop.
-        const declared = [...resolved.propsByAlias.keys()];
-        const suggestion = closestProp(key, declared);
-        throw new Error(
-          `[volt] <${resolved.config.selector}> has no prop "${key}".` +
-            (suggestion ? ` Did you mean "${suggestion}"?` : '') +
-            (declared.length
-              ? ` Declared props: ${declared.join(', ')}.`
-              : ' It declares no props.'),
-        );
+        if (__VOLT_DEV__) reportUnknownProp(key, resolved);
+        continue;
       }
 
       const property = def.property;
@@ -446,13 +464,7 @@ function applyProps(
     }
   }
 
-  for (const def of resolved.propsByAlias.values()) {
-    if (def.required && !seen.has(def.alias)) {
-      throw new Error(
-        `[volt] <${resolved.config.selector}> requires the prop "${def.alias}".`,
-      );
-    }
-  }
+  if (__VOLT_DEV__) checkRequiredProps(props, resolved);
 }
 
 interface InstantiateOptions {
@@ -467,7 +479,9 @@ function instantiate(
   const resolved = CONFIGS.get(component);
   if (!resolved) {
     throw new Error(
-      `[volt] ${component.name} is not decorated with @Component.`,
+      __VOLT_DEV__
+        ? `[volt] ${component.name} is not decorated with @Component.`
+        : '[volt] not a component',
     );
   }
 
@@ -507,9 +521,10 @@ export function createComponent(
 ): unknown {
   const component = resolveComponent(parentCtx, tag);
   if (component) {
-    if (events) {
+    if (__VOLT_DEV__ && events) {
       // Components have no event channel: a parent passes a function in as an
-      // ordinary input and the child calls it.
+      // ordinary input and the child calls it. Purely an authoring mistake, so
+      // it is reported while developing and ignored in a shipped build.
       const name = Object.keys(events)[0] ?? '';
       throw new Error(
         `[volt] <${tag}> is a component, so \`:on-${name}\` does not apply. ` +
@@ -527,15 +542,18 @@ export function createComponent(
     return createCustomElement(tag, props, events, slots);
   }
 
-  const owner = (parentCtx as { constructor?: { name: string } } | null)?.constructor?.name;
-  throw new Error(
-    `[volt] Unknown component <${tag}>` +
-      (owner ? ` used by ${owner}` : '') +
-      `. Add it to that component's \`imports\`` +
-      (tag.includes('-')
-        ? ', or define it as a custom element before the component mounts.'
-        : '.'),
-  );
+  if (__VOLT_DEV__) {
+    const owner = (parentCtx as { constructor?: { name: string } } | null)?.constructor?.name;
+    throw new Error(
+      `[volt] Unknown component <${tag}>` +
+        (owner ? ` used by ${owner}` : '') +
+        `. Add it to that component's \`imports\`` +
+        (tag.includes('-')
+          ? ', or define it as a custom element before the component mounts.'
+          : '.'),
+    );
+  }
+  throw new Error(`[volt] unknown component <${tag}>`);
 }
 
 function createCustomElement(
@@ -626,7 +644,11 @@ export function mount(
     dispose = disposeRoot;
     const resolved = CONFIGS.get(component);
     if (!resolved) {
-      throw new Error(`[volt] ${component.name} is not decorated with @Component.`);
+      throw new Error(
+        __VOLT_DEV__
+          ? `[volt] ${component.name} is not decorated with @Component.`
+          : '[volt] not a component',
+      );
     }
 
     // Capture the instance without a second construction.

@@ -20,7 +20,7 @@ type TransformHook = (
 const FIXTURE_ID = resolve(import.meta.dirname, 'fixtures/component.ts');
 
 async function lower(code: string): Promise<string | null> {
-  const decorators = volt()[1]!;
+  const decorators = volt().find((p) => p.name === 'volt:decorators')!;
   const hook = decorators.transform as unknown as TransformHook;
   const context = {
     error(message: string): never {

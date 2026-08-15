@@ -36,8 +36,9 @@ async function runTransform(
 }
 
 function plugins(options?: Parameters<typeof volt>[0]) {
-  const [templates, decorators] = volt(options);
-  return { templates: templates!, decorators: decorators! };
+  const all = volt(options);
+  const byName = (name: string) => all.find((p) => p.name === name)!;
+  return { templates: byName('volt:templates'), decorators: byName('volt:decorators') };
 }
 
 const COMPONENT = `

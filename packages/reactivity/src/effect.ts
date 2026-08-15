@@ -143,7 +143,7 @@ export function createRoot<T>(
 
 export function onCleanup(fn: CleanupFn): CleanupFn {
   if (currentScope === null) {
-    if (typeof console !== 'undefined') {
+    if (__VOLT_DEV__ && typeof console !== 'undefined') {
       console.warn('[volt] onCleanup called outside a reactive scope — it will never run.');
     }
     return fn;
@@ -231,9 +231,11 @@ export function flushSync(): void {
         renderWatcher.watch();
         if (++passes > MAX_FLUSH_PASSES) {
           throw new Error(
-            '[volt] Render effects did not settle after ' +
-              MAX_FLUSH_PASSES +
-              ' passes — a render effect is very likely writing a signal it also reads.',
+            __VOLT_DEV__
+              ? '[volt] Render effects did not settle after ' +
+                MAX_FLUSH_PASSES +
+                ' passes — a render effect is very likely writing a signal it also reads.'
+              : '[volt] render effects did not settle',
           );
         }
         continue;
@@ -247,9 +249,11 @@ export function flushSync(): void {
 
       if (++passes > MAX_FLUSH_PASSES) {
         throw new Error(
-          '[volt] Effects did not settle after ' +
-            MAX_FLUSH_PASSES +
-            ' passes — an effect is very likely writing a signal it also reads.',
+          __VOLT_DEV__
+            ? '[volt] Effects did not settle after ' +
+              MAX_FLUSH_PASSES +
+              ' passes — an effect is very likely writing a signal it also reads.'
+            : '[volt] effects did not settle',
         );
       }
     }
