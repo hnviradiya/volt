@@ -3,7 +3,11 @@
   "compilerOptions": {
     "emitDeclarationOnly": true,
     "declaration": true,
-    "declarationMap": true
+    "declarationMap": true,
+    // Declarations ship, so these do go to dist — alongside Vite's bundles,
+    // never overlapping them.
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "exclude": ["**/*.test.ts", "test/**"]
 }

@@ -7,6 +7,9 @@ dist/
 build/
 *.tsbuildinfo
 
+# Type-check emit; see packages/*/tsconfig.json
+.tsc/
+
 # VitePress.
 # A pattern containing a slash is anchored to this file's directory, so
 # `.vitepress/cache/` would only ever match at the repo root. The `**/` prefix
