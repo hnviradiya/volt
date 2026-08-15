@@ -270,22 +270,34 @@ and tables *inside* content. That is a specialist engine, not a component.
 **Decided: write our own engine.** No dependency on ProseMirror or Lexical,
 consistent with the rest of the project owning its stack.
 
-The risks are recorded here because they are the ones that stay invisible
-until production, and each needs deliberate work rather than discovery:
+**Collaborative editing is V2.** That leaves IME composition, cross-browser
+selection and undo grouping as the V1 hazards — each hard, none open-ended.
 
-- **Input-method composition.** `compositionstart`/`compositionend` around
-  Chinese, Japanese and Korean input. Naive models corrupt text mid-composition.
-- **Selection across browsers.** `Selection` and `Range` disagree between
-  engines, especially around contenteditable boundaries and zero-width nodes.
-- **Undo grouping.** Users expect word-level grouping and coalescing by time,
-  not per keystroke; and undo has to survive collaborative remote edits.
-- **Schema.** A constrained document model is what stops paste from injecting
-  arbitrary markup, and what makes tables-inside-content tractable.
-- **Collaboration.** If it is ever wanted, the document model has to be
-  designed for it up front — CRDT or OT cannot be retrofitted cheaply.
+One caveat, and it is the reason this is written down rather than assumed.
+Deferring collaboration is safe. Deferring the *shape of the document model*
+is not: a model built on mutation and integer offsets cannot be made
+collaborative later without rewriting it and everything layered on it.
 
-Build the document model and schema first, then selection, then input, then
-the UI. The UI is the smallest part.
+The way to defer collaboration at no cost is to build the model
+operation-based from the start — an immutable document plus explicit steps
+that describe a change, rather than mutation in place. That is not a
+concession to collaboration. It is what makes the other three V1 problems
+tractable:
+
+- **Undo** becomes inverting steps, which is how word-level grouping and
+  coalescing by time are expressed at all. A snapshot stack cannot do either
+  without storing whole documents.
+- **Schema validation** happens on a step before it is applied, rather than
+  after the document is already wrong.
+- **IME** needs a composition to be one atomic change; a step is exactly that,
+  where a sequence of mutations is not.
+
+So: build immutable documents and steps, keep positions as mappable
+references rather than raw offsets, and collaboration in V2 becomes adding a
+rebase function rather than a rewrite.
+
+Build order: the document model and schema first, then selection, then input,
+then the interface — which is much the smallest part.
 
 ### Date and time
 
