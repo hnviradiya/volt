@@ -128,3 +128,55 @@ describe('event delegation is limited to events it suits', () => {
     expect(gen(`<button :click.once="go()"></button>`)).toContain('_rt.on(');
   });
 });
+
+describe('components that cannot render on first paint', () => {
+  const deferrable = (template: string) => compile(template).deferrable.sort();
+
+  it('finds a component reachable only behind a condition', () => {
+    expect(deferrable(`<div><v-chart :if="open.get()"></v-chart></div>`)).toEqual(['v-chart']);
+  });
+
+  it('finds one reachable only through a portal', () => {
+    expect(deferrable(`<div><v-dialog :portal></v-dialog></div>`)).toEqual(['v-dialog']);
+  });
+
+  it('leaves out a component rendered directly', () => {
+    expect(deferrable(`<div><v-header></v-header></div>`)).toEqual([]);
+  });
+
+  it('leaves out one used both ways', () => {
+    // A single direct occurrence puts it on the first-paint path, so splitting
+    // it would add a round trip to the critical path.
+    expect(
+      deferrable(`<div><v-icon></v-icon><v-icon :if="x.get()"></v-icon></div>`),
+    ).toEqual([]);
+  });
+
+  it('sees through nesting to the component inside', () => {
+    expect(
+      deferrable(`<div><section :if="open.get()"><v-chart></v-chart></section></div>`),
+    ).toEqual(['v-chart']);
+  });
+
+  it('counts an else branch as conditional too', () => {
+    expect(
+      deferrable(`<div><b :if="x.get()">a</b><v-fallback :else></v-fallback></div>`),
+    ).toEqual(['v-fallback']);
+  });
+
+  it('does not treat a list as deferrable', () => {
+    // A list is very often non-empty on first render. Being wrong about a
+    // dialog costs nothing; being wrong here costs a round trip.
+    expect(
+      deferrable(`<ul><v-row :for="r in rows.get()" :key="r.id"></v-row></ul>`),
+    ).toEqual([]);
+  });
+
+  it('reports several independent ones', () => {
+    expect(
+      deferrable(
+        `<div><v-a :if="x.get()"></v-a><v-b :portal></v-b><v-c></v-c></div>`,
+      ),
+    ).toEqual(['v-a', 'v-b']);
+  });
+});

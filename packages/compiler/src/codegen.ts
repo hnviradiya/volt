@@ -75,6 +75,20 @@ export interface CodegenResult {
   templates: string[];
   /** What the compiler removed or folded before runtime ever sees it. */
   stats: CompileStats;
+  /**
+   * Component tags this template can never render on first paint.
+   *
+   * A tag qualifies when every one of its occurrences sits inside a `:if`
+   * chain or a `:portal` — so reaching it always depends on a condition, and
+   * the initial render cannot include it unless that condition starts true.
+   * The build uses this to decide what to split into its own chunk without
+   * anyone having to declare it.
+   *
+   * `:for` deliberately does not qualify. A list is very often non-empty on
+   * first render, and being wrong there costs a round trip on the critical
+   * path — whereas being wrong about a dialog costs nothing.
+   */
+  deferrable: string[];
 }
 
 export interface CompileStats {
@@ -157,6 +171,11 @@ class Generator {
   private hoisted: string[] = [];
   private uid = 0;
 
+  /** Depth of `:if` / `:portal` nesting, for the deferrable-tag analysis. */
+  private conditionalDepth = 0;
+  /** Every component tag seen, mapped to whether it was ever unconditional. */
+  private componentTags = new Map<string, boolean>();
+
   private stats: CompileStats = {
     templates: 0,
     dedupedTemplates: 0,
@@ -208,6 +227,9 @@ class Generator {
       renderExpression: expression,
       templates: this.templates,
       stats: this.stats,
+      deferrable: [...this.componentTags]
+        .filter(([, unconditional]) => !unconditional)
+        .map(([tag]) => tag),
     };
   }
 
@@ -276,6 +298,12 @@ class Generator {
         return this.genSlotOutlet(only, ctx);
       }
       if (only.type === 'element') {
+        // Checked before the rest: a portalled element renders elsewhere, so
+        // whatever it is — component, template or plain element — this
+        // position yields nothing.
+        if (findDirective(only, 'portal') && !findDirective(only, 'if')) {
+          return `(${this.genPortal(only, ctx).replace(/;$/, '')}, null)`;
+        }
         if (findDirective(only, 'if')) return this.genConditionalChain([only], ctx);
         if (findDirective(only, 'for')) return this.genFor(only, ctx);
         if (only.isComponent) return this.genComponent(only, ctx);
@@ -632,6 +660,11 @@ class Generator {
     if (children.length !== 1) return false;
 
     const only = children[0]!;
+    // A portalled child contributes nothing at this position, so there is
+    // nothing to insert here and this path does not apply. Without this it
+    // would take the component branch below and the portal would be dropped.
+    if (only.type === 'element' && findDirective(only, 'portal')) return false;
+
     const isDynamic =
       only.type === 'slot-outlet' ||
       (only.type === 'element' &&
@@ -1014,9 +1047,11 @@ class Generator {
     // Default to the document body, which is what an overlay almost always
     // wants and saves every call site writing it out.
     const target = dir.exp ? this.genAccessor(dir.exp, ctx) : 'null';
-    const body = stripped.isTemplate
-      ? this.genChildrenExpression(stripped.children, ctx)
-      : this.genChildrenExpression([stripped], ctx);
+    const body = this.inConditional(() =>
+      stripped.isTemplate
+        ? this.genChildrenExpression(stripped.children, ctx)
+        : this.genChildrenExpression([stripped], ctx),
+    );
     return `${this.rt}.portal(${target}, ${this.thunk(body)});`;
   }
 
@@ -1033,6 +1068,10 @@ class Generator {
 
   /** Render one branch of a conditional without re-triggering its own `:if`. */
   private genBranchBody(node: ElementNode, ctx: PrintContext): string {
+    return this.inConditional(() => this.genBranchBodyInner(node, ctx));
+  }
+
+  private genBranchBodyInner(node: ElementNode, ctx: PrintContext): string {
     const stripped = stripDirectives(node, ['if', 'else-if', 'else']);
     if (findDirective(stripped, 'for')) {
       return this.genFor(stripped, ctx);
@@ -1235,7 +1274,26 @@ class Generator {
   // Components
   // -------------------------------------------------------------------------
 
+  /** Note a component tag, and whether this occurrence is reachable directly. */
+  private noteComponentTag(tag: string): void {
+    const unconditional = this.conditionalDepth === 0;
+    // Once seen unconditionally it stays that way: one direct occurrence is
+    // enough to put the component on the first-paint path.
+    this.componentTags.set(tag, (this.componentTags.get(tag) ?? false) || unconditional);
+  }
+
+  /** Generate `body` as sitting behind a condition, for the analysis. */
+  private inConditional<T>(body: () => T): T {
+    this.conditionalDepth++;
+    try {
+      return body();
+    } finally {
+      this.conditionalDepth--;
+    }
+  }
+
   private genComponent(node: ElementNode, ctx: PrintContext): string {
+    this.noteComponentTag(node.tag);
     const props: string[] = [];
     const events: string[] = [];
 

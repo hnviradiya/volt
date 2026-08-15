@@ -182,3 +182,47 @@ describe('the properties a dialog depends on', () => {
     expect(target.childNodes).toHaveLength(0);
   });
 });
+
+describe('portalling a component', () => {
+  it('moves a component, not just an element', () => {
+    @Component({ selector: 'v-inner', render: compileTemplate(`<b>inner</b>`) })
+    class Inner {}
+
+    @Component({
+      selector: 'v-outer',
+      imports: [Inner],
+      render: compileTemplate(`<div><v-inner :portal="'#elsewhere'"></v-inner></div>`),
+    })
+    class Outer {}
+
+    mount(Outer, host);
+    // Silently dropped before: a lone component child took a fast path that
+    // never looked for `:portal`.
+    expect(document.querySelector('#elsewhere')!.textContent).toBe('inner');
+    expect(host.querySelector('b')).toBeNull();
+  });
+
+  it('portals a component that is also conditional', () => {
+    @Component({ selector: 'v-inner2', render: compileTemplate(`<b>x</b>`) })
+    class Inner {}
+
+    @Component({
+      selector: 'v-outer2',
+      imports: [Inner],
+      render: compileTemplate(
+        `<div><v-inner2 :if="open.get()" :portal="'#elsewhere'"></v-inner2></div>`,
+      ),
+    })
+    class Outer {
+      open = new Signal.State(false);
+    }
+
+    const handle = mount(Outer, host);
+    const target = document.querySelector('#elsewhere')!;
+    expect(target.textContent).toBe('');
+
+    (handle.instance as Outer).open.set(true);
+    flushSync();
+    expect(target.textContent).toBe('x');
+  });
+});
