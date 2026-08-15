@@ -176,6 +176,13 @@ Naming their real feature surface here so it is not discovered later.
 
 The single largest thing on this roadmap. Its own package, `@voltjs/grid`.
 
+**Decided: started in parallel**, rather than after the six behaviour-forming
+components. The cost to watch is that the grid needs virtualization,
+collection and roving focus before `@voltjs/primitives` defines them, so those
+must be written in the shared package from the start even though only the grid
+uses them at first — otherwise the grid grows a private copy that combobox and
+tree later have to reconcile with.
+
 - **Rendering** — row and column virtualization, variable row height, pinned
   top/bottom rows, pinned left/right columns, auto-height, RTL
 - **Columns** — resize, reorder, hide, pin, auto-size, column groups,
@@ -203,14 +210,25 @@ Robustness here means schema-constrained documents, collaborative editing,
 input-method support for non-Latin scripts, undo grouping, paste sanitisation,
 and tables *inside* content. That is a specialist engine, not a component.
 
-Two ways to get it, and this is a decision rather than a detail:
+**Decided: write our own engine.** No dependency on ProseMirror or Lexical,
+consistent with the rest of the project owning its stack.
 
-- **Bind a proven engine** — ProseMirror or Lexical, both framework-agnostic.
-  Volt supplies the view layer and the UI. This is how Tiptap, and every
-  serious editor in every framework, is actually built.
-- **Write the engine** — years of work, and the failure modes (IME, selection
-  across browsers, collaborative conflict resolution) are exactly the ones
-  that are invisible until they are in production.
+The risks are recorded here because they are the ones that stay invisible
+until production, and each needs deliberate work rather than discovery:
+
+- **Input-method composition.** `compositionstart`/`compositionend` around
+  Chinese, Japanese and Korean input. Naive models corrupt text mid-composition.
+- **Selection across browsers.** `Selection` and `Range` disagree between
+  engines, especially around contenteditable boundaries and zero-width nodes.
+- **Undo grouping.** Users expect word-level grouping and coalescing by time,
+  not per keystroke; and undo has to survive collaborative remote edits.
+- **Schema.** A constrained document model is what stops paste from injecting
+  arbitrary markup, and what makes tables-inside-content tractable.
+- **Collaboration.** If it is ever wanted, the document model has to be
+  designed for it up front — CRDT or OT cannot be retrofitted cheaply.
+
+Build the document model and schema first, then selection, then input, then
+the UI. The UI is the smallest part.
 
 ### Date and time
 
