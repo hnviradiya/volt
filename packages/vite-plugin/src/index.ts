@@ -3,9 +3,12 @@
  *
  * Two build-time jobs, both of which remove work from the browser:
  *
- *  1. **Standard decorators.** `@Component` and friends are TC39 stage-3
- *     syntax that no engine implements yet, and Vite's oxc transformer does
- *     not lower them. This plugin does, via esbuild.
+ *  1. **Standard decorators.** `@Component` and `@Prop` are TC39 stage-3
+ *     syntax that no engine implements yet. Rather than ship a decorator
+ *     runtime to evaluate them, this plugin resolves them: it already knows
+ *     every selector and prop name, so it emits the registration call they
+ *     would have made and deletes the syntax. Files using decorators Volt does
+ *     not own fall back to esbuild, which lowers them the ordinary way.
  *
  *  2. **Template and style compilation.** `templateUrl` becomes a `render`
  *     function built from hoisted `<template>` clones, and `styleUrl` is
@@ -17,9 +20,12 @@ import { readFile } from 'node:fs/promises';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { transform as esbuildTransform } from 'esbuild';
+import MagicString from 'magic-string';
 import { compileStringAsync } from 'sass';
 import { compile, CompilerError } from '@voltjs/compiler';
 import type { Plugin } from 'vite';
+import { DecoratorError, planLowering } from './decorators.js';
+import { isIdentChar, matchDelimiter, skipQuoted, skipTemplateLiteral } from './scan.js';
 
 export interface VoltPluginOptions {
   /** File pattern to process. Defaults to `.ts`/`.mts` outside node_modules. */
@@ -39,6 +45,7 @@ export interface VoltPluginOptions {
 const DEFAULT_INCLUDE = /\.m?ts$/;
 const DEFAULT_EXCLUDE = /[\\/]node_modules[\\/]/;
 const RUNTIME_NAMESPACE = '__volt_rt';
+const DEFINE_LOCAL = '__volt_define';
 
 export function volt(options: VoltPluginOptions = {}): Plugin[] {
   const include = options.include ?? DEFAULT_INCLUDE;
@@ -79,9 +86,33 @@ export function volt(options: VoltPluginOptions = {}): Plugin[] {
     enforce: 'pre',
     async transform(code, id) {
       if (!shouldProcess(id)) return null;
-      // Cheap gate: only files that actually decorate something.
-      if (!/^\s*@[A-Za-z_$]/m.test(code)) return null;
+      // Cheap gate: `@` followed by a name is the only thing worth scanning
+      // for, and the scan itself ignores comments and strings.
+      if (!/@[A-Za-z_$]/.test(code)) return null;
 
+      let plan;
+      try {
+        plan = planLowering(code, DEFINE_LOCAL);
+      } catch (err) {
+        if (err instanceof DecoratorError) this.error(`${err.message}\n  in ${id}`);
+        throw err;
+      }
+
+      if (plan.kind === 'none') return null;
+
+      if (plan.kind === 'lowered') {
+        const s = new MagicString(code);
+        for (const { start, end } of plan.removals) s.remove(start, end);
+        for (const { at, text } of plan.insertions) s.appendRight(at, text);
+        s.prepend(
+          `import { defineComponent as ${DEFINE_LOCAL} } from ${JSON.stringify(runtimeModule)};\n`,
+        );
+        // Only decorators were removed, so what is left is ordinary
+        // TypeScript that Vite's own transformer handles.
+        return { code: s.toString(), map: s.generateMap({ hires: true, source: id }) };
+      }
+
+      // Decorators Volt does not own: esbuild lowers the file, runtime and all.
       const result = await esbuildTransform(code, {
         loader: 'ts',
         // es2022 keeps modern output while still lowering decorators, which
@@ -293,7 +324,7 @@ function findStyleSites(code: string): StyleSite[] {
     }
 
     if (quote === '[') {
-      const end = matchBracket(code, valueStart);
+      const end = matchDelimiter(code, valueStart);
       const inner = code.slice(valueStart + 1, end - 1);
       const paths = [...inner.matchAll(/['"]([^'"]+)['"]/g)].map((m) => m[1]!);
       if (paths.length === 0) return null;
@@ -319,8 +350,6 @@ function scanComponentProperties(
   let i = 0;
   let componentDepth = -1;
   let depth = 0;
-
-  const isIdentChar = (ch: string) => /[A-Za-z0-9_$]/.test(ch);
 
   while (i < code.length) {
     const ch = code[i]!;
@@ -388,66 +417,6 @@ function scanComponentProperties(
 
     i++;
   }
-}
-
-/** Index just past the `]` matching the `[` at `start`. */
-function matchBracket(code: string, start: number): number {
-  let depth = 0;
-  let i = start;
-  while (i < code.length) {
-    const ch = code[i]!;
-    if (ch === '"' || ch === "'") {
-      i = skipQuoted(code, i, ch);
-      continue;
-    }
-    if (ch === '[') depth++;
-    else if (ch === ']') {
-      depth--;
-      if (depth === 0) return i + 1;
-    }
-    i++;
-  }
-  return i;
-}
-
-function skipQuoted(code: string, start: number, quote: string): number {
-  let i = start + 1;
-  while (i < code.length) {
-    if (code[i] === '\\') {
-      i += 2;
-      continue;
-    }
-    if (code[i] === quote) return i + 1;
-    i++;
-  }
-  return i;
-}
-
-function skipTemplateLiteral(code: string, start: number): number {
-  let i = start + 1;
-  while (i < code.length) {
-    if (code[i] === '\\') {
-      i += 2;
-      continue;
-    }
-    if (code[i] === '`') return i + 1;
-    if (code[i] === '$' && code[i + 1] === '{') {
-      let braces = 1;
-      i += 2;
-      while (i < code.length && braces > 0) {
-        if (code[i] === '{') braces++;
-        else if (code[i] === '}') braces--;
-        else if (code[i] === '`') {
-          i = skipTemplateLiteral(code, i);
-          continue;
-        }
-        i++;
-      }
-      continue;
-    }
-    i++;
-  }
-  return i;
 }
 
 export { compile, CompilerError };

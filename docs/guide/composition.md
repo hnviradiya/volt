@@ -23,13 +23,15 @@ neither component re-renders, and no diff runs.
 
 ```ts
 @Prop() a = new Signal.State(0);  // reactive; read as a.get()
-@Prop() accessor b = 0;           // reactive; read as b
-@Prop() c = 0;                    // not reactive
+@Prop() b = 0;                    // not reactive
 ```
 
-Use the first when the child passes the signal around, the second when you
-want the ergonomics of a plain property, the third only for values that never
-change after construction.
+Use the first whenever the parent can change the value after construction, the
+second only for values that never change.
+
+There is no third form that is reactive but reads like a plain property. A
+property is reactive because it holds a signal, and nothing else — so
+`{{ a.get() }}` in a template means exactly what it means in a method.
 
 ## Notifying the parent
 

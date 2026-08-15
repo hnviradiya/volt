@@ -69,9 +69,6 @@ export class Counter {
   // Reactive: a parent write flows in through .set()
   @Prop() step = new Signal.State(1);
 
-  // Reactive: signal-backed automatically, read as a plain property
-  @Prop() accessor label = 'Counter';
-
   // Not reactive: plain assignment, fine for values that never change
   @Prop() id = '';
 }

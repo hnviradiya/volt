@@ -92,6 +92,9 @@ importers:
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
+      magic-string:
+        specifier: ^0.30.21
+        version: 0.30.21
       sass:
         specifier: ^1.102.0
         version: 1.102.0

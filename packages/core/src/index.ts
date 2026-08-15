@@ -15,6 +15,7 @@
 export {
   Component,
   Prop,
+  defineComponent,
   mount,
   getComponentConfig,
   isComponent,
@@ -26,6 +27,7 @@ export type {
   ComponentConfig,
   ComponentType,
   PropOptions,
+  PropDefinition,
   MountHandle,
   OnMount,
   RenderFn,

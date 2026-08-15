@@ -24,7 +24,6 @@
  */
 
 import {
-  Signal,
   createRoot,
   flushSync,
   getScope,
@@ -103,6 +102,14 @@ export interface PropOptions {
   required?: boolean;
 }
 
+/** A prop as handed to `defineComponent` — what `@Prop` records per field. */
+export interface PropDefinition {
+  property: string;
+  /** Template-facing name. Defaults to `property`. */
+  alias?: string;
+  required?: boolean;
+}
+
 interface PropDef {
   property: string;
   alias: string;
@@ -176,6 +183,38 @@ function readMetadata<T>(metadata: MetadataRecord | undefined, key: symbol): T[]
 // ---------------------------------------------------------------------------
 
 /**
+ * Register a class as a component without decorator syntax.
+ *
+ * This is what `@Component` reduces to, and what `@voltjs/vite-plugin` emits
+ * directly: knowing every prop at build time, it can drop both decorators from
+ * the output rather than shipping a decorator runtime to evaluate them. Hand
+ * calls are supported but rarely worth writing.
+ */
+export function defineComponent<T extends ComponentType<unknown>>(
+  target: T,
+  config: ComponentConfig,
+  props?: readonly PropDefinition[] | null,
+): T {
+  if (!config.selector) {
+    throw new Error(`[volt] @Component on ${target.name || '(anonymous class)'} needs a selector.`);
+  }
+
+  const propsByAlias = new Map<string, PropDef>();
+  if (props) {
+    for (const def of props) {
+      propsByAlias.set(def.alias ?? def.property, {
+        property: def.property,
+        alias: def.alias ?? def.property,
+        required: def.required ?? false,
+      });
+    }
+  }
+
+  CONFIGS.set(target, { config, propsByAlias, stylesInjected: false });
+  return target;
+}
+
+/**
  * Mark a class as a component.
  *
  * Runs after every member decorator, so the metadata it reads is complete.
@@ -188,19 +227,8 @@ export function Component(config: ComponentConfig) {
     if (context.kind !== 'class') {
       throw new Error('[volt] @Component can only be applied to a class.');
     }
-    if (!config.selector) {
-      throw new Error(`[volt] @Component on ${String(context.name)} needs a selector.`);
-    }
-
     const metadata = context.metadata as MetadataRecord | undefined;
-
-    const propsByAlias = new Map<string, PropDef>();
-    for (const def of readMetadata<PropDef>(metadata, PROPS)) {
-      propsByAlias.set(def.alias, def);
-    }
-
-    CONFIGS.set(target, { config, propsByAlias, stylesInjected: false });
-    return target;
+    return defineComponent(target, config, readMetadata<PropDef>(metadata, PROPS));
   };
 }
 
@@ -211,17 +239,32 @@ export function Component(config: ComponentConfig) {
  * a function it was given, so there is no separate event channel.
  *
  *   `@Prop() n = new Signal.State(0)`      parent writes call `.set()` — reactive
- *   `@Prop() accessor n = 0`               signal-backed automatically — reactive
  *   `@Prop() n = 0`                        plain assignment — not reactive
  *   `@Prop() onDone?: (v: T) => void`      a callback the child invokes
+ *
+ * A prop is reactive because it holds a signal, never because the decorator
+ * rewrote the property behind your back. That is why `accessor` is rejected:
+ * it would make `{{ label }}` a tracked read while looking like a plain field,
+ * which is the one thing Volt's reactivity does not do.
  */
 export function Prop(options: PropOptions = {}) {
-  return function decorateProp(
-    target: unknown,
-    context: ClassFieldDecoratorContext | ClassAccessorDecoratorContext,
-  ): unknown {
+  return function decorateProp(_target: undefined, context: ClassFieldDecoratorContext): void {
+    const kind = (context as { kind: string }).kind;
+    const name = String((context as { name?: unknown }).name);
+
+    if (kind !== 'field') {
+      throw new Error(
+        `[volt] @Prop applies to a field, not ${kind} (${name}).` +
+          (kind === 'accessor'
+            ? '\n  Volt has no hidden reactivity — a property is reactive because it' +
+              '\n  holds a signal, never because a decorator rewrote it:' +
+              `\n    @Prop() ${name} = new Signal.State(...);   // reactive — read ${name}.get()` +
+              `\n    @Prop() ${name} = ...;                     // constant`
+            : ''),
+      );
+    }
     if (context.static) {
-      throw new Error(`[volt] @Prop cannot be used on a static member (${String(context.name)}).`);
+      throw new Error(`[volt] @Prop cannot be used on a static member (${name}).`);
     }
     if (typeof context.name === 'symbol') {
       throw new Error('[volt] @Prop cannot be used on a symbol-named property.');
@@ -233,26 +276,6 @@ export function Prop(options: PropOptions = {}) {
       alias: options.alias ?? property,
       required: options.required ?? false,
     });
-
-    if (context.kind === 'accessor') {
-      // Back the accessor with a signal so reads inside a template subscribe.
-      const store = new WeakMap<object, Signal.State<unknown>>();
-      void (target as ClassAccessorDecoratorTarget<unknown, unknown>);
-      return {
-        get(this: object) {
-          return store.get(this)?.get();
-        },
-        set(this: object, value: unknown) {
-          store.get(this)?.set(value);
-        },
-        init(this: object, initial: unknown) {
-          store.set(this, new Signal.State(initial));
-          return initial;
-        },
-      } satisfies ClassAccessorDecoratorResult<object, unknown>;
-    }
-
-    return undefined;
   };
 }
 

@@ -7,4 +7,4 @@
  */
 
 export * from './dom.js';
-export { createComponent, slot } from './component.js';
+export { createComponent, slot, defineComponent } from './component.js';

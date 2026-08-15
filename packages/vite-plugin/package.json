@@ -23,6 +23,7 @@
   "dependencies": {
     "@voltjs/compiler": "workspace:*",
     "esbuild": "^0.28.2",
+    "magic-string": "^0.30.21",
     "sass": "^1.102.0"
   },
   "peerDependencies": {

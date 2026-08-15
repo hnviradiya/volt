@@ -40,13 +40,16 @@ interface PropOptions {
 }
 ```
 
-Three forms, differing in reactivity:
+Two forms, differing in reactivity:
 
 ```ts
 @Prop() a = new Signal.State(0);  // parent writes call .set() — reactive
-@Prop() accessor b = 0;           // signal-backed automatically — reactive
-@Prop() c = 0;                    // plain assignment — not reactive
+@Prop() b = 0;                    // plain assignment — not reactive
 ```
+
+A prop is reactive because it holds a signal, never because the decorator
+rewrote the property. `@Prop() accessor` is rejected for that reason: it would
+make `{{ b }}` a tracked read while looking like a plain field.
 
 A missing required prop throws at construction.
 

@@ -15,6 +15,7 @@ export default defineConfig({
   build: {
     target: 'esnext',
     minify: 'terser',
+    sourcemap: true,
     terserOptions: {
       compress: { passes: 3, unsafe_arrows: true, unsafe_methods: true, booleans_as_integers: true },
       mangle: { toplevel: true },

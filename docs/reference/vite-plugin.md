@@ -18,7 +18,34 @@ Vite toolchain does.
 no JavaScript engine. Vite 8 transforms with oxc, which parses decorators but
 emits them untouched, and TypeScript 7 is the native Go port with no
 JavaScript transform API. Without this pass, `@Component` reaches the browser
-as a syntax error. The plugin uses esbuild, which does lower them.
+as a syntax error.
+
+Rather than ship a decorator runtime to evaluate them, the plugin *resolves*
+them. It already knows every selector and prop name, and `@Component` only
+ever ends in a registration call, so it emits that call and deletes the
+syntax:
+
+```ts
+// what you write
+@Component({ selector: 'v-counter', templateUrl: './counter.html' })
+export class Counter {
+  @Prop() start = new Signal.State(0);
+}
+
+// what ships
+export class Counter {
+  start = new Signal.State(0);
+}
+defineComponent(Counter, { selector: 'v-counter', render: __volt_render_0 },
+  [{ property: 'start' }]);
+```
+
+Nothing about authoring changes — the decorators stay in your source, keep
+their types, and still work at runtime for anyone without a build step. This
+only means the bundle never carries the ~4.6 kB of helpers needed to run them.
+
+A file using decorators Volt does not own falls back to esbuild, which lowers
+the whole file the ordinary way. That is always correct, only larger.
 
 **It compiles templates at build time.** `templateUrl` inside a `@Component`
 is resolved, read, and compiled into a `render` function with hoisted static
