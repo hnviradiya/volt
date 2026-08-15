@@ -67,8 +67,7 @@ or symbol-named members.
 
 ## Notifying the parent
 
-There is no `@Output` and no `EventEmitter`. A component notifies its parent
-through a callback passed in as an input:
+A component notifies its parent by calling a function the parent gave it:
 
 ```ts
 @Prop() onChanged?: (value: number) => void;
@@ -84,8 +83,8 @@ this.onChanged?.(next);
 A prop matching `on[A-Z]` given a bare method reference is bound to the
 component that declared it, so `this` is correct without an arrow.
 
-`:on-*` remains the syntax for real DOM and custom-element events. Applying
-it to a Volt component throws, naming the callback prop to use instead.
+`:on-*` is the syntax for real DOM and custom-element events. Applying it to a
+Volt component throws, naming the callback prop to use instead.
 
 ## Lifecycle
 
@@ -99,10 +98,14 @@ interface OnMount { onMount(): void }
 | `onMount` | after the component's DOM is in the document |
 | `onCleanup(fn)` | registered anywhere in the component; runs on teardown |
 
-There is no `onInit`: a `Signal.Computed` field reads props lazily, and an
-`effect` field has its first run deferred until after props are applied.
-There is no `onDestroy`: `onCleanup` does the same job beside the setup it
-undoes.
+Setup belongs in field initializers: a `Signal.Computed` reads props lazily,
+and an `effect` has its first run deferred until after props are applied, so
+both see the values the parent passed. Teardown belongs in `onCleanup`,
+written beside the setup it undoes.
+
+`onMount` exists for the one thing neither can do — touching DOM that is
+already in the document, for focus, measurement, or handing an element to a
+library.
 
 `mount()` flushes before returning, so the tree it hands back already
 reflects any field effects.

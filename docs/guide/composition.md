@@ -51,7 +51,7 @@ export class Editor {
 <v-editor :onSaved="(text) => persist(text)"></v-editor>
 ```
 
-The child calls a function it was handed. There is no emitter, no
+The child calls a function it was handed. No emitter, no
 subscription, and nothing to tear down — which also means the callback is
 fully typed end to end.
 

@@ -328,9 +328,26 @@ function reportError(err: unknown): void {
 // Effects
 // ---------------------------------------------------------------------------
 
+/**
+ * An effect's computed node, which is also its scope.
+ *
+ * Two objects were allocated per effect: the computed, and a separate scope
+ * holding its children and cleanups. Effect construction is what building a
+ * list row is made of, so that second object was paid for on every binding of
+ * every row. A subclass keeps the scope fields off ordinary computeds, which
+ * never need them, while giving effects both roles in one allocation.
+ */
+class EffectNode extends ComputedSignal<void> implements Scope {
+  parent: Scope | null = null;
+  children: Scope[] | null = null;
+  slot = -1;
+  cleanups: CleanupFn[] | null = null;
+  contexts: Map<symbol, unknown> | null = null;
+  disposed = false;
+}
+
 function createEffect(fn: EffectFn, watcher: WatcherNode, immediate: boolean): Dispose {
   const parent = currentScope;
-  const scope = createScope(parent);
   let cleanup: CleanupFn | null = null;
   let disposed = false;
 
@@ -340,7 +357,7 @@ function createEffect(fn: EffectFn, watcher: WatcherNode, immediate: boolean): D
   // constructor builds around it) for a comparison that is never reached,
   // because a node marked as an effect skips the equality path entirely. Row
   // creation is dominated by effect construction, so this is not incidental.
-  const computed = new ComputedSignal<void>(function effectBody() {
+  const computed: EffectNode = new EffectNode(function effectBody() {
     // Each run starts from a clean slate: children disposed, cleanups run.
     clearScope(scope);
     if (cleanup) {
@@ -356,9 +373,18 @@ function createEffect(fn: EffectFn, watcher: WatcherNode, immediate: boolean): D
     if (typeof result === 'function') cleanup = result;
   });
 
-  markEffectComputed(computed as ComputedSignal<unknown>);
+  // The node is its own scope, so nothing else is allocated for one.
+  const scope: Scope = computed;
+  computed.parent = parent;
+  if (parent) {
+    const siblings = (parent.children ??= []);
+    computed.slot = siblings.length;
+    siblings.push(computed);
+  }
 
-  watcher.watch(computed as ComputedSignal<unknown>);
+  markEffectComputed(computed as unknown as ComputedSignal<unknown>);
+
+  watcher.watch(computed as unknown as ComputedSignal<unknown>);
 
   if (immediate) {
     // Untracked so that creating an effect inside another effect does not make
@@ -376,17 +402,17 @@ function createEffect(fn: EffectFn, watcher: WatcherNode, immediate: boolean): D
     // effect declared in a class field observe values assigned to the
     // instance afterwards — component props, most importantly — instead of
     // firing once against the field's initial value.
-    watcher.pending.add(computed as ComputedSignal<unknown>);
+    watcher.pending.add(computed as unknown as ComputedSignal<unknown>);
     schedule();
   }
 
   const dispose: Dispose = () => {
     if (disposed) return;
     disposed = true;
-    watcher.unwatch(computed as ComputedSignal<unknown>);
+    watcher.unwatch(computed as unknown as ComputedSignal<unknown>);
     // Unwatching stops it being scheduled; this detaches it from its sources
     // so they stop retaining and re-marking it.
-    disposeComputed(computed as ComputedSignal<unknown>);
+    disposeComputed(computed as unknown as ComputedSignal<unknown>);
     if (cleanup) {
       try {
         cleanup();
