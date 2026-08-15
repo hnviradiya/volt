@@ -42,9 +42,11 @@ leaning it found nothing: removing a per-write allocation made writes slower
 
 ### Runtime gaps blocking the component library
 
-- [x] **Portal** — done. `:portal`, with context and disposal following the reactive scope. Dialog, dropdown, tooltip, popover, select,
+- [x] **Portal** — `:portal`. Dialog, dropdown, tooltip, popover, select,
       combobox and toast all have to escape `overflow: hidden` and stacking
-      contexts. Nothing overlay-shaped can be built without it.
+      contexts. Context and disposal follow the reactive scope, so portalled
+      content still sees its providers and is still torn down with the
+      component that declared it.
 - [ ] **Transitions** — enter/leave. Requires coordinating node removal with
       animation completion; the runtime removes immediately today.
 - [ ] **`:show`** — removed as redundant with `:class`. A component library
