@@ -134,7 +134,7 @@ export function createTabs(options: TabsOptions): Tabs {
   const activation = options.activation ?? 'automatic';
 
   /**
-   * The tab focus is on, which is only the selected tab under automatic
+   * The tab that focus is on, which is the selected one only under automatic
    * activation. Held as a value rather than an element so that a tab list
    * re-rendering its items does not leave it pointing at a detached node.
    */
@@ -181,9 +181,9 @@ export function createTabs(options: TabsOptions): Tabs {
     {
       orientation,
       loop: options.loop !== false,
-      // No typeahead. APG gives letters no meaning in a tab list — the labels
-      // are few and all on screen — and swallowing them would take first-letter
-      // navigation away from the assistive technology that uses it.
+      // No typeahead: APG gives letters no meaning in a tab list, and the
+      // labels are few and all on screen. Claiming the letter keys here would
+      // only take them from whatever else on the page wants them.
       typeahead: false,
       onSelect: (item) => {
         const value = valueOf(item);
@@ -194,9 +194,8 @@ export function createTabs(options: TabsOptions): Tabs {
 
   const onKeyDown = (event: Event) => {
     if (!isKeyboardEvent(event)) return;
-    // Only the keys the list actually consumed: an ArrowDown it did not claim
-    // must still scroll the page, and Space must still scroll when the tabs
-    // ignored it.
+    // Only the keys the list actually consumed: an ArrowDown a horizontal list
+    // did not claim must still scroll the page.
     if (roving.onKeyDown(event)) event.preventDefault();
   };
 

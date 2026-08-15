@@ -291,7 +291,19 @@ describe('keyboard focus', () => {
     trigger().blur();
     flushSync();
 
-    // The press flag is consumed by one focus event, not held for good.
+    // The press is remembered for one focus event, not held for good.
+    trigger().focus();
+    flushSync();
+    expect(content()).not.toBeNull();
+  });
+
+  it('forgets a press the pointer has moved away from', () => {
+    const { trigger, content } = setup();
+    // A press that never moved focus — a trigger the browser does not focus on
+    // pointerdown, say — would otherwise leave the flag set for the next Tab.
+    press(trigger());
+    leave(trigger());
+
     trigger().focus();
     flushSync();
     expect(content()).not.toBeNull();
