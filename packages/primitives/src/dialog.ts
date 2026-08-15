@@ -116,8 +116,11 @@ export function createDialog(options: DialogOptions): Dialog {
     const content = options.content();
     if (!content) return;
 
-    hasTitle.set(Boolean(content.querySelector(`#${CSS.escape(titleId)}`)));
-    hasDescription.set(Boolean(content.querySelector(`#${CSS.escape(descriptionId)}`)));
+    // These ids are generated here, in a known-safe form, so they need no
+    // escaping — and escaping them would pull in `CSS`, a browser global that
+    // does not exist when rendering on a server.
+    hasTitle.set(Boolean(content.querySelector(`#${titleId}`)));
+    hasDescription.set(Boolean(content.querySelector(`#${descriptionId}`)));
 
     createDismiss(
       () => options.content(),

@@ -271,3 +271,70 @@ no-legacy stance — real timezone and calendar support, no `Date` foot-guns, no
 - Min, max and collapsible panels, collapse to a handle
 - Keyboard resize with arrow keys, `separator` role per APG
 - Persisted layout, percentage and pixel constraints
+
+## Server-side rendering
+
+Committed, and it constrains work already underway — a primitive that touches
+the DOM while being constructed cannot be rendered on a server, so every
+primitive is written to defer DOM access into an effect or guard it.
+
+`@voltjs/server` — `renderToString` and `renderToStream`.
+
+Hydration should suit this architecture unusually well. Codegen already
+resolves every dynamic node by a `firstChild`/`nextSibling` path computed at
+build time, because there is no virtual DOM to diff against. Hydration is the
+same walk against server-rendered markup instead of a cloned template: the
+paths are identical, only the source of the nodes differs. There is no tree to
+reconcile and no chance of a "hydration mismatch" in the React sense, because
+nothing is being compared — bindings simply attach to the nodes that are
+already there.
+
+- [ ] `renderToString`, then `renderToStream` for streaming
+- [ ] A hydration codegen mode reusing the existing path resolution
+- [ ] Serialize initial signal state, and adopt it on the client
+- [ ] `onMount` must not run on the server; effects must not either
+- [ ] Portals — render inline on the server, relocate on hydration
+- [ ] Event delegation attaches once on hydration rather than per element
+- [ ] Async boundaries, so streaming can flush a shell before data arrives
+
+## Developer tools
+
+A browser extension plus the hooks in core it needs, all behind `__VOLT_DEV__`
+so none of it reaches production.
+
+- [ ] **Component tree** — instances, their props, and their scopes
+- [ ] **Signal graph** — nodes, edges, and what is currently live. Volt already
+      exposes exactly what this needs: `Signal.subtle.introspectSources`,
+      `introspectSinks`, `hasSinks` and `hasSources` are the graph-walking API
+      a inspector is built on. They were measured at ~100 B gzipped and nearly
+      cut for it; this is what they are for.
+- [ ] **Why did this update** — which write woke which effect, which is the
+      question fine-grained reactivity makes answerable and virtual DOM does not
+- [ ] **Performance** — effect run counts and durations, flush timings, and
+      which bindings are re-running most
+- [ ] **Time travel** — signal history, step back and forth
+- [ ] Highlight the DOM a binding owns, on hover
+
+## Chat
+
+A first-class component, not an afterthought. Most libraries have nothing like
+it, and building one out of a list and a textarea misses everything that makes
+it hard.
+
+- **Message list** — virtualized with variable heights, grouping of
+  consecutive messages from one author, timestamps, avatars
+- **Streaming** — appending to the last message token by token without
+  re-rendering the list, and without losing the user's scroll position
+- **Scroll behaviour** — pinned to the bottom while at the bottom, releasing
+  the moment the user scrolls up, with a "jump to latest" affordance. Getting
+  this wrong is the single most noticeable defect in a chat interface.
+- **Content** — markdown, code blocks with syntax highlighting and copy,
+  tables, math, citations and sources, collapsible reasoning
+- **Composer** — auto-sizing textarea, Enter to send with Shift+Enter for a
+  newline, slash commands, @-mentions, attachments and paste-to-upload,
+  draft persistence
+- **Per-message actions** — copy, edit and resend, regenerate, react, branch
+- **States** — typing indicator, generation in progress with cancel, error
+  with retry, offline queueing
+- **Accessibility** — new messages announced in a live region without
+  interrupting, and full keyboard access to per-message actions
