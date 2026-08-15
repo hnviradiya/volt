@@ -410,8 +410,27 @@ class Generator {
         continue;
       }
 
+      // A portalled element renders somewhere else entirely, so it leaves no
+      // marker behind — nothing is ever inserted at this position.
+      if (node.type === 'element' && findDirective(node, 'portal')) {
+        this.emitDetachedChild(block, this.genPortal(node, ctx));
+        continue;
+      }
+
       this.buildNode(node, block, ctx);
     }
+  }
+
+  /**
+   * Emit a statement that produces DOM somewhere other than here.
+   *
+   * Unlike `emitDynamicChild` this punches no marker and reserves no child
+   * slot, because nothing is ever inserted at this position — the surrounding
+   * markup must come out exactly as if the node had not been written.
+   */
+  private emitDetachedChild(block: Block, statement: string): void {
+    this.stats.effects++;
+    block.effects.push(() => [statement]);
   }
 
   /** Punch a marker into the markup and insert a dynamic value at it. */
@@ -975,6 +994,32 @@ class Generator {
    * branch's body is ever built — a nested-ternary encoding would construct
    * every arm eagerly.
    */
+  /**
+   * `:portal` — render this element into a different container.
+   *
+   * With no virtual DOM, a portal is simply a node put somewhere else, so
+   * there is nothing to reconcile across trees. Context and disposal both
+   * follow the reactive scope rather than the DOM, so a portalled dialog still
+   * sees the providers it was declared under and is still torn down with the
+   * component that declared it.
+   *
+   * The target is read once. Re-homing live content on a changing target is
+   * not something a dialog or tooltip needs, and pretending to support it
+   * would cost a marker and a move path on every portal.
+   */
+  private genPortal(node: ElementNode, ctx: PrintContext): string {
+    const dir = findDirective(node, 'portal')!;
+    const stripped = stripDirectives(node, ['portal']);
+
+    // Default to the document body, which is what an overlay almost always
+    // wants and saves every call site writing it out.
+    const target = dir.exp ? this.genAccessor(dir.exp, ctx) : 'null';
+    const body = stripped.isTemplate
+      ? this.genChildrenExpression(stripped.children, ctx)
+      : this.genChildrenExpression([stripped], ctx);
+    return `${this.rt}.portal(${target}, ${this.thunk(body)});`;
+  }
+
   private genConditionalChain(chain: ElementNode[], ctx: PrintContext): string {
     const entries = chain.map((node) => {
       const body = this.thunk(this.genBranchBody(node, ctx));
@@ -991,6 +1036,12 @@ class Generator {
     const stripped = stripDirectives(node, ['if', 'else-if', 'else']);
     if (findDirective(stripped, 'for')) {
       return this.genFor(stripped, ctx);
+    }
+    // `<div :if="open" :portal>` — the condition decides whether the portal
+    // exists at all, and the portal decides where its content lands. The
+    // branch itself contributes nothing to the tree it was declared in.
+    if (findDirective(stripped, 'portal')) {
+      return `(${this.genPortal(stripped, ctx).replace(/;$/, '')}, null)`;
     }
     if (stripped.isTemplate) {
       return this.genChildrenExpression(stripped.children, ctx);

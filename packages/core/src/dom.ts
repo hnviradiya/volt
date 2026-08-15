@@ -664,6 +664,54 @@ function setAttribute(el: Element, name: string, value: unknown): void {
 }
 
 /**
+ * Render content into a different container — `:portal`.
+ *
+ * With no virtual DOM there is nothing to reconcile across trees: a portal is
+ * a node placed somewhere else. Context and disposal both follow the reactive
+ * scope rather than the DOM, so content declared inside a provider still sees
+ * it, and is still torn down with the component that declared it, wherever it
+ * ended up on the page.
+ *
+ * `target` may be an element, a selector string, or null for `document.body`.
+ * It is read once: re-homing live content is not something an overlay needs,
+ * and supporting it would cost every portal a move path it never uses.
+ */
+export function portal(target: unknown, build: () => unknown): void {
+  const container = resolvePortalTarget(target);
+
+  // Anchoring to a marker rather than appending means several portals into the
+  // same container keep a stable order, and each removes only its own nodes.
+  const marker = document.createComment('');
+  container.appendChild(marker);
+
+  const current = insertExpression(container, build(), marker, null);
+
+  onCleanup(() => {
+    removeNodes(current);
+    marker.remove();
+  });
+}
+
+function resolvePortalTarget(target: unknown): Element {
+  let resolved = target;
+  while (typeof resolved === 'function') resolved = (resolved as Accessor<unknown>)();
+
+  if (resolved === null || resolved === undefined) return document.body;
+  if (resolved instanceof Element) return resolved;
+
+  if (typeof resolved === 'string') {
+    const found = document.querySelector(resolved);
+    if (found) return found;
+    throw new Error(
+      `[volt] :portal target "${resolved}" matched no element. ` +
+        'It has to exist before the component that portals into it mounts.',
+    );
+  }
+
+  throw new Error('[volt] :portal expects an element, a selector string, or nothing.');
+}
+
+/**
  * Toggle a single class from a boolean.
  *
  * What `:class="{ danger: expr }"` compiles to when every key is written

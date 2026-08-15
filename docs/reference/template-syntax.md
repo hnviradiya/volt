@@ -291,3 +291,36 @@ Comments are stripped. Whitespace is condensed the way Vue does it:
 whitespace-only text between elements that spans a line break is removed, and
 other runs collapse to a single space. `<pre>`, `<textarea>`, `<script>`, and
 `<style>` are left alone.
+
+## `:portal`
+
+Render an element into a different container. Overlays need this: a dialog
+nested inside a scrolling panel has to escape that panel's `overflow: hidden`
+and its stacking context.
+
+```html
+<div :portal>…</div>                  <!-- document.body -->
+<div :portal="'#modals'">…</div>      <!-- CSS selector -->
+<div :portal="container">…</div>      <!-- an element -->
+```
+
+Nothing is left at the declaration site — the surrounding markup compiles
+exactly as if the element had not been written there.
+
+Two things hold regardless of where the content lands, because Volt tracks
+both on the reactive scope rather than on the DOM tree:
+
+- **Context resolves from where the content was declared.** A dialog inside a
+  provider still sees it, even though it renders under `<body>`.
+- **Disposal follows the declaring component.** Unmounting it removes the
+  portalled content too, which is the leak portals otherwise make easy.
+
+Combine with `:if` to mount and unmount the overlay:
+
+```html
+<div :if="open.get()" :portal>…</div>
+```
+
+The target is read once. Re-homing live content to a new container is not
+something an overlay needs, and supporting it would cost every portal a move
+path it never uses.

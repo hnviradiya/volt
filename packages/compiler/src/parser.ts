@@ -451,7 +451,7 @@ class Parser {
 
     if (STRUCTURAL_DIRECTIVES.has(base)) {
       const node = make(base as DirectiveKind, '');
-      if (base !== 'else' && !node.exp) {
+      if (base !== 'else' && base !== 'portal' && !node.exp) {
         this.error(`\`${rawName}\` requires a value, e.g. \`${rawName}="expression"\``);
       }
       if (base === 'else' && node.exp) {
