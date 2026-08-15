@@ -9,14 +9,24 @@ import { describe, expect, it } from 'vitest';
 import { gzipSync } from 'node:zlib';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { transformSync } from 'esbuild';
 
 const root = resolve(import.meta.dirname, '../../..');
 
-/** Gzipped size in bytes, or null when the package has not been built. */
-function gzipped(relative: string): number | null {
+/**
+ * Minified, gzipped size in bytes — or null when the package is not built.
+ *
+ * The published bundles are deliberately unminified, so an app's bundler can
+ * minify them in context. Measuring them as-is therefore measured the
+ * comments: explaining why a loop is written a certain way cost more
+ * "bundle size" than the loop, which is precisely the wrong incentive.
+ */
+function measured(relative: string): number | null {
   const file = resolve(root, relative);
   if (!existsSync(file)) return null;
-  return gzipSync(readFileSync(file), { level: 9 }).length;
+  const source = readFileSync(file, 'utf8');
+  const minified = transformSync(source, { loader: 'js', minify: true, target: 'esnext' }).code;
+  return gzipSync(minified, { level: 9 }).length;
 }
 
 /**
@@ -25,18 +35,15 @@ function gzipped(relative: string): number | null {
  * The compiler is excluded — it runs at build time and never ships.
  */
 const BUDGETS: Record<string, number> = {
-  // Raised from 6,500 when Watcher.unwatch stopped searching and splicing its
-  // source list. The index bookkeeping costs ~280 B gzipped and took tearing
-  // down 8,000 effects from 1,848 ms to 14.7 ms — it was quadratic.
-  'packages/reactivity/dist/index.js': 6_700,
-  'packages/core/dist/runtime.js': 1_100,
+  'packages/reactivity/dist/index.js': 3_000,
+  'packages/core/dist/runtime.js': 750,
   'packages/core/dist/index.js': 400,
 };
 
 describe('bundle budgets', () => {
   for (const [file, budget] of Object.entries(BUDGETS)) {
     it(`${file} stays under ${budget} B gzipped`, () => {
-      const size = gzipped(file);
+      const size = measured(file);
       if (size === null) {
         // `pnpm build` has not run; nothing to measure rather than a failure.
         expect(size).toBeNull();

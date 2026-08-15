@@ -44,18 +44,16 @@ function defaultEquals<T>(a: T, b: T): boolean {
 }
 
 /**
- * Effects are implemented as computeds (as the proposal's own example does),
- * so they need an exemption from the no-writes-in-a-computed rule. The
- * framework marks its own nodes; user computeds are never in this set.
+ * Mark a computed as an effect, exempting it from the no-writes-in-a-computed
+ * rule. Effects are implemented as computeds, as the proposal's own example
+ * does; user computeds are never marked.
+ *
+ * A flag on the node rather than a side table, because the rule is checked on
+ * every write and a keyed list writes two signals per row on every reconcile
+ * — a hash lookup here would run thousands of times per update.
  */
-const EFFECT_COMPUTEDS = new WeakSet<ComputedSignal<unknown>>();
-
 export function markEffectComputed(node: ComputedSignal<unknown>): void {
-  EFFECT_COMPUTEDS.add(node);
-}
-
-export function isEffectComputed(node: unknown): boolean {
-  return node instanceof ComputedSignal && EFFECT_COMPUTEDS.has(node);
+  node.isEffect = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,13 +61,12 @@ export function isEffectComputed(node: unknown): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * A signal is "live" while a Watcher can reach it. Liveness propagates up
- * through computed sources so that `watched`/`unwatched` fire exactly on the
- * transitions in and out of observation — which is what lets a signal attach
- * and release external resources.
- */
-/**
  * Invoke a `watched`/`unwatched` hook with the signal as `this`.
+ *
+ * A signal is "live" while a Watcher can reach it, and liveness propagates up
+ * through computed sources, so these fire exactly on the transitions in and
+ * out of observation — which is what lets a signal attach and release an
+ * external resource.
  *
  * The options object is generic in the signal's value type, which does not
  * survive erasure to `Producer`; the hook only ever receives `this`, so the
@@ -222,6 +219,14 @@ function unlinkSources(consumer: ComputedSignal<unknown>): void {
  * further downstream is only CHECK, because whether it truly changed depends
  * on what the intermediate computeds produce.
  */
+/**
+ * Colour the graph downstream of a write, collecting watchers to notify.
+ *
+ * The set is allocated per write and deliberately so. Hoisting it to module
+ * scope to avoid the allocation measured *slower*: it never escapes `set`, so
+ * V8 already elides it, and the bookkeeping needed to make a shared buffer
+ * re-entrant cost more than the allocation it saved.
+ */
 function propagate(node: Producer, direct: boolean, pending: Set<WatcherNode>): void {
   if (node.sinks === null) return;
   for (const sink of node.sinks) {
@@ -276,7 +281,7 @@ export class StateSignal<T> {
   set(value: T): void {
     // A pure computed must stay pure. Effects are computeds too, so they are
     // exempted explicitly rather than by accident.
-    if (currentConsumer instanceof ComputedSignal && !EFFECT_COMPUTEDS.has(currentConsumer)) {
+    if (currentConsumer instanceof ComputedSignal && !currentConsumer.isEffect) {
       throw new Error('[volt] A Signal.Computed must not write to a Signal.State.');
     }
     if (this.equals(this.value, value)) return;
@@ -319,6 +324,8 @@ export class ComputedSignal<T> {
   /** @internal */ liveCount = 0;
   /** @internal */ options: SignalOptions<T> | undefined;
   /** @internal */ computing = false;
+  /** @internal Exempt from the "a computed must not write" rule. */
+  /** @internal */ isEffect = false;
   /** @internal */ readonly fn: (this: ComputedSignal<T>) => T;
   /** @internal */ readonly equals: (a: T, b: T) => boolean;
 
