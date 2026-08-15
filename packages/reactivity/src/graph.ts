@@ -441,17 +441,12 @@ export class WatcherNode {
   /** @internal */ sourceSlots: number[] = [];
   /** @internal */ liveCount = 1;
   /** @internal */ notified = false;
-  /**
-   * Watched producers, mapped to their index in `sources`.
-   *
-   * A set would do for membership, but `unwatch` also has to find the source
-   * to unlink. Searching for it made dropping N watched signals one at a time
-   * quadratic — which is what a keyed list does every time it clears, since
-   * every render effect in the app is watched by one shared watcher.
-   *
-   * @internal
-   */
-  watching = new Map<Producer, number>();
+  // Watched producers are not tracked in a side table. `unwatch` needs this
+  // watcher's index inside the producer's sink list, and the producer already
+  // records that: `sinks[i] === this` gives `sinkSlots[i]`. Scanning `sinks`
+  // is bounded by how many consumers depend on that one producer — one, for
+  // the effect computeds Volt watches — and never by how much this watcher
+  // watches, which is the axis that previously made teardown quadratic.
   /** @internal */ pending = new Set<Producer>();
 
   constructor(notify: (this: WatcherNode) => void) {
@@ -466,9 +461,7 @@ export class WatcherNode {
   watch(...signals: (StateSignal<unknown> | ComputedSignal<unknown>)[]): void {
     for (const signal of signals) {
       const producer = signal as Producer;
-      if (this.watching.has(producer)) continue;
-      // `link` appends, so the index it will land at is the current length.
-      this.watching.set(producer, this.sources.length);
+      if (producer.sinks?.includes(this as Consumer)) continue;
       link(producer, this as Consumer);
       incrementLive(producer);
     }
@@ -478,9 +471,13 @@ export class WatcherNode {
   unwatch(...signals: (StateSignal<unknown> | ComputedSignal<unknown>)[]): void {
     for (const signal of signals) {
       const producer = signal as Producer;
-      const index = this.watching.get(producer);
-      if (index === undefined) continue;
-      this.watching.delete(producer);
+
+      const sinks = producer.sinks;
+      const sinkIndex = sinks ? sinks.indexOf(this as Consumer) : -1;
+      if (sinkIndex === -1) continue;
+      // The producer records where it sits in this watcher's source list.
+      const index = producer.sinkSlots![sinkIndex]!;
+
       this.pending.delete(producer);
 
       unlinkEdge(this as Consumer, index);
@@ -496,7 +493,6 @@ export class WatcherNode {
         this.sourceVersions[index] = this.sourceVersions[last]!;
         this.sourceSlots[index] = movedSlot;
         moved.sinkSlots![movedSlot] = index;
-        this.watching.set(moved, index);
       }
       this.sources.pop();
       this.sourceVersions.pop();
