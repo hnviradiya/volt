@@ -142,33 +142,17 @@ components use `templateUrl`, which needs none of it at runtime.
 `createComponent` and `slot` are called by compiled templates. You should not
 need them directly.
 
-## Lazy components
+## Code splitting
 
-Fetch a component on first use so it lands in its own chunk.
+There is nothing to write. The compiler works out which components cannot be
+on screen when the page first renders — every use of them sits behind a `:if`
+or a `:portal` — and the build splits exactly those into their own chunks,
+fetching them ahead of time once the page is idle.
 
-```ts
-import { lazy } from '@voltjs/core';
+A component used directly is never split, because putting it in another chunk
+would add a network round trip to the first paint. Neither is a small one:
+chunks compress against their own contents, so splitting a component that
+saves less than it costs in compression makes the application larger.
 
-const Chart = lazy('v-chart', () => import('./chart.js'), {
-  fallback: () => 'Loading…',
-  error: (err, retry) => `Could not load. ${err}`,
-});
-
-@Component({ selector: 'v-page', imports: [Chart], templateUrl: './page.html' })
-export class Page {}
-```
-
-It goes in `imports` and is written in a template exactly like any other
-component. The selector is given to `lazy()` rather than read from the
-component, because a template mentioning `<v-chart>` has to resolve it before
-the chunk that defines it exists.
-
-The loader may return the module (`import('./chart.js')`) or the class itself.
-It runs once however many instances are rendered.
-
-`preload(Chart)` starts the fetch without rendering — what a router calls on
-hover or on route match, so the chunk has arrived by the time the view mounts.
-
-Supplying `error` is worth the trouble. The usual cause of a failed chunk in
-production is a deploy that removed the file a still-open tab is asking for,
-and that case recovers on retry.
+Nothing about a component changes to make this happen, and there is no
+directive or option to reach for.

@@ -8,7 +8,10 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { compileTemplate } from '@voltjs/core/jit';
-import { Component, Prop, Signal, flushSync, lazy, mount, preload } from '@voltjs/core';
+import { Component, Prop, Signal, flushSync, mount } from '@voltjs/core';
+// Not part of the public API: the build decides what to split, and emits
+// these itself. Reached here through the entry compiled output uses.
+import { lazy, preload } from '@voltjs/core/runtime';
 
 let host: HTMLElement;
 

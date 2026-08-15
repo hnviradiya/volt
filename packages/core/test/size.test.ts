@@ -36,7 +36,10 @@ function measured(relative: string): number | null {
  */
 const BUDGETS: Record<string, number> = {
   'packages/reactivity/dist/index.js': 3_000,
-  'packages/core/dist/runtime.js': 750,
+  // Raised from 750 when lazy/preload moved to the runtime entry, which is
+  // where generated code reaches them now that splitting is the build's
+  // decision rather than something an application writes.
+  'packages/core/dist/runtime.js': 800,
   'packages/core/dist/index.js': 400,
 };
 
