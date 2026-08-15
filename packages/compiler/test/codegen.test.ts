@@ -96,3 +96,35 @@ describe(':class object literals compile to per-class toggles', () => {
     });
   }
 });
+
+describe('event delegation is limited to events it suits', () => {
+  it('delegates a click, which many elements have and which fires once', () => {
+    expect(gen(`<button :click="go()"></button>`)).toContain('_rt.delegate(');
+  });
+
+  for (const [why, event] of [
+    ['browsers force document wheel listeners to be passive', 'wheel'],
+    ['and document touch listeners too', 'touchstart'],
+    ['and touchmove', 'touchmove'],
+  ] as const) {
+    it(`uses a direct listener for :${event}, because ${why}`, () => {
+      const code = gen(`<div :${event}.prevent="go()"></div>`);
+      // Delegated, this would compile to a listener whose preventDefault is
+      // discarded — the bug is silent apart from a console warning.
+      expect(code).toContain('_rt.on(');
+      expect(code).not.toContain('_rt.delegate(');
+    });
+  }
+
+  for (const event of ['pointermove', 'mousemove', 'dragover', 'mouseover'] as const) {
+    it(`uses a direct listener for :${event}, which fires too often to walk the tree`, () => {
+      const code = gen(`<div :${event}="go()"></div>`);
+      expect(code).toContain('_rt.on(');
+      expect(code).not.toContain('_rt.delegate(');
+    });
+  }
+
+  it('still lets an explicit listener option force a direct listener', () => {
+    expect(gen(`<button :click.once="go()"></button>`)).toContain('_rt.on(');
+  });
+});

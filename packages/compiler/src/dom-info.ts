@@ -132,15 +132,45 @@ export const KEY_MODIFIERS: Record<string, string> = {
  */
 export const DELEGATED_EVENTS = new Set([
   'click', 'dblclick', 'contextmenu', 'auxclick',
-  'mousedown', 'mouseup', 'mousemove', 'mouseover', 'mouseout',
-  'pointerdown', 'pointerup', 'pointermove', 'pointerover', 'pointerout',
-  'touchstart', 'touchend', 'touchmove', 'touchcancel',
+  'mousedown', 'mouseup',
+  'pointerdown', 'pointerup',
   'keydown', 'keyup', 'keypress',
   'input', 'change', 'submit', 'reset', 'beforeinput',
   'focusin', 'focusout',
-  'dragstart', 'dragend', 'dragenter', 'dragleave', 'dragover', 'drop',
+  'dragstart', 'dragend', 'dragenter', 'dragleave', 'drop',
   'copy', 'cut', 'paste',
-  'wheel',
+]);
+
+/**
+ * Two kinds of event are deliberately absent from that list, and both were
+ * once in it.
+ *
+ * **Events browsers force to be passive.** A `wheel`, `touchstart` or
+ * `touchmove` listener registered on the document is passive whether or not it
+ * asks to be, so `preventDefault()` inside it is discarded — silently, apart
+ * from a console warning. Delegating them meant `:wheel.prevent` compiled to a
+ * listener that could not prevent anything, because `prevent` is a guard
+ * rather than a listener option and so never forced a direct listener. That
+ * silently breaks the components most likely to want it: sliders adjusted by
+ * wheel, number inputs, carousels, splitters and custom scrollers.
+ *
+ * **High-frequency events.** Delegation trades one listener per element for an
+ * ancestor walk per event. That is a good trade for `click`, where a table may
+ * carry a thousand handlers and a press fires once. It is a bad trade for
+ * `pointermove` or `dragover`, where a drag has a single handler and fires
+ * hundreds of events a second, each walking from target to document finding
+ * nothing. `dragover` is doubly wrong to delegate: cancelling it is how a drop
+ * target declares itself.
+ *
+ * Hover belongs in CSS, and a gesture should listen on the document only for
+ * as long as the gesture lasts.
+ */
+export const NEVER_DELEGATED = new Set([
+  'wheel', 'mousewheel',
+  'touchstart', 'touchmove', 'touchend', 'touchcancel',
+  'mousemove', 'mouseover', 'mouseout',
+  'pointermove', 'pointerover', 'pointerout',
+  'dragover',
 ]);
 
 export const SYSTEM_MODIFIERS = new Set(['ctrl', 'alt', 'shift', 'meta']);
