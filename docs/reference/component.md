@@ -48,7 +48,18 @@ Three forms, differing in reactivity:
 @Prop() c = 0;                    // plain assignment — not reactive
 ```
 
-A missing required input throws at construction. Cannot be applied to static
+A missing required prop throws at construction.
+
+An **undeclared** prop throws too. Volt has no fall-through for unrecognised
+attributes, so a name matching no prop can only be a mistake — most often a
+kebab-cased spelling of a camelCase prop:
+
+```
+[volt] <v-counter> has no prop "max-count". Did you mean "maxCount"?
+Declared props: maxCount, onChanged.
+```
+
+There is one spelling: the declared one. Cannot be applied to static
 or symbol-named members.
 
 ## Notifying the parent

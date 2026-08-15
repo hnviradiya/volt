@@ -354,6 +354,18 @@ function injectStyles(resolved: ResolvedConfig): void {
 // Instantiation
 // ---------------------------------------------------------------------------
 
+/**
+ * Find the declared prop a mistyped name most likely meant.
+ *
+ * Compares with case and separators removed, which catches the kebab-cased
+ * spelling of a camelCase prop as well as ordinary capitalisation slips.
+ */
+function closestProp(name: string, declared: string[]): string | undefined {
+  const normalise = (s: string) => s.toLowerCase().replaceAll(/[^a-z0-9]/g, '');
+  const target = normalise(name);
+  return declared.find((candidate) => normalise(candidate) === target);
+}
+
 function applyProps(
   instance: Record<string, unknown>,
   props: Record<string, unknown> | null,
@@ -367,7 +379,23 @@ function applyProps(
       seen.add(key);
 
       const def = resolved.propsByAlias.get(key);
-      const property = def?.property ?? key;
+      if (!def) {
+        // Volt has no fall-through for undeclared attributes, so a name that
+        // matches no prop can only be a mistake — and silently doing nothing
+        // is the worst way to report one. The commonest is a kebab-cased
+        // spelling of a camelCase prop.
+        const declared = [...resolved.propsByAlias.keys()];
+        const suggestion = closestProp(key, declared);
+        throw new Error(
+          `[volt] <${resolved.config.selector}> has no prop "${key}".` +
+            (suggestion ? ` Did you mean "${suggestion}"?` : '') +
+            (declared.length
+              ? ` Declared props: ${declared.join(', ')}.`
+              : ' It declares no props.'),
+        );
+      }
+
+      const property = def.property;
       const descriptor = Object.getOwnPropertyDescriptor(props, key);
       const current = instance[property];
 
