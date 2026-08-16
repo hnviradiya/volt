@@ -1,0 +1,113 @@
+# Publishes the packages to npm with provenance.
+#
+# Two tools, because neither does the whole job. `pnpm pack` rewrites the
+# `workspace:*` dependency ranges into real versions — publishing with npm
+# directly would ship the protocol string and break every install. `npm publish`
+# is what attests provenance. So each package is packed by pnpm and the tarball
+# handed to npm.
+#
+# Provenance links a published version to the exact commit and workflow run that
+# built it, and npm shows it as a verified badge. It needs `id-token: write`,
+# and it needs the `repository` field in package.json to match this repository —
+# both are set.
+#
+# The first publish of a package needs NPM_TOKEN, because a trusted publisher
+# can only be configured on npmjs.com once the package exists. After that, set
+# each package's publisher to this workflow and the secret can be deleted.
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Pack and check everything, publish nothing
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      # Nothing ships that has not passed everything CI runs. A bad version
+      # cannot be taken back: npm only allows unpublishing within 72 hours,
+      # and never once anything depends on it.
+      - name: Build packages
+        run: pnpm build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          # Dependency order. reactivity and compiler stand alone, core needs
+          # both, and vite-plugin needs compiler — a package must exist on the
+          # registry before something that depends on it is published.
+          PACKAGES="reactivity compiler core vite-plugin"
+
+          # Deliberately absent: primitives, ui, grid and editor. The first has
+          # components that have not passed review; the rest are a single file
+          # each. An empty package at 0.1.0 would be permanent.
+
+          for pkg in $PACKAGES; do
+            cd "$GITHUB_WORKSPACE/packages/$pkg"
+            name=$(node -p "require('./package.json').name")
+            version=$(node -p "require('./package.json').version")
+
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "== $name@$version is already on the registry, skipping"
+              continue
+            fi
+
+            rm -f ./*.tgz
+            pnpm pack >/dev/null
+            tarball=$(ls ./*.tgz)
+
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              echo "== would publish $name@$version from $tarball"
+              npm publish "$tarball" --provenance --access public --dry-run
+            else
+              echo "== publishing $name@$version"
+              npm publish "$tarball" --provenance --access public
+            fi
+            rm -f "$tarball"
+          done
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Packages"
+            for pkg in reactivity compiler core vite-plugin; do
+              name=$(node -p "require('$GITHUB_WORKSPACE/packages/$pkg/package.json').name")
+              version=$(node -p "require('$GITHUB_WORKSPACE/packages/$pkg/package.json').version")
+              echo "- \`$name@$version\`"
+            done
+            echo ""
+            echo "Held back: primitives, ui, grid, editor."
+          } >> "$GITHUB_STEP_SUMMARY"
