@@ -8,8 +8,15 @@ Volt targets current engines and carries no legacy support. You need **Node
 ## Install
 
 ```bash
-pnpm add @voltdev/core
-pnpm add -D @voltdev/vite-plugin vite
+::: warning Under active development
+Volt is pre-alpha. It is published under the `alpha` tag only, so
+`pnpm add @voltdev/core` will not resolve — the tag has to be asked for by
+name. Nothing here is stable, and versions may change shape without a
+deprecation path until a `latest` release exists.
+:::
+
+pnpm add @voltdev/core@alpha
+pnpm add -D @voltdev/vite-plugin@alpha vite
 ```
 
 ## Configure Vite

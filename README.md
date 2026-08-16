@@ -104,8 +104,8 @@ outputs and custom events), `:prop-*` and `:attr-*` force the other direction.
 ## Getting started
 
 ```bash
-pnpm add @voltdev/core
-pnpm add -D @voltdev/vite-plugin
+pnpm add @voltdev/core@alpha
+pnpm add -D @voltdev/vite-plugin@alpha
 ```
 
 ```ts

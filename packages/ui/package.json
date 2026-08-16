@@ -1,6 +1,6 @@
 {
   "name": "@voltdev/ui",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.1",
   "description": "Styled components built on @voltdev/primitives.",
   "type": "module",
   "license": "MIT",
