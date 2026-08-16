@@ -72,8 +72,8 @@ export * from './navigation.js';
 export * from './feedback.js';
 export * from './display-extras.js';
 
-// Listbox, combobox, tree, inputs and slider/upload are in ../pending. They
-// typecheck, but the run that wrote them hit a limit before the review pass,
-// and listbox's own tests encode two incompatible models of Shift+Arrow. They
-// move here once that is settled and they are covered.
+export * from './listbox.js';
+
+// combobox, tree, inputs and slider-upload are written and typecheck but have
+// no tests yet. Exported once they are covered.
 

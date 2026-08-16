@@ -827,9 +827,24 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
     focusIndex(target);
     if (mode === 'none') return true;
 
+    // Shift+Arrow means different things in the two patterns, and conflating
+    // them is why a range can come out either too large or one item wide.
+    //
+    // In a multi-select listbox the APG has Shift+Arrow "move focus to and
+    // toggle the selected state of" the next option — one option at a time,
+    // building a selection as you go. In an extended-selection listbox it
+    // extends a contiguous range from the anchor instead, which is the
+    // convention every desktop file list uses.
     if (event.shiftKey && multiselect) {
-      if (anchor < 0) anchor = previous >= 0 ? previous : target;
-      selectRange(anchor, target, mode === 'multiple');
+      if (mode === 'multiple') {
+        toggleAt(target);
+        // The anchor follows the last option actually selected, because that
+        // is what Shift+Space later ranges from.
+        anchor = target;
+      } else {
+        if (anchor < 0) anchor = previous >= 0 ? previous : target;
+        selectRange(anchor, target, false);
+      }
       return true;
     }
 
@@ -837,7 +852,10 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
     // list navigable at all once something is selected.
     if (modified) return true;
 
-    anchor = target;
+    // A plain move re-anchors only when it also selects. Where the arrows
+    // merely move focus, Shift+Space still has to range from the last
+    // *selected* option — otherwise the range collapses onto one item.
+    if (followsFocus || mode !== 'multiple') anchor = target;
     if (followsFocus) replaceAt(target);
     return true;
   };

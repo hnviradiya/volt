@@ -680,7 +680,7 @@ describe('choosing several options', () => {
     expect(ids(harness)).toEqual(['ap', 'ba']);
   });
 
-  it('extends a range with Shift and an arrow, keeping what was toggled before', () => {
+  it('toggles one option at a time with Shift and an arrow', () => {
     boxOptions = { selectionMode: 'multiple' };
     const harness = setup();
 
@@ -689,8 +689,24 @@ describe('choosing several options', () => {
     press(harness.root, 'ArrowDown', { shiftKey: true });
     press(harness.root, 'ArrowDown', { shiftKey: true });
 
-    // 0 to 2, plus Fig from before — and never Date, which is disabled.
-    expect(ids(harness).sort()).toEqual(['ap', 'ba', 'ch', 'fi']);
+    // In a multi-select listbox Shift+Arrow moves focus to and toggles the
+    // next option, one at a time — it does not sweep a range, which is the
+    // extended-selection pattern instead. So Banana and Cherry join Fig, and
+    // Apple, which was only ever focused, does not.
+    expect(ids(harness).sort()).toEqual(['ba', 'ch', 'fi']);
+  });
+
+  it('sweeps a range with Shift and an arrow in extended mode', () => {
+    boxOptions = { selectionMode: 'extended' };
+    const harness = setup();
+
+    click(harness.option(0));
+    press(harness.root, 'ArrowDown', { shiftKey: true });
+    press(harness.root, 'ArrowDown', { shiftKey: true });
+
+    // The other half of the same decision: extended selection is the desktop
+    // file-list convention, where Shift+Arrow grows one contiguous range.
+    expect(ids(harness).sort()).toEqual(['ap', 'ba', 'ch']);
   });
 
   it('takes a range from the anchor with Shift and Space', () => {
