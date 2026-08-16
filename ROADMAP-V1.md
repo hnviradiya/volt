@@ -308,6 +308,63 @@ already there.
 - [ ] Event delegation attaches once on hydration rather than per element
 - [ ] Async boundaries, so streaming can flush a shell before data arrives
 
+## Server functions
+
+A method that runs on the server and is called from the client as though it
+were local. Next.js spells this `'use server'`; Volt spells it as a decorator,
+because the build already lowers decorators and this is the same mechanism
+pointed at a different emit.
+
+```ts
+export class Todos {
+  @Server()
+  async create(text: string): Promise<{ id: string }> {
+    const session = await requireSession();
+    return db.todos.insert({ text, userId: session.userId });
+  }
+}
+```
+
+The client build strips the body and leaves a stub that posts to a generated
+endpoint id. The server build registers the real method under that id. Neither
+half is written by hand.
+
+A decorator beats a string directive here on every axis but one. It is a
+declaration rather than a statement the compiler has to recognise in two
+different placements; it can constrain the signature at compile time — async,
+and arguments and return type both serializable; it appears in completion and
+on hover; and it matches `@Component` and `@Prop`.
+
+**The axis it loses on is the one that matters most.** Every server function
+is a public HTTP endpoint, reachable by anyone with `curl`, whatever the call
+site looks like. `'use server'` at least reads as unusual. `@Server()` looks
+like an ordinary annotation, and `todos.create(text)` reads exactly like a
+local call — so the syntax actively hides that this is an unauthenticated
+public endpoint by default. Next's own documentation spends most of its length
+on that hazard.
+
+So the decorator has to make the security surface impossible to ignore rather
+than merely documented:
+
+- The compiler refuses a `@Server()` method whose body does not reach a
+  declared guard, the way it refuses `:for` without `:key`. An explicit
+  `@Server({ public: true })` is the way to say a method really is open.
+- Authentication is read from the request — cookies and headers — never from a
+  parameter, because a parameter is attacker-controlled.
+- Return values are serialized, so the constraint is a type-level one: a
+  database row cannot cross the boundary unless its type says it may.
+
+**Sequencing: this comes after SSR, not before.** It needs a server entry,
+request handling, a serialization format, and endpoint registration and
+routing — which is most of what SSR needs anyway. Building it first means
+inventing a server runtime for this alone and reconciling it with SSR
+afterwards, which is the mistake already flagged for virtualization and the
+grid.
+
+Form integration comes with it: an action bound to a `<form>` so a submission
+works before any JavaScript has loaded, which is the main thing server
+functions buy over an ordinary fetch.
+
 ## Developer tools
 
 A browser extension plus the hooks in core it needs, all behind `__VOLT_DEV__`
