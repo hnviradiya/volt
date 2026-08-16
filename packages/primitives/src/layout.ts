@@ -387,6 +387,18 @@ export function createAspectRatio(options: AspectRatioOptions = {}): AspectRatio
   };
 }
 
+/**
+ * A ratio as one number, or null when it is not one a box can have.
+ *
+ * Zero, a negative, a NaN, or a pair over a zero denominator would all reach
+ * CSS as a box with no height and nothing on the page to say why. Refusing
+ * them leaves the box sized by its content, which is at least visible.
+ */
+function ratioOf(raw: AspectRatioValue): number | null {
+  const n = typeof raw === 'number' ? raw : raw[0] / raw[1];
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 // ---------------------------------------------------------------------------
 // Scroll area
 // ---------------------------------------------------------------------------
@@ -1160,9 +1172,16 @@ interface PanelLimits {
  * the line, and `separatorOrientation()` is there when a consumer needs the
  * same answer.
  *
- * Nesting works because there is no shared state and no delegated listener:
- * an inner group's handles carry their own handlers, and an event on one never
- * reaches the outer group's.
+ * Nesting works because there is no shared state and nothing is delegated from
+ * the group: each handle carries its own handlers, so an event on an inner
+ * handle bubbles out past the outer group with nothing there to act on it.
+ *
+ * This does not compose `createSeparator`, which covers the same ARIA and a
+ * near-identical key map for one pane. It cannot: that primitive owns a single
+ * number, and a group of panels owns an array with a sum to keep. Driving it
+ * from a mirror signal would mean two copies of the same fact — and a cascade
+ * that applies less than it was asked for would immediately disagree with the
+ * mirror. One source of truth is worth the duplicated key map.
  */
 export function createResizable(options: ResizableOptions): Resizable {
   const orientation = options.orientation ?? 'horizontal';
@@ -1184,10 +1203,7 @@ export function createResizable(options: ResizableOptions): Resizable {
     return { min, max, collapsible: Boolean(panel.collapsible), collapsed };
   });
 
-  const defaults = normalise(
-    distributeDefaults(options.panels, limits),
-    limits,
-  );
+  const defaults = normalise(distributeDefaults(options.panels, limits), limits);
 
   const storage = resolveStorage(options);
   const stored = loadSizes(storage, options.storageKey, limits);

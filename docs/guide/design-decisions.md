@@ -212,3 +212,52 @@ node in the DOM until the exit animation the stylesheet declared has finished,
 and asks the element whether anything is animating rather than being told a
 duration. A JavaScript animation layer would duplicate all of that and lose
 the off-main-thread part.
+
+## Performance is not a setting
+
+There is no `virtualize: false`, no `memo`, no `trackBy`, no
+`shouldComponentUpdate`, no "optimization" section in any component's options.
+A knob that makes an application slower is a bug with a name, and a knob that
+makes it faster is a default someone forgot to set.
+
+You choose the data and the markup. The framework chooses how to render it.
+
+### Why that is not the same as "always virtualize"
+
+Below roughly fifty rows, virtualization costs more than it saves: a scroll
+container, a spacer, a transformed window and a `ResizeObserver`, to avoid
+creating forty elements the browser would have made in under a millisecond. A
+grid that virtualizes unconditionally is slower on every small grid, and small
+grids are most grids.
+
+So the rule is not one strategy always on. It is that the strategy is never
+yours to pick:
+
+| collection | what happens |
+| --- | --- |
+| small | render all of it; anything else is overhead |
+| medium | `content-visibility: auto` with `contain-intrinsic-size` — the browser skips layout and paint for offscreen rows, at zero JavaScript cost |
+| large | pool-keyed virtualization, recycling rows through a fixed window |
+
+The threshold is the framework's business and may move as it is measured. What
+does not move is that there is no option to get it wrong.
+
+### The escapes are the framework's problem, not yours
+
+Virtualization silently breaks things people expect to work, and every library
+that ships it leaves them broken. They are correctness, not preference, so
+they are handled rather than documented:
+
+- **Printing.** A virtualized grid prints one screenful. Volt renders the full
+  collection on `beforeprint` and restores the window afterwards.
+- **Find in page.** `Ctrl+F` cannot match a row that is not in the DOM, which
+  makes the browser's own find quietly wrong on any virtualized list anywhere.
+  The grid ships a find that searches the data and scrolls the match into
+  view.
+- **Select all and copy.** Operates on the collection, not on the rows that
+  happen to be mounted.
+- **Assistive technology.** `aria-setsize` and `aria-posinset` are computed
+  from the collection, so "row 4,312 of 100,000" is true even though 4,311 of
+  them were never rendered.
+
+A performance technique that breaks the page is not a performance technique.

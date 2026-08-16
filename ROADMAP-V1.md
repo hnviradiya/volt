@@ -202,7 +202,8 @@ must be written in the shared package from the start even though only the grid
 uses them at first — otherwise the grid grows a private copy that combobox and
 tree later have to reconcile with.
 
-- **Rendering** — row and column virtualization, variable row height, pinned
+- **Rendering** — row and column virtualization, always on above the
+  threshold and never configurable (see Design decisions), variable row height, pinned
   top/bottom rows, pinned left/right columns, auto-height, RTL
 - **Columns** — resize, reorder, hide, pin, auto-size, column groups,
   multi-row headers
