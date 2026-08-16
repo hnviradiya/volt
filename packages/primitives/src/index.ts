@@ -56,4 +56,4 @@ export * from './toggle.js';
 export * from './form-controls.js';
 export * from './toast.js';
 export * from './display.js';
-
+export * from './async.js';
