@@ -263,3 +263,27 @@ describe('decorator lowering', () => {
     expect(await runTransform(decorators, `export const x = 1;`)).toBeNull();
   });
 });
+
+describe('paths must match the file on disk exactly', () => {
+  it('rejects a templateUrl that differs only by case', async () => {
+    const { templates } = plugins();
+    // Resolves happily on macOS and Windows, then breaks the first Linux CI
+    // run — so it is an error on the machine where the mistake is made.
+    await expect(
+      runTransform(
+        templates,
+        `@Component({ selector: 'v-c', templateUrl: './Counter.html' })\nexport class C {}`,
+      ),
+    ).rejects.toThrow(/spelled differently on disk: the file is "counter\.html"/);
+  });
+
+  it('accepts the exact spelling', async () => {
+    const { templates } = plugins();
+    await expect(
+      runTransform(
+        templates,
+        `@Component({ selector: 'v-c', templateUrl: './counter.html' })\nexport class C {}`,
+      ),
+    ).resolves.not.toBeNull();
+  });
+});

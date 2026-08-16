@@ -180,3 +180,34 @@ describe('components that cannot render on first paint', () => {
     ).toEqual(['v-a', 'v-b']);
   });
 });
+
+describe('a mistyped directive is an error, not a property', () => {
+  for (const [written, meant] of [
+    ['iff', 'if'], ['clas', 'class'], ['kay', 'key'], ['styel', 'style'],
+    ['slto', 'slot'], ['fro', 'for'], ['refe', 'ref'], ['modle', 'model'],
+  ] as const) {
+    it(`rejects :${written} and names :${meant}`, () => {
+      // Without this it becomes a property binding: `:iff="open"` sets a
+      // property called `iff` and the element renders unconditionally, with
+      // nothing wrong in the output to notice.
+      expect(() => gen(`<div :${written}="x"></div>`)).toThrow(
+        new RegExp(`Unknown directive .:${written}.*did you mean .:${meant}`),
+      );
+    });
+  }
+
+  for (const name of ['id', 'form', 'value', 'title', 'name', 'type', 'step', 'size'] as const) {
+    it(`leaves :${name} alone, though it is one edit from a directive`, () => {
+      expect(() => gen(`<div :${name}="x"></div>`)).not.toThrow();
+    });
+  }
+
+  it('takes :prop-* as the way to insist', () => {
+    expect(() => gen(`<div :prop-iff="x"></div>`)).not.toThrow();
+  });
+
+  it('does not second-guess a hyphenated or component binding', () => {
+    expect(() => gen(`<div :data-iff="x"></div>`)).not.toThrow();
+    expect(() => gen(`<v-thing :iffy="x"></v-thing>`)).not.toThrow();
+  });
+});

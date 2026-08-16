@@ -188,3 +188,61 @@ export function isComponentTag(tag: string): boolean {
 export function isKnownElement(tag: string): boolean {
   return HTML_TAGS.has(tag) || SVG_TAGS.has(tag.toLowerCase()) || SVG_TAGS.has(tag);
 }
+
+/**
+ * Attribute and property names common enough that a `:` binding using one is
+ * certainly deliberate.
+ *
+ * Used only to keep the typo check below from firing on real bindings: `:id`
+ * is one character from `:if`, and `:form` one from `:for`. This does not have
+ * to be exhaustive — a name missing from it is only checked for a near-miss
+ * against a directive, and almost nothing legitimate is one edit away from one.
+ */
+export const COMMON_ATTRIBUTES = new Set([
+  'id', 'title', 'lang', 'dir', 'role', 'tabindex', 'hidden', 'inert', 'slot', 'part',
+  'name', 'value', 'type', 'placeholder', 'href', 'src', 'alt', 'srcset', 'sizes',
+  'width', 'height', 'form', 'action', 'method', 'target', 'rel', 'download',
+  'min', 'max', 'step', 'pattern', 'accept', 'autocomplete', 'inputmode', 'enterkeyhint',
+  'rows', 'cols', 'wrap', 'span', 'colspan', 'rowspan', 'headers', 'scope',
+  'checked', 'selected', 'disabled', 'readonly', 'required', 'multiple', 'open',
+  'loading', 'decoding', 'fetchpriority', 'referrerpolicy', 'crossorigin',
+  'poster', 'preload', 'controls', 'autoplay', 'loop', 'muted', 'playsinline',
+  'draggable', 'spellcheck', 'translate', 'contenteditable', 'popover', 'popovertarget',
+  'label', 'list', 'maxlength', 'minlength', 'size', 'start', 'reversed', 'datetime',
+]);
+
+/** Directive names a mistyped one is most likely aiming at. */
+export const DIRECTIVE_NAMES = [
+  'if', 'else-if', 'else', 'for', 'key', 'text', 'html', 'model', 'ref', 'slot',
+  'portal', 'class', 'style', 'spread',
+];
+
+/** Edit distance, capped — anything past 1 is not a typo worth guessing at. */
+export function isOneEditFrom(a: string, b: string): boolean {
+  if (a === b) return false;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  if (long.length - short.length > 1) return false;
+
+  if (short.length === long.length) {
+    // One substitution, or one transposition of neighbours.
+    let diff = -1;
+    for (let i = 0; i < short.length; i++) {
+      if (short[i] === long[i]) continue;
+      if (diff !== -1) {
+        return (
+          diff === i - 1 && short[diff] === long[i] && short[i] === long[diff] &&
+          short.slice(i + 1) === long.slice(i + 1)
+        );
+      }
+      diff = i;
+    }
+    return diff !== -1;
+  }
+
+  // One insertion: the shorter must be the longer with a single character out.
+  for (let i = 0; i < long.length; i++) {
+    if (short === long.slice(0, i) + long.slice(i + 1)) return true;
+  }
+  return false;
+}
+

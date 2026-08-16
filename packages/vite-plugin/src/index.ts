@@ -16,7 +16,7 @@
  *     and nothing is parsed at runtime.
  */
 
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { transform as esbuildTransform } from 'esbuild';
@@ -203,6 +203,7 @@ async function compileTemplates(
 
   for (const site of templates) {
     const file = resolvePath(dir, site.path);
+    await assertExactCase(file, site.path, id);
     // Registering the file makes an edit to the markup re-run this transform,
     // so templates hot-reload like any other source file.
     watch(file);
@@ -249,6 +250,7 @@ async function compileTemplates(
       }
 
       const file = resolvePath(dir, relative);
+      await assertExactCase(file, relative, id);
       watch(file);
 
       let source: string;
@@ -303,6 +305,48 @@ async function compileTemplates(
       : '';
 
   return { code: header + output, map: null };
+}
+
+/**
+ * Fail when a path differs from the file on disk only by case.
+ *
+ * macOS and Windows resolve `./Counter.html` against `counter.html` without
+ * complaint, so the mismatch survives every local build and every review, then
+ * breaks the first Linux CI run or container deploy. Reading the directory and
+ * comparing exactly is the only way to catch it on the machine where the
+ * mistake is made.
+ */
+const caseChecked = new Set<string>();
+
+async function assertExactCase(file: string, written: string, id: string): Promise<void> {
+  if (caseChecked.has(file)) return;
+
+  const directory = dirname(file);
+  const wanted = file.slice(directory.length + 1);
+
+  let entries: string[];
+  try {
+    entries = await readdir(directory);
+  } catch {
+    // A missing directory is reported by the read that follows, with a better
+    // message than anything this function could give.
+    return;
+  }
+
+  if (entries.includes(wanted)) {
+    caseChecked.add(file);
+    return;
+  }
+
+  const actual = entries.find((entry) => entry.toLowerCase() === wanted.toLowerCase());
+  if (!actual) return;
+
+  throw new Error(
+    `[volt] "${written}" is spelled differently on disk: the file is "${actual}".\n` +
+      `  Referenced by ${id}.\n` +
+      '  This resolves on a case-insensitive filesystem and fails on Linux, so it is an\n' +
+      '  error everywhere rather than a surprise at deploy time.',
+  );
 }
 
 /**

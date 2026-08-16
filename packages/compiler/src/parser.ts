@@ -23,7 +23,13 @@ import {
   type TemplateChildNode,
   type TextNode,
 } from './ast.js';
-import { KNOWN_EVENTS, isComponentTag } from './dom-info.js';
+import {
+  COMMON_ATTRIBUTES,
+  DIRECTIVE_NAMES,
+  KNOWN_EVENTS,
+  isComponentTag,
+  isOneEditFrom,
+} from './dom-info.js';
 
 export class CompilerError extends Error {
   constructor(
@@ -541,6 +547,22 @@ class Parser {
     if (base === 'style') return make('style', 'style');
 
     if (KNOWN_EVENTS.has(base)) return make('event', base);
+
+    // Anything left is a property binding, which is where a mistyped directive
+    // goes to hide: `:iff="open"` sets a property called `iff` and the element
+    // renders unconditionally, with nothing to see in the output. A name one
+    // edit from a directive, and not an attribute anyone actually writes, is a
+    // typo rather than a property.
+    if (!COMMON_ATTRIBUTES.has(base) && !base.includes('-')) {
+      const meant = DIRECTIVE_NAMES.find((name) => isOneEditFrom(base, name));
+      if (meant) {
+        this.error(
+          `Unknown directive \`:${base}\` — did you mean \`:${meant}\`?\n` +
+            `  If \`${base}\` really is a property, write \`:prop-${base}\` to say so.`,
+          loc,
+        );
+      }
+    }
 
     return make('prop', base);
   }
