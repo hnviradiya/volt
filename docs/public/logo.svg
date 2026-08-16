@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="Volt">
+  <clipPath id="v"><rect x="-2" y="-2" width="36" height="22.5"/></clipPath>
+  <path d="M2 19 H11 L15 5 L19 27 L22 19 H30" stroke="#14161A" stroke-width="3" stroke-linecap="butt" stroke-linejoin="round"/>
+  <path d="M2 19 H11 L15 5 L19 27" stroke="#6F42C1" stroke-width="3" stroke-linecap="butt" stroke-linejoin="round" clip-path="url(#v)"/>
+</svg>

@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/public/logo-dark.svg">
+  <img src="docs/public/logo.svg" alt="Volt" width="72" height="72">
+</picture>
+
 # Volt
 
 A TypeScript UI framework built from three ideas that fit together:

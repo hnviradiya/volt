@@ -8,7 +8,10 @@ export default defineConfig({
   cleanUrls: true,
   lastUpdated: true,
 
+  head: [['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }]],
+
   themeConfig: {
+    logo: { light: '/logo.svg', dark: '/logo-dark.svg' },
     nav: [
       { text: 'Guide', link: '/guide/introduction' },
       { text: 'Reference', link: '/reference/template-syntax' },
