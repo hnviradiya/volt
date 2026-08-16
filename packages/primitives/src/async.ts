@@ -14,10 +14,11 @@
  * results land under the word "cat" and the list is wrong in a way that looks
  * like a backend bug. Aborting the first request is not enough — abort is a
  * request to stop, not a promise that nothing arrives, and a fetcher reading
- * from cache or ignoring the signal will resolve anyway. So every response is
- * checked against a generation counter and a stale one is dropped before it
- * can touch a signal. The `AbortController` is still there, because stopping
- * work nobody wants is worth doing; it is just not what makes this correct.
+ * from cache, from a service worker, or simply ignoring the signal will
+ * resolve anyway. So every write is checked against a generation counter and a
+ * stale one is dropped before it can touch a signal. The `AbortController` is
+ * still there, because stopping work nobody wants is worth doing; it is just
+ * not what makes this correct.
  *
  * Headless like the rest: it owns state and returns prop objects to spread
  * onto whatever markup the consumer writes. Nothing here renders.
@@ -39,13 +40,13 @@
  *   }
  *
  *   <input :value="query.get()" :input="query.set($event.target.value)">
- *   <p :spread="results.statusProps()">{{ results.announcement() }}</p>
- *   <p :if="results.isError()" :spread="results.errorProps()">{{ results.errorMessage() }}</p>
+ *   <p :spread="results.statusProps()">{ results.announcement() }</p>
+ *   <p :if="results.isError()" :spread="results.errorProps()">{ results.errorMessage() }</p>
  *   <ul :spread="results.contentProps()">
- *     <li :for="item of results.data() ?? []" :key="item.id">{{ item.name }}</li>
+ *     <li :for="item of results.data() ?? []" :key="item.id">{ item.name }</li>
  *   </ul>
  *
- * Two rules are worth knowing before reading the options:
+ * Three rules are worth knowing before reading the options:
  *
  *   - **`debounce` and `throttle` apply to the dependency, not to calls.**
  *     They exist for search-as-you-type, where the input changes far faster
@@ -56,6 +57,10 @@
  *     data in place and sets the error beside it, because a list that empties
  *     itself on a dropped connection loses work the user could still see. Call
  *     `mutate(undefined)` to clear it deliberately.
+ *   - **A fetcher can answer more than once.** `request.push()` writes a
+ *     partial result without ending the request, which is what a streamed
+ *     reply and an upload's progress both need. `mutate()` cannot serve that
+ *     purpose: it means "the answer is known now", so it abandons the request.
  */
 
 import { Signal, batch, effect, onCleanup } from '@voltjs/core';
@@ -73,7 +78,10 @@ const { untrack } = Signal.subtle;
  */
 export type ResourceStatus = 'idle' | 'loading' | 'success' | 'error';
 
-/** Everything the fetcher is told about the call it is making. */
+/** Given what is there now, what should be there instead. */
+export type ResourceUpdater<T> = (previous: T | undefined) => T | undefined;
+
+/** Everything the fetcher is told about, and can do to, the call it is making. */
 export interface ResourceRequest<T, S> {
   /** The dependency's value when this request started. */
   readonly source: S;
@@ -85,16 +93,30 @@ export interface ResourceRequest<T, S> {
   /** 0 on the first try, then 1, 2, … for each retry. */
   readonly attempt: number;
   /**
-   * The last data that landed, mutations included. This is what makes an
-   * infinite list a one-liner: return `[...previous ?? [], ...page]`.
+   * The last data that landed — earlier responses, mutations and this
+   * request's own pushes. This is what makes an infinite list a one-liner:
+   * return `[...previous ?? [], ...page]`.
+   *
+   * On a retry it therefore still holds whatever the failed attempt managed to
+   * push, which a resumable stream wants and a restarting one does not;
+   * `attempt` is how you tell the two apart.
    */
   readonly previous: T | undefined;
+  /**
+   * Publish a partial result without ending the request: a streamed chunk, an
+   * upload's byte count, the first page of a paged read. The status stays
+   * `loading`.
+   *
+   * Dropped silently once this request is no longer the newest, so a stream
+   * the user has moved on from cannot keep writing over its replacement.
+   *
+   * A function is treated as an updater, so a `T` that is itself a function
+   * type must be wrapped: `push(() => fn)`.
+   */
+  push(next: T | ResourceUpdater<T>): void;
 }
 
 export type ResourceFetcher<T, S> = (request: ResourceRequest<T, S>) => T | Promise<T>;
-
-/** Given what is there now, what should be there instead. */
-export type ResourceUpdater<T> = (previous: T | undefined) => T | undefined;
 
 /**
  * Every string this can put in front of a user.
@@ -167,7 +189,13 @@ export interface ResourceOptions<T, S> {
   /** Likewise for the status, for a shell that shows one spinner for many resources. */
   status?: Signal.State<ResourceStatus>;
 
-  /** Skip the fetch this would otherwise start on creation. Default false. */
+  /**
+   * Fetch once as soon as this is created. Default true.
+   *
+   * With it off nothing goes out until the source changes or `refetch()` is
+   * called — which is what a form's submit-driven resource wants, and what a
+   * resource hydrating from `initialData` wants until something invalidates it.
+   */
   immediate?: boolean;
 
   /**
@@ -225,7 +253,10 @@ export interface Resource<T, S = undefined> {
   data(): T | undefined;
   /** The last failure, as thrown. `unknown`, because a `throw` can be anything. */
   error(): unknown;
-  /** 0 while on the first try, then the retry number. For "Attempt 2 of 3". */
+  /**
+   * The retry number of the attempt in flight, or of the last one to finish.
+   * 0 on a first try. For "Attempt 2 of 3".
+   */
   attempt(): number;
   isLoading(): boolean;
   isError(): boolean;
@@ -246,13 +277,14 @@ export interface Resource<T, S = undefined> {
   refetch(): Promise<T | undefined>;
 
   /**
-   * Write the data locally — an optimistic update, an appended page, a
-   * streamed chunk.
+   * Write the data locally — an optimistic update, an edit the server has yet
+   * to confirm.
    *
    * Anything in flight is aborted and its response discarded: a mutation says
    * the answer is known now, and a response already on its way carries the
    * value the user just changed. So the order in the usual flow matters —
-   * mutate, save, then `refetch()` to reconcile.
+   * mutate, save, then `refetch()` to reconcile. To add to the data *during* a
+   * request, which is a different thing, use `request.push()`.
    *
    * A function is treated as an updater. A resource whose `T` is itself a
    * function type must therefore wrap it: `mutate(() => fn)`.
@@ -297,6 +329,16 @@ export function exponentialBackoff(
   return capped / 2 + Math.random() * (capped / 2);
 }
 
+/**
+ * Whether a value handed to `mutate` or `push` is an updater.
+ *
+ * There is no way to tell an updater from a `T` that happens to be a function,
+ * so this picks the common case and both call sites document the wrap.
+ */
+function isUpdater<T>(next: T | undefined | ResourceUpdater<T>): next is ResourceUpdater<T> {
+  return typeof next === 'function';
+}
+
 export function createResource<T, S = undefined>(
   fetcher: ResourceFetcher<T, S>,
   options: ResourceOptions<T, S> = {},
@@ -320,9 +362,9 @@ export function createResource<T, S = undefined>(
 
   /**
    * Which request is allowed to write. Bumped by every new request and by
-   * everything that invalidates one, so a response only has to prove it is
-   * still the newest — which is the check `signal.aborted` cannot make,
-   * because an abort a fetcher ignored leaves a perfectly resolved promise.
+   * everything that invalidates one, so a write only has to prove it is still
+   * the newest — which is the check `signal.aborted` cannot make, because an
+   * abort a fetcher ignored leaves a perfectly resolved promise.
    */
   let generation = 0;
   let controller: AbortController | null = null;
@@ -390,6 +432,16 @@ export function createResource<T, S = undefined>(
     const id = generation;
     lastStart = Date.now();
 
+    /** True only while this call is still the one whose answer anyone wants. */
+    const current = (): boolean => id === generation && !disposed;
+
+    const push = (next: T | ResourceUpdater<T>): void => {
+      // A chunk from a stream that has been superseded. Dropped for the same
+      // reason a whole response is: the newest request owns the data.
+      if (!current()) return;
+      data.set(isUpdater(next) ? next(peek(data)) : next);
+    };
+
     for (let tries = 0; ; tries++) {
       const request = new AbortController();
       controller = request;
@@ -408,11 +460,12 @@ export function createResource<T, S = undefined>(
           signal: request.signal,
           attempt: tries,
           previous: peek(data),
+          push,
         });
 
         // The whole point of the exercise: a response that is no longer the
         // newest is dropped here, resolved or not, aborted or not.
-        if (id !== generation || disposed) return undefined;
+        if (!current()) return undefined;
 
         controller = null;
         batch(() => {
@@ -423,14 +476,13 @@ export function createResource<T, S = undefined>(
         options.onSuccess?.(value);
         return value;
       } catch (error) {
-        if (id !== generation || disposed) return undefined;
-        // Our own abort of the current request — a disable, say. Its rejection
-        // is bookkeeping, not a failure anyone should be told about.
-        if (request.signal.aborted) return undefined;
+        if (!current()) return undefined;
 
         if (tries < retries && (options.shouldRetry?.(error, tries + 1) ?? true)) {
+          // The backoff is cancellable, so a source change during it starts the
+          // new request instead of queueing behind a wait for the old one.
           if (!(await wait(retryDelay(tries + 1, error)))) return undefined;
-          if (id !== generation || disposed) return undefined;
+          if (!current()) return undefined;
           continue;
         }
 
@@ -478,7 +530,7 @@ export function createResource<T, S = undefined>(
     }, delay);
   };
 
-  /** The source the current request was started for, or null for none. */
+  /** The source the newest request was started for, or null for none. */
   let requested: { source: S } | null = null;
   let started = false;
 
@@ -538,7 +590,9 @@ export function createResource<T, S = undefined>(
     announcement: () => {
       switch (status.get()) {
         case 'loading':
-          return attempt.get() > 0 ? (labels.retrying ?? 'Retrying…') : (labels.loading ?? 'Loading…');
+          return attempt.get() > 0
+            ? (labels.retrying ?? 'Retrying…')
+            : (labels.loading ?? 'Loading…');
         case 'success':
           return labels.success ?? '';
         default:
@@ -556,14 +610,16 @@ export function createResource<T, S = undefined>(
 
     refetch: () => {
       const source = untrack(readSource);
+      // Recorded, so the effect that is about to see this same source does not
+      // treat it as a change and ask again.
       requested = { source };
+      started = true;
       return execute(source);
     },
 
     mutate: (next) => {
       stop('Superseded by a local mutation');
-      const value =
-        typeof next === 'function' ? (next as ResourceUpdater<T>)(peek(data)) : next;
+      const value = isUpdater(next) ? next(peek(data)) : next;
       batch(() => {
         data.set(value);
         failure.set(undefined);
@@ -579,6 +635,10 @@ export function createResource<T, S = undefined>(
       // The role and the `aria-live` say the same thing on purpose: the role's
       // implicit value satisfies the specification, and some assistive
       // technology still honours only the explicit attribute.
+      //
+      // Render this element unconditionally. A live region only announces
+      // changes to text inside a region that was already there, so one that
+      // appears together with its message is a region that says nothing.
       role: 'status',
       'aria-live': 'polite',
       // The message is one sentence and replaces the last one; half of it is
@@ -603,6 +663,9 @@ export function createResource<T, S = undefined>(
       // is queued. Two regions rather than one that changes politeness,
       // because changing `aria-live` on a live region is not reliably picked
       // up once the region exists.
+      //
+      // `role="alert"` is the one live region that may be rendered with its
+      // message, since it is announced on insertion as well as on change.
       role: 'alert',
       'aria-live': 'assertive',
       'aria-atomic': 'true',

@@ -365,6 +365,47 @@ Form integration comes with it: an action bound to a `<form>` so a submission
 works before any JavaScript has loaded, which is the main thing server
 functions buy over an ordinary fetch.
 
+### Performance target
+
+The goal is that a Volt server request costs less than the same request
+through Fastify. That is achievable, but not by writing a faster HTTP
+framework — Fastify has had years of micro-optimisation and most of what
+remains is Node's own HTTP parsing, which both would pay.
+
+It is achievable because Volt knows at build time what Fastify has to work out
+at runtime.
+
+| Fastify does at runtime | Volt can do at build time |
+| --- | --- |
+| Walk a radix tree to match a route | Every server-function endpoint is generated, so dispatch is a lookup on an interned id — no tree, no parameter parsing |
+| Serialize with `fast-json-stringify`, from a JSON Schema you hand-wrote | Derive the serializer from the TypeScript return type. Same technique, same speed, nothing to author |
+| Run a middleware chain | There is no chain unless something asks for one |
+| Validate against a schema you wrote | The types are the schema |
+
+**Volt should not ship an HTTP server.** The handler is a
+`(Request) => Response` function against the Fetch standard, which runs on
+Node, Bun, Deno, Cloudflare Workers — and inside Fastify or Hono for anyone
+who wants their middleware. That is faster in the only sense that matters to
+an application: the fastest request is the one that does not pass through a
+framework at all, and on Bun or workerd it is not competing with Fastify-on-
+Node in the first place.
+
+Owning a server would also constrain deployment, which is a high price for a
+benchmark number.
+
+What has to be measured, on the same harness and with the same discipline as
+the client benchmark:
+
+- requests per second for a server function returning a small object, against
+  Fastify with `fast-json-stringify` and a matching schema
+- time to first byte for a streamed SSR response
+- allocation per request, since that is what decides behaviour under load
+  rather than a single-request number
+
+No claim about beating Fastify goes in the README until that harness exists
+and reports it. This project has already produced four optimisations that
+measured well in isolation and moved nothing in the macro benchmark.
+
 ## Developer tools
 
 A browser extension plus the hooks in core it needs, all behind `__VOLT_DEV__`

@@ -1,57 +1,72 @@
 import { describe, expect, it } from 'vitest';
 
-describe('happy-dom capabilities', () => {
-  it('reports what exists', () => {
-    const el = document.createElement('div');
-    document.body.append(el);
-    const caps = {
-      PointerEvent: typeof PointerEvent,
-      setPointerCapture: typeof el.setPointerCapture,
-      releasePointerCapture: typeof el.releasePointerCapture,
-      hasPointerCapture: typeof el.hasPointerCapture,
-      checkVisibility: typeof (el as unknown as { checkVisibility?: unknown }).checkVisibility,
-      ResizeObserver: typeof ResizeObserver,
-      IntersectionObserver: typeof IntersectionObserver,
-      elementFromPoint: typeof document.elementFromPoint,
-      getBoundingClientRect: JSON.stringify(el.getBoundingClientRect()),
-      scrollTo: typeof el.scrollTo,
-      scrollBy: typeof el.scrollBy,
-      requestAnimationFrame: typeof requestAnimationFrame,
-      overflowY: getComputedStyle(el).overflowY,
-      matchMedia: typeof matchMedia,
-      scrollHeight: el.scrollHeight,
+describe('probe', () => {
+  it('capture ordering and styles', () => {
+    document.body.innerHTML = '<div id="a"><button id="b">x</button></div>';
+    const a = document.querySelector('#a') as HTMLElement;
+    const b = document.querySelector('#b') as HTMLElement;
+
+    const order: string[] = [];
+    const onWin = () => order.push('window');
+    const onDoc = () => order.push('document');
+    document.addEventListener('keydown', onDoc, true);
+    window.addEventListener('keydown', onWin, true);
+    b.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    console.log('capture order', order);
+
+    order.length = 0;
+    const onWin2 = (e: Event) => {
+      order.push('window');
+      e.stopPropagation();
     };
-    console.log(caps);
+    window.removeEventListener('keydown', onWin, true);
+    window.addEventListener('keydown', onWin2, true);
+    b.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    console.log('after stopPropagation at window', order);
+    window.removeEventListener('keydown', onWin2, true);
+    document.removeEventListener('keydown', onDoc, true);
+
+    a.style.overflowY = 'auto';
+    console.log('computed overflowY', getComputedStyle(a).overflowY, '|', getComputedStyle(a).overflow);
+    console.log('checkVisibility opts', a.checkVisibility({ visibilityProperty: true }));
+    console.log('scrollIntoView', typeof a.scrollIntoView);
+    console.log('body userSelect', typeof document.body.style.userSelect);
+
+    // pointer events to window capture
+    const pointerSeen: string[] = [];
+    const onPtr = () => pointerSeen.push('doc');
+    document.addEventListener('pointermove', onPtr, true);
+    b.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 1, clientY: 2 }));
+    console.log('pointermove to document capture', pointerSeen);
+    document.removeEventListener('pointermove', onPtr, true);
+
+    console.log('setPointerCapture throws?', (() => {
+      try {
+        b.setPointerCapture(1);
+        return 'no';
+      } catch (error) {
+        return String(error);
+      }
+    })());
+
+    const stub = document.createElement('div');
+    stub.getBoundingClientRect = () => new DOMRect(0, 10, 100, 20);
+    console.log('stubbed rect', JSON.stringify(stub.getBoundingClientRect()));
     expect(true).toBe(true);
   });
 
-  it('pointer event props', () => {
-    const ev = new PointerEvent('pointerdown', {
-      pointerId: 3,
-      pointerType: 'touch',
-      clientX: 5,
-      clientY: 6,
-      bubbles: true,
-      button: 0,
+  it('raf timing', async () => {
+    let frames = 0;
+    const start = Date.now();
+    await new Promise<void>((resolve) => {
+      const step = () => {
+        frames++;
+        if (frames >= 3) resolve();
+        else requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
     });
-    console.log({
-      id: ev.pointerId,
-      type: ev.pointerType,
-      x: ev.clientX,
-      y: ev.clientY,
-      button: ev.button,
-      isPrimary: ev.isPrimary,
-    });
-    expect(ev.pointerId).toBe(3);
-  });
-
-  it('scroll props are writable', () => {
-    const el = document.createElement('div');
-    document.body.append(el);
-    Object.defineProperty(el, 'scrollHeight', { value: 500, configurable: true });
-    Object.defineProperty(el, 'clientHeight', { value: 100, configurable: true });
-    el.scrollTop = 40;
-    console.log({ scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight });
-    expect(el.scrollTop).toBe(40);
+    console.log('frames', frames, 'ms', Date.now() - start);
+    expect(frames).toBe(3);
   });
 });
