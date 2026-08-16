@@ -179,6 +179,11 @@ export interface Breadcrumb {
  * once in the trail and once in the menu; `hidden` keeps the trail's copy out
  * of the accessibility tree so nothing is announced twice.
  *
+ * The overflow slot belongs where the collapse happens — after the first
+ * `itemsBefore` crumbs — and one `:for` cannot put it there. Either split the
+ * trail into two loops, or leave it after them and give it a CSS `order`,
+ * which is the cheaper of the two and is styling either way.
+ *
  * Measurement reads layout, which forces the browser to compute it: one
  * synchronous reflow per resize, which is the price of not guessing. It is
  * measured against the list's own client width, so give the list a width that
@@ -268,13 +273,12 @@ export function createBreadcrumb(options: BreadcrumbOptions): Breadcrumb {
     // zero and collapsing a trail that may well fit.
     if (available <= 0) return;
 
-    // Whatever is between the crumbs — separators, gaps, padding — shared out
-    // evenly across the slots. Assuming the separators are alike is what lets
-    // this work without knowing how the consumer renders them; a trail with
-    // one enormous separator in it will collapse one crumb too few.
-    const slots = total + 1;
-    const chrome = Math.max(0, required - (sum(widths) + slotWidth));
-    const perSlot = slots > 1 ? chrome / (slots - 1) : 0;
+    // Whatever sits between the crumbs — separators, gaps, padding — shared
+    // out evenly across the gaps. Assuming the separators are alike is what
+    // lets this work without knowing how the consumer renders them; a trail
+    // with one enormous separator in it will collapse one crumb too few.
+    const chrome = Math.max(0, required - sum(widths));
+    const perGap = chrome / Math.max(total - 1, 1);
 
     const widthWith = (collapsed: number): number => {
       let shown = 0;
@@ -282,8 +286,10 @@ export function createBreadcrumb(options: BreadcrumbOptions): Breadcrumb {
         if (i >= itemsBefore && i < itemsBefore + collapsed) continue;
         shown += width;
       }
+      // The trigger takes a slot of its own the moment anything is in it, so
+      // collapsing a single crumb only saves the difference between the two.
       const parts = total - collapsed + (collapsed > 0 ? 1 : 0);
-      return shown + (collapsed > 0 ? slotWidth : 0) + perSlot * Math.max(parts - 1, 0);
+      return shown + (collapsed > 0 ? slotWidth : 0) + perGap * Math.max(parts - 1, 0);
     };
 
     // Collapse from just after the kept start, forwards. That keeps the
@@ -668,6 +674,21 @@ export function createPagination(options: PaginationOptions): Pagination {
     // arrowed past.
     focused.set(null);
   };
+
+  // The row is rebuilt whenever the page or the total moves, which none of the
+  // other lists here do. A tab stop remembered on a number that is no longer
+  // in the row would leave the widget with no tab stop at all, and Tab would
+  // step straight over it — and removing a focused element fires no
+  // `focusout`, so nothing else would notice.
+  effect(() => {
+    page();
+    pageCount();
+    const key = focused.get();
+    if (key === null) return;
+    untrack(() => {
+      if (!elementFor(key)) focused.set(null);
+    });
+  });
 
   return {
     page,
@@ -1416,17 +1437,19 @@ export function createNavigationMenu(options: NavigationMenuOptions): Navigation
 
   const isTrigger = (el: Element | null): boolean => el?.getAttribute('aria-haspopup') === 'menu';
 
-  /** Move along the bar and, if what we land on opens a submenu, open it. */
+  /** Move along the bar, carrying an open submenu with us. */
   const moveAlongBar = (event: KeyboardEvent): boolean => {
     const before = untrack(() => active.get());
+    const wasOpen = untrack(() => open.get()) !== null;
     if (!barRoving.onKeyDown(event)) return false;
 
     const key = untrack(() => active.get());
     if (key === null || key === before) return true;
 
-    // Browsing the bar with a submenu open keeps them open, which is what the
-    // pointer does and what a user who opened one is looking for.
-    if (isTrigger(elementFor(key))) openSubmenu(key, 'first');
+    // Only when a submenu was already open. Moving along a closed bar is
+    // moving focus and nothing else — opening menus as focus passes over them
+    // is what makes a menubar unusable with a keyboard.
+    if (wasOpen && isTrigger(elementFor(key))) openSubmenu(key, 'first');
     else setOpen(null);
     return true;
   };
@@ -1490,6 +1513,14 @@ export function createNavigationMenu(options: NavigationMenuOptions): Navigation
   const onSubmenuKeyDown = (event: Event) => {
     if (!isKeyboardEvent(event)) return;
     if (event.ctrlKey || event.metaKey || event.altKey) return;
+
+    // The submenu and the bar are two halves of one widget, and this is the
+    // inner half. A submenu rendered inside the bar rather than portalled out
+    // of it shares the bar's bubble path, and one Right press would move two
+    // items along. Dismissal is unaffected: it listens on the document in the
+    // capture phase, so Escape has already been dealt with by the time this
+    // runs.
+    event.stopPropagation();
 
     switch (event.key) {
       case 'Enter':
@@ -1776,6 +1807,3 @@ function isMouseEvent(event: Event): event is MouseEvent {
 function isPointerEvent(event: Event): event is PointerEvent {
   return 'pointerId' in event;
 }
-
-/** Exported for the sake of consumers writing their own collection helpers. */
-export type { Collection };

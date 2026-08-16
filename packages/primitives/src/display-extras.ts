@@ -327,8 +327,9 @@ export function createChip(options: ChipOptions): Chip {
 
   // Siblings are read from the DOM, in the order they appear, which is the
   // only place that order is actually true — an array of tags can be sorted or
-  // filtered between renders.
-  const siblings = createCollection(containerOf, { skipDisabled: false });
+  // filtered between renders. Disabled chips count: `aria-disabled` leaves an
+  // element focusable, so one is still somewhere for focus to go.
+  const siblings = createCollection(containerOf);
 
   const label = (): string => options.label?.()?.trim() ?? '';
   const isDisabled = (): boolean => options.disabled?.() === true;
@@ -737,7 +738,11 @@ export interface KbdLabels {
 }
 
 export interface KbdOptions {
-  /** The chord, in `KeyboardEvent.key` names: `['Meta', 'K']`. */
+  /**
+   * The chord, in `KeyboardEvent.key` names: `['Meta', 'K']`. A string is
+   * split on `+`, which is the shorthand everyone writes and the reason the
+   * array form exists — `'Meta++'` has no sensible reading.
+   */
   keys: () => readonly string[] | string | null | undefined;
   /**
    * Which symbols to draw. Defaults to the platform the browser is running on,

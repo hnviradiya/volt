@@ -402,8 +402,9 @@ export function createAlert(options: AlertOptions): Alert {
 
     const onKeyDown = (event: Event) => {
       if (!isKeyboardEvent(event) || event.key !== 'Escape') return;
-      // No `preventDefault`: Escape has other meanings further up — leaving an
-      // input's own composition, for one — and this layer has no claim on it.
+      // Neither prevented nor stopped: Escape has other meanings further up —
+      // abandoning an input's own composition, for one — and an alert has no
+      // claim on the key beyond its own subtree.
       setOpen(false);
     };
 
@@ -568,9 +569,9 @@ export interface Skeleton {
  *           :spread="skeleton.messageProps()">{ skeleton.message() }</span>
  *   </div>
  *
- * The placeholder is hidden from assistive technology and inert. A screen
- * reader read a dozen empty boxes as a dozen empty boxes, and a keyboard user
- * tabbed through them, which is why the sentence in the status region exists:
+ * The placeholder is hidden from assistive technology and inert. Left visible
+ * to it, a dozen empty boxes are read out as a dozen empty boxes and tabbed
+ * through one by one, which is why the sentence in the status region exists:
  * one "Loading…" instead of the wall.
  *
  * `aria-hidden` alone would be a lie on any placeholder holding something
@@ -606,12 +607,14 @@ export function createSkeleton(options: SkeletonOptions = {}): Skeleton {
     return labels.loaded ?? 'Loaded';
   };
 
+  const isMessageVisible = (): boolean => timing.isReady() && message() !== '';
+
   return {
     isLoading: () => state.get(),
     isVisible: () => visibility.isVisible(),
     state: () => visibility.state(),
     message,
-    isMessageVisible: () => timing.isReady() && message() !== '',
+    isMessageVisible,
 
     setLoading(next) {
       if (untrack(() => state.get()) === next) return;
@@ -642,7 +645,9 @@ export function createSkeleton(options: SkeletonOptions = {}): Skeleton {
     }),
 
     messageProps: () => ({
-      hidden: timing.isReady() && message() !== '' ? undefined : true,
+      // The same rule as the flag above, for a consumer who renders the words
+      // unconditionally: see the note on the alert's `messageProps`.
+      hidden: isMessageVisible() ? undefined : true,
     }),
   };
 }
@@ -740,14 +745,16 @@ export function createSpinner(options: SpinnerOptions = {}): Spinner {
 
   const timing = regionTiming(options.region, options.announceDelay);
 
+  // Nothing is announced during the delay, on purpose: a wait too short to show
+  // is a wait too short to mention.
+  const isMessageVisible = (): boolean => visibility.isVisible() && timing.isReady();
+
   return {
     isLoading: () => state.get(),
     isVisible: () => visibility.isVisible(),
     state: () => visibility.state(),
     label: () => labels.loading ?? 'Loading…',
-    // Nothing is announced during the delay, on purpose: a wait too short to
-    // show is a wait too short to mention.
-    isMessageVisible: () => visibility.isVisible() && timing.isReady(),
+    isMessageVisible,
 
     setLoading(next) {
       if (untrack(() => state.get()) === next) return;
@@ -768,7 +775,7 @@ export function createSpinner(options: SpinnerOptions = {}): Spinner {
     }),
 
     labelProps: () => ({
-      hidden: visibility.isVisible() && timing.isReady() ? undefined : true,
+      hidden: isMessageVisible() ? undefined : true,
     }),
 
     contentProps: () => ({
@@ -943,12 +950,14 @@ export function createEmptyState(options: EmptyStateOptions): EmptyState {
     return labels.noResults ? labels.noResults(query) : `No results for “${query}”.`;
   };
 
+  const isMessageVisible = (): boolean => isEmpty() && timing.isReady();
+
   return {
     isEmpty,
     count,
     status,
     message,
-    isMessageVisible: () => isEmpty() && timing.isReady(),
+    isMessageVisible,
 
     collectionProps: () => ({
       'aria-describedby': isEmpty() ? messageId : undefined,
@@ -968,7 +977,9 @@ export function createEmptyState(options: EmptyStateOptions): EmptyState {
     }),
 
     messageProps: () => ({
-      hidden: isEmpty() && timing.isReady() ? undefined : true,
+      // The same rule as the flag above, for a consumer who renders the words
+      // unconditionally: see the note on the alert's `messageProps`.
+      hidden: isMessageVisible() ? undefined : true,
     }),
   };
 }

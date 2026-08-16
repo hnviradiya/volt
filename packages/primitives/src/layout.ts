@@ -349,19 +349,12 @@ export function createAspectRatio(options: AspectRatioOptions = {}): AspectRatio
   const state = options.ratio ?? new Signal.State<AspectRatioValue>(options.defaultRatio ?? 1);
   const fit = options.fit ?? 'cover';
 
-  const value = (): number | null => {
-    const raw = state.get();
-    const n = Array.isArray(raw) ? (raw[1] === 0 ? Number.NaN : raw[0] / raw[1]) : (raw as number);
-    // A ratio of zero, a negative, or NaN would reach CSS as `aspect-ratio: 0`
-    // and collapse the box to nothing. Refusing it leaves the box sized by its
-    // content, which is at least visible and therefore reportable.
-    return Number.isFinite(n) && n > 0 ? n : null;
-  };
-
   const declaration = (): string => {
-    if (value() === null) return 'auto';
-    const raw = untrack(() => state.get());
-    return Array.isArray(raw) ? `${raw[0]} / ${raw[1]}` : String(raw);
+    const raw = state.get();
+    if (ratioOf(raw) === null) return 'auto';
+    // The pair is written as CSS writes it, so the browser divides rather than
+    // this doing it and handing over a rounded decimal.
+    return typeof raw === 'number' ? String(raw) : `${raw[0]} / ${raw[1]}`;
   };
 
   return {
@@ -370,14 +363,14 @@ export function createAspectRatio(options: AspectRatioOptions = {}): AspectRatio
       state.set(next);
       options.onRatioChange?.(next);
     },
-    value,
+    value: () => ratioOf(state.get()),
 
     style: () => Object.freeze({ 'aspect-ratio': declaration() }),
 
-    rootProps: () => ({
-      'data-ratio': declaration(),
-      style: { 'aspect-ratio': declaration() },
-    }),
+    rootProps: () => {
+      const ratio = declaration();
+      return { 'data-ratio': ratio, style: { 'aspect-ratio': ratio } };
+    },
 
     contentProps: () => ({
       style: {
@@ -542,9 +535,16 @@ const EMPTY_GEOMETRY: ScrollGeometry = Object.freeze({
 /**
  * A scroll area with scrollbars of your own.
  *
- *   <div :ref="viewport" :spread="area.viewportProps()">
- *     <div :ref="content">…</div>
- *   </div>
+ *   class Log {
+ *     viewport = new Signal.State<Element | null>(null);
+ *     bar = new Signal.State<Element | null>(null);
+ *     area = createScrollArea({
+ *       viewport: () => this.viewport.get(),
+ *       verticalScrollbar: () => this.bar.get(),
+ *     });
+ *   }
+ *
+ *   <div :ref="viewport" :spread="area.viewportProps()">…</div>
  *   <div :if="area.vertical.overflows()" :ref="bar"
  *        :spread="area.vertical.scrollbarProps()"
  *        :pointerdown="area.vertical.onTrackPointerDown($event)"
@@ -698,8 +698,12 @@ export function createScrollArea(options: ScrollAreaOptions): ScrollArea {
       return declared ?? thumb.parentElement;
     };
 
-    const pointerAlong = (event: { clientX: number; clientY: number }, rect: DOMRect): number =>
-      vertical ? event.clientY - rect.top : rtl() ? rect.right - event.clientX : event.clientX - rect.left;
+    /** How far along the track a press landed, counting from its start. */
+    const pointerAlong = (event: PointerEvent, rect: DOMRect): number => {
+      if (vertical) return event.clientY - rect.top;
+      // In a right-to-left document the track starts at its right edge.
+      return rtl() ? rect.right - event.clientX : event.clientX - rect.left;
+    };
 
     return {
       overflows,
@@ -839,10 +843,10 @@ export function createScrollArea(options: ScrollAreaOptions): ScrollArea {
 
       onTrackPointerDown(event) {
         if (event.button !== 0 || !event.isPrimary) return;
-        // The thumb's own handler owns presses that land on it.
-        if (event.target instanceof Element && event.target.closest(`[${SCROLL_THUMB_ATTRIBUTE}]`)) {
-          return;
-        }
+        // The thumb's own handler owns presses that land on it, and this one
+        // runs as well because the press bubbles out through the track.
+        const target = event.target;
+        if (target instanceof Element && target.closest(`[${SCROLL_THUMB_ATTRIBUTE}]`)) return;
 
         const trackEl = event.currentTarget;
         if (!(trackEl instanceof HTMLElement)) return;
@@ -992,7 +996,13 @@ function sameGeometry(a: ScrollGeometry, b: ScrollGeometry): boolean {
 // Resizable
 // ---------------------------------------------------------------------------
 
-/** Marks a handle, and carries its index for delegation and for tests. */
+/**
+ * Marks a handle and carries its index, for CSS and for finding one.
+ *
+ * Nothing here reads it. Handlers are wired per handle rather than delegated
+ * from the group, which is exactly what lets one group nest inside another
+ * without an event on the inner handle reaching the outer group's listener.
+ */
 export const RESIZABLE_HANDLE_ATTRIBUTE = 'data-volt-resizable-handle';
 
 /** One panel's share of the group, as a percentage. */
@@ -1180,8 +1190,8 @@ export function createResizable(options: ResizableOptions): Resizable {
   );
 
   const storage = resolveStorage(options);
-  const state =
-    options.sizes ?? new Signal.State<number[]>(loadSizes(storage, options.storageKey, limits) ?? defaults);
+  const stored = loadSizes(storage, options.storageKey, limits);
+  const state = options.sizes ?? new Signal.State<number[]>(stored ?? defaults);
 
   const dragging = new Signal.State<number | null>(null);
 
@@ -1750,11 +1760,21 @@ function distributeDefaults(
  * an overflow, and the arithmetic above assumes the invariant holds.
  */
 function normalise(sizes: number[], limits: readonly PanelLimits[]): number[] {
-  const next = sizes.map((size, index) => {
+  const raw = sizes.map((size) => (Number.isFinite(size) ? Math.max(0, size) : 0));
+  const sum = raw.reduce((total, size) => total + size, 0);
+  // Scaled to 100 before clamping, so that sizes which are merely on the wrong
+  // scale — halves given as `[0.5, 0.5]`, or a list that no longer adds up
+  // after a panel was removed — keep the proportions they were asked for.
+  // Handing the whole shortfall to the first panel instead would turn `[5, 5]`
+  // into `[95, 5]`, which is not what anyone meant by two equal halves.
+  const scale = sum > 0 ? 100 / sum : 0;
+
+  const next = raw.map((size, index) => {
     const limit = limits[index];
-    if (!limit) return Math.max(0, size);
+    const scaled = scale > 0 ? size * scale : 100 / Math.max(1, raw.length);
+    if (!limit) return scaled;
     const floor = limit.collapsible ? limit.collapsed : limit.min;
-    return clamp(Number.isFinite(size) ? size : floor, floor, limit.max);
+    return clamp(scaled, floor, limit.max);
   });
 
   const bound: Bound[] = limits.map((limit, index) => {

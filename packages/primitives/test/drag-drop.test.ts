@@ -61,7 +61,8 @@ afterEach(() => {
          :keydown="dnd.onKeyDown($event)">
       <ul class="todo" :spread="dnd.containerProps({ id: 'todo', label: 'Todo' })">
         <li :for="item in todo.get()" :key="item" tabindex="0"
-            :spread="dnd.itemProps({ id: item, disabled: item === 'Numb' })">{ item }</li>
+            :style="{ transform: dnd.transformFor(item) }"
+            :spread="dnd.itemProps({ id: item, disabled: item === 'Sway' })">{ item }</li>
       </ul>
       <ul class="done" :spread="dnd.containerProps({ id: 'done', label: 'Done' })">
         <li :for="item in done.get()" :key="item" tabindex="0"
@@ -196,15 +197,26 @@ function board(options: Partial<DragDropOptions> = {}) {
   layout();
 
   return {
-    instance: handle.instance as Board,
     handle,
     dnd: (handle.instance as Board).dnd,
-    items: () => [...host.querySelectorAll<HTMLElement>('li')],
     item: (id: string) => host.querySelector<HTMLElement>(`[${DRAG_ITEM_ATTRIBUTE}="${id}"]`)!,
     list: (id: string) => host.querySelector<HTMLElement>(`[${DRAG_CONTAINER_ATTRIBUTE}="${id}"]`)!,
     said: () => host.querySelector('.live')!.textContent,
     todo: () => (handle.instance as Board).todo.get(),
     done: () => (handle.instance as Board).done.get(),
+  };
+}
+
+function tree(options: Partial<DragDropOptions> = {}) {
+  boardOptions = options;
+  const handle = track(mount(Tree, host));
+  flushSync();
+  layout();
+
+  return {
+    dnd: (handle.instance as Tree).dnd,
+    node: (selector: string) => host.querySelector<HTMLElement>(selector)!,
+    said: () => host.querySelector('.live')!.textContent,
   };
 }
 
@@ -337,9 +349,7 @@ describe('what assistive technology is told', () => {
   });
 
   it('names a handle and marks it as the thing that drags', () => {
-    track(mount(Tree, host));
-    flushSync();
-    const handle = host.querySelector('.handle')!;
+    const handle = tree().node('.handle');
     expect(handle.hasAttribute(DRAG_HANDLE_ATTRIBUTE)).toBe(true);
     expect(handle.getAttribute('aria-label')).toBe('Reorder Work');
     expect(handle.getAttribute('aria-roledescription')).toBe('drag handle');
@@ -490,13 +500,13 @@ describe('the keyboard drag', () => {
 
   it('keeps Escape away from the layer the list is inside', () => {
     const { item, dnd } = board();
-    const seen: string[] = [];
-    // Dismissal listens exactly like this, on the document and capturing.
-    const dismissal = () => seen.push('dismissed');
-    document.addEventListener('keydown', dismissal, true);
-
     const kite = item('Kite');
     key(kite, ' ');
+
+    const seen: string[] = [];
+    // Dismissal listens exactly like this: on the document, and capturing.
+    const dismissal = () => seen.push('dismissed');
+    document.addEventListener('keydown', dismissal, true);
     key(kite, 'Escape');
 
     document.removeEventListener('keydown', dismissal, true);
@@ -514,6 +524,43 @@ describe('the keyboard drag', () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(dnd.isDragging()).toBe(true);
+  });
+
+  it('ends a keyboard drag when the user reaches for the pointer', () => {
+    const { item, dnd } = board();
+    const kite = item('Kite');
+    key(kite, ' ');
+
+    // There is no pointer to let go of, so a press anywhere puts the item down.
+    // The alternative is an item left lifted with nothing able to drop it.
+    pointer('pointerdown', document.body, 400, 400);
+    expect(dnd.isDragging()).toBe(false);
+    expect(ends).toEqual(['cancel']);
+    expect(drops).toHaveLength(0);
+  });
+
+  it('refuses to lift what it cannot find or cannot move', () => {
+    const { item, dnd } = board();
+    expect(dnd.lift('Nothing')).toBe(false);
+    expect(dnd.lift(item('Sway'))).toBe(false);
+    expect(dnd.lift(null)).toBe(false);
+    expect(dnd.isDragging()).toBe(false);
+  });
+
+  it('reports every target change, and the drop that follows, once each', () => {
+    const seen: (string | null)[] = [];
+    const { item } = board({ onDragOver: (target) => seen.push(target?.itemId ?? null) });
+    const kite = item('Kite');
+
+    key(kite, ' ');
+    key(kite, 'ArrowDown');
+    // Pressing into the end of the list twice changes nothing, and must not be
+    // announced twice either.
+    key(kite, 'End');
+    key(kite, 'End');
+    key(kite, ' ');
+
+    expect(seen).toEqual(['Grace', 'Sway', 'Sway']);
   });
 
   it('marks the target for the drop indicator, before and after', () => {
@@ -534,55 +581,57 @@ describe('the keyboard drag', () => {
 
 describe('dropping onto an item', () => {
   it('offers on as a step of its own between before and after', () => {
-    track(mount(Tree, host));
-    flushSync();
-    const notes = host.querySelector<HTMLElement>('.leaf')!;
-    const live = host.querySelector('.live')!;
-    const tree = (mounted[0] as unknown as { instance: Tree }).instance.dnd;
+    const { dnd, node, said } = tree();
+    const notes = node('.leaf');
 
-    // Notes lives in the nested collection; sideways moves it up to the root.
-    tree.lift(notes);
-    key(notes, 'ArrowRight');
-    flushSync();
-    expect(tree.target()?.containerId).toBe('root');
+    // Notes lives in the nested collection; sideways moves it out to the list
+    // that collection sits in.
+    dnd.lift(notes);
+    key(notes, 'ArrowLeft');
+    expect(dnd.target()?.containerId).toBe('root');
 
     const seen: string[] = [];
-    for (let i = 0; i < 4; i++) {
-      const target = tree.target();
+    for (let i = 0; i < 5; i++) {
+      const target = dnd.target();
       seen.push(`${target?.itemId}:${target?.position}`);
-      key(notes, 'ArrowDown');
+      if (i < 4) key(notes, 'ArrowDown');
     }
 
-    expect(seen).toEqual(['work:before', 'work:on', 'home:before', 'home:on']);
-    expect(live.textContent).toBe('Drop Notes on Home.');
+    // Re-parenting needs a step of its own, or the only way to say "into this
+    // folder" would be a pointer.
+    expect(seen).toEqual(['work:before', 'work:on', 'home:before', 'home:on', 'home:after']);
+
+    key(notes, 'ArrowUp');
+    expect(said()).toBe('Drop Notes on Home.');
   });
 
   it('reports an on drop with no index, because nothing was inserted', () => {
-    track(mount(Tree, host));
-    flushSync();
-    const notes = host.querySelector<HTMLElement>('.leaf')!;
-    const tree = (mounted[0] as unknown as { instance: Tree }).instance.dnd;
+    const { dnd, node } = tree();
+    const notes = node('.leaf');
 
-    tree.lift(notes);
-    key(notes, 'ArrowRight');
+    dnd.lift(notes);
+    key(notes, 'ArrowLeft');
+    key(notes, 'ArrowDown');
+    key(notes, 'ArrowDown');
     key(notes, 'ArrowDown');
     key(notes, ' ');
 
-    expect(drops[0]!.target).toMatchObject({ containerId: 'root', itemId: 'work', position: 'on', index: -1 });
+    expect(drops[0]!.target).toMatchObject({
+      containerId: 'root',
+      itemId: 'home',
+      position: 'on',
+      index: -1,
+    });
   });
 
   it('refuses to drop a node into its own subtree', () => {
-    track(mount(Tree, host));
-    flushSync();
-    const work = host.querySelector<HTMLElement>('.folder')!;
-    const tree = (mounted[0] as unknown as { instance: Tree }).instance.dnd;
-
-    tree.lift(work);
-    flushSync();
+    const { dnd, node } = tree();
+    const work = node('.folder');
+    dnd.lift(work);
 
     const reachable = new Set<string | null>();
     for (let i = 0; i < 8; i++) {
-      reachable.add(tree.target()?.containerId ?? null);
+      reachable.add(dnd.target()?.containerId ?? null);
       key(work, 'ArrowDown');
       key(work, 'ArrowRight');
     }
@@ -610,6 +659,18 @@ describe('validation and refusal', () => {
     const { item, dnd } = board({ canDrag: () => false });
     key(item('Kite'), ' ');
     expect(dnd.isDragging()).toBe(false);
+  });
+
+  it('locks nothing when the drag it refused never started', () => {
+    const { item, dnd } = board({ canDrag: () => false });
+    const kite = item('Kite');
+    startPointerDrag(kite, 50, 25);
+
+    expect(dnd.isDragging()).toBe(false);
+    // A refused drag has no end to undo anything at, so it must take nothing:
+    // otherwise the page stays unselectable for the rest of the session.
+    expect(document.body.style.userSelect).not.toBe('none');
+    expect(kite.hasPointerCapture(1)).toBe(false);
   });
 
   it('turns a drop with nowhere to go into a cancel', () => {
@@ -698,19 +759,14 @@ describe('the pointer drag', () => {
   });
 
   it('only drags from the handle when the item declares one', () => {
-    track(mount(Tree, host));
-    flushSync();
-    layout();
-    const work = host.querySelector<HTMLElement>('.folder')!;
-    const handle = host.querySelector<HTMLElement>('.handle')!;
-    const tree = (mounted[0] as unknown as { instance: Tree }).instance.dnd;
+    const { dnd, node } = tree();
 
-    startPointerDrag(work, 50, 10);
+    startPointerDrag(node('.folder'), 50, 10);
     // The rest of the row stays available for selection, links and buttons.
-    expect(tree.isDragging()).toBe(false);
+    expect(dnd.isDragging()).toBe(false);
 
-    startPointerDrag(handle, 50, 10);
-    expect(tree.isDragging()).toBe(true);
+    startPointerDrag(node('.handle'), 50, 10);
+    expect(dnd.isDragging()).toBe(true);
   });
 
   it('resolves the half of the row the pointer is in', () => {
@@ -727,22 +783,59 @@ describe('the pointer drag', () => {
   });
 
   it('gives an item that takes children a middle third', () => {
-    track(mount(Tree, host));
-    flushSync();
-    layout();
-    const notes = host.querySelector<HTMLElement>('.leaf')!;
-    const tree = (mounted[0] as unknown as { instance: Tree }).instance.dnd;
+    const { dnd, node } = tree();
+    const notes = node('.leaf');
     // Home is the second row of the root list, y 50..100.
     startPointerDrag(notes, 150, 10);
 
     pointer('pointermove', notes, 50, 55);
-    expect(tree.target()).toMatchObject({ itemId: 'home', position: 'before' });
+    expect(dnd.target()).toMatchObject({ itemId: 'home', position: 'before' });
 
     pointer('pointermove', notes, 50, 75);
-    expect(tree.target()).toMatchObject({ itemId: 'home', position: 'on', index: -1 });
+    expect(dnd.target()).toMatchObject({ itemId: 'home', position: 'on', index: -1 });
 
     pointer('pointermove', notes, 50, 95);
-    expect(tree.target()).toMatchObject({ itemId: 'home', position: 'after' });
+    expect(dnd.target()).toMatchObject({ itemId: 'home', position: 'after' });
+  });
+
+  it('draws a highlight over the whole item for an on drop, not a line', () => {
+    const { dnd, node } = tree();
+    const notes = node('.leaf');
+
+    startPointerDrag(notes, 150, 10);
+    pointer('pointermove', notes, 50, 75);
+    expect(dnd.indicator()).toMatchObject({ position: 'on', x: 0, y: 50, width: 100, height: 50 });
+
+    pointer('pointermove', notes, 50, 55);
+    // An insertion line has no thickness of its own; the consumer decides how
+    // it is drawn either side of that edge.
+    expect(dnd.indicator()).toMatchObject({ position: 'before', y: 50, height: 0 });
+  });
+
+  it('announces what a pointer drag is doing too', () => {
+    const view = board();
+    const kite = view.item('Kite');
+    startPointerDrag(kite, 50, 25);
+    // A screen reader user with a pointer, a trackpad or a head mouse gets the
+    // same commentary a keyboard drag does.
+    expect(view.said()).toContain('Picked up Kite');
+
+    pointer('pointermove', kite, 50, 90);
+    expect(view.said()).toBe('Kite is now item 2 of 3 in Todo.');
+  });
+
+  it('forgets the offset once the drag is over', () => {
+    const { item, dnd } = board();
+    const kite = item('Kite');
+    startPointerDrag(kite, 50, 25);
+    pointer('pointermove', kite, 50, 80);
+    expect(dnd.offset().y).toBe(55);
+
+    pointer('pointerup', kite, 50, 80);
+    // A stale offset would leave the row translated after it had been put back
+    // into the list at its new index.
+    expect(dnd.offset()).toEqual({ x: 0, y: 0 });
+    expect(dnd.transformFor('Kite')).toBeUndefined();
   });
 
   it('carries an item into another collection', () => {
@@ -819,6 +912,10 @@ describe('the pointer drag', () => {
     expect(dnd.offset()).toEqual({ x: 0, y: 40 });
     expect(dnd.transformFor('Kite')).toBe('translate(0px, 40px)');
     expect(dnd.transformFor('Grace')).toBeUndefined();
+    // The transform is what the documented `:style` binding spreads, and only
+    // the dragged row gets one.
+    expect(item('Kite').style.transform).toBe('translate(0px, 40px)');
+    expect(item('Grace').style.transform).toBe('');
   });
 
   it('keeps the item inside its boundary', () => {
@@ -932,6 +1029,101 @@ describe('auto-scroll', () => {
     pointer('pointermove', item(), 50, 99);
     await frames(2);
     expect(scroller.scrollTop).toBe(0);
+  });
+});
+
+describe('a collection that runs across', () => {
+  @Component({
+    selector: 'v-tabs',
+    render: compileTemplate(`
+      <div :ref="root"
+           :pointerdown="dnd.onPointerDown($event)"
+           :keydown="dnd.onKeyDown($event)">
+        <div class="strip" :spread="dnd.containerProps({ id: 'tabs', label: 'Tabs' })">
+          <button :for="tab in tabs.get()" :key="tab" :spread="dnd.itemProps({ id: tab })">{ tab }</button>
+        </div>
+      </div>
+    `),
+  })
+  class Tabs {
+    root = new Signal.State<Element | null>(null);
+    tabs = new Signal.State(['one', 'two', 'three']);
+    dnd = createDragDrop({
+      root: () => this.root.get(),
+      orientation: 'horizontal',
+      onDrop: (event) => drops.push(event),
+    });
+  }
+
+  function tabs() {
+    const handle = track(mount(Tabs, host));
+    flushSync();
+    const strip = host.querySelector('.strip')!;
+    setRect(strip, 0, 0, 300, 40);
+    [...strip.children].forEach((tab, i) => setRect(tab, i * 100, 0, 100, 40));
+    return {
+      dnd: (handle.instance as Tabs).dnd,
+      tab: (id: string) => host.querySelector<HTMLElement>(`[${DRAG_ITEM_ATTRIBUTE}="${id}"]`)!,
+    };
+  }
+
+  it('splits a tab left and right rather than top and bottom', () => {
+    const { dnd, tab } = tabs();
+    const one = tab('one');
+    startPointerDrag(one, 10, 20);
+
+    // `two` runs from x 100 to x 200.
+    pointer('pointermove', one, 120, 20);
+    expect(dnd.target()).toMatchObject({ itemId: 'two', position: 'before', index: 0 });
+
+    pointer('pointermove', one, 180, 20);
+    expect(dnd.target()).toMatchObject({ itemId: 'two', position: 'after', index: 1 });
+    expect(dnd.indicator()).toMatchObject({ x: 200, y: 0, width: 0, height: 40 });
+  });
+
+  it('moves along the strip with the horizontal arrows', () => {
+    const { dnd, tab } = tabs();
+    const one = tab('one');
+    dnd.lift(one);
+
+    key(one, 'ArrowRight');
+    expect(dnd.target()?.index).toBe(1);
+    // Down would move to another strip, and there is only this one.
+    key(one, 'ArrowDown');
+    expect(dnd.target()?.index).toBe(1);
+
+    key(one, 'ArrowLeft');
+    expect(dnd.target()?.index).toBe(0);
+  });
+});
+
+describe('where focus lands', () => {
+  it('can be left exactly where the user put it', async () => {
+    const view = board({ restoreFocus: 'none' });
+    const kite = view.item('Kite');
+    kite.focus();
+    key(kite, ' ');
+    key(kite, 'ArrowDown');
+    key(kite, ' ');
+    await settle();
+
+    // The moved row was re-rendered elsewhere, so focus fell to the body and
+    // was deliberately left there.
+    expect(document.activeElement?.getAttribute(DRAG_ITEM_ATTRIBUTE)).not.toBe('Kite');
+  });
+
+  it('falls back to the collection when the item did not survive', async () => {
+    const view = board({ restoreFocus: 'container' });
+    const kite = view.item('Kite');
+    kite.focus();
+    key(kite, ' ');
+    key(kite, ' ');
+    await settle();
+
+    expect(document.activeElement).toBe(view.list('todo'));
+    // A list is not focusable on its own, so `focus()` alone would have done
+    // nothing at all in a real browser.
+    expect(view.list('todo').getAttribute('tabindex')).toBe('-1');
   });
 });
 

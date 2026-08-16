@@ -12,3 +12,8 @@
 The split is by whether an application needs it before it can be built at all,
 not by difficulty. The data grid and the rich text editor are both V1 and both
 large.
+
+What was considered and deliberately **not** done — proxies, dependency
+injection, resumability, a Rust compiler, `:show`, a JavaScript animation
+layer — is in [Design decisions](docs/guide/design-decisions.md) rather than
+here. A roadmap should list work, not absences.

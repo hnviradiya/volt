@@ -16,7 +16,7 @@
  *
  *   <div :ref="scroller" :spread="rows.scrollerProps()">
  *     <div :spread="rows.sizerProps()">
- *       <div :ref="viewport" :spread="rows.containerProps()">
+ *       <div :ref="container" :spread="rows.containerProps()">
  *         <div :for="item in rows.items()" :key="item.key"
  *              :spread="rows.itemProps(item.index)">{ item.index }</div>
  *       </div>
@@ -95,9 +95,9 @@ export interface VirtualizerOptions {
   /** The element that scrolls. Its client box is the viewport. */
   scroller: () => Element | null | undefined;
   /**
-   * The element the rendered items live in — the one `containerProps()` goes
-   * on, and the one items are measured inside. Defaults to the scroller, for
-   * a consumer who has no separate container.
+   * Where to look for rendered items to measure — normally the element
+   * `containerProps()` goes on. Defaults to the scroller, which is right
+   * whenever the items are simply somewhere inside it.
    */
   container?: () => Element | null | undefined;
 
@@ -132,6 +132,11 @@ export interface VirtualizerOptions {
    * that grows at the front keeps the sizes it already knows. Without it an
    * item is identified by its index, which is right for appending and wrong
    * for prepending.
+   *
+   * Keys are re-read when the count changes, and only then: re-keying every
+   * item on every frame would be the one O(n) step this otherwise avoids. A
+   * collection whose items are replaced without its length changing should
+   * say so with `remeasure()`.
    */
   getItemKey?: (index: number) => string | number;
 
@@ -242,14 +247,15 @@ export interface Virtualizer {
 const DEFAULT_OVERSCAN = 2;
 
 /**
- * How many times a scroll may be corrected as measurements land.
+ * How long a jump keeps the right to correct itself, in frames.
  *
  * A jump into unmeasured territory is aimed with estimates, so it lands short
- * or long; measuring what it landed on says by how much. Each correction costs
- * a frame, and after a few the remaining error is smaller than the estimate
- * error that caused it, so it stops rather than chasing.
+ * or long, and measuring what it landed on is what says by how much. Those
+ * measurements arrive within a frame or two; after that, anything moving
+ * underneath is somebody else's change and following it would be a scroll the
+ * reader did not ask for.
  */
-const MAX_SCROLL_CORRECTIONS = 4;
+const SETTLING_FRAMES = 4;
 
 export function createVirtualizer(options: VirtualizerOptions): Virtualizer {
   const axis = options.axis ?? 'vertical';
@@ -285,6 +291,10 @@ export function createVirtualizer(options: VirtualizerOptions): Virtualizer {
   /**
    * Measured sizes, by key rather than by index, so that inserting an item
    * does not shift every measurement onto the wrong row.
+   *
+   * Nothing is ever evicted. A million rows scrolled past leave a million
+   * numbers here, which is the price of scrolling back through them without
+   * the list rearranging itself on the way.
    */
   const measurements = new Map<string | number, number>();
   const sizeFor = (index: number): number => measurements.get(keyOf(index)) ?? estimate(index);
@@ -326,11 +336,13 @@ export function createVirtualizer(options: VirtualizerOptions): Virtualizer {
 
   const commandScroll = (el: Element, offset: number, behavior: ScrollBehavior): void => {
     commanded = offset;
+    // Back into the DOM's signed form on the way out.
+    const signed = rtl.get() ? -offset : offset;
     // Both axes every time: passing one and omitting the other is specified to
     // leave the omitted one alone, but relying on that costs nothing to avoid.
     el.scrollTo({
       top: vertical ? offset : el.scrollTop,
-      left: vertical ? el.scrollLeft : rtl.get() ? -offset : offset,
+      left: vertical ? el.scrollLeft : signed,
       behavior,
     });
     // Read back rather than assume: the browser clamps, and a smooth scroll
@@ -463,6 +475,7 @@ export function createVirtualizer(options: VirtualizerOptions): Virtualizer {
   function onEntries(entries: ResizeObserverEntry[]): void {
     const scroller = untrack(() => options.scroller());
     const scroll = scroller ? readScroll(scroller) : 0;
+    const count = untrack(itemCount);
     let changed = false;
     let shift = 0;
 
@@ -478,7 +491,10 @@ export function createVirtualizer(options: VirtualizerOptions): Virtualizer {
       }
 
       const index = indexOfItem(target);
-      if (index === null) continue;
+      // An entry can outlive the item it belongs to: the observer delivers
+      // what it saw before the collection shrank, and asking the consumer for
+      // the key of an item that no longer exists is asking for trouble.
+      if (index === null || index >= count) continue;
 
       // An element with no box measures zero, and a zero here would collapse
       // everything below it — the list jumps, then jumps back when the element
@@ -505,7 +521,12 @@ export function createVirtualizer(options: VirtualizerOptions): Virtualizer {
         // unmeasured items — and is exactly the correction the browser's own
         // scroll anchoring would make at the same time, badly, which is why
         // `scrollerProps` turns it off.
-        if (startBefore < scroll) shift += size - previous;
+        //
+        // Against `scroll + shift` rather than `scroll`, because each entry
+        // applied in this batch has already moved the ones after it: the
+        // viewport top has notionally moved by that much too, so comparing
+        // with the original offset would miss every item but the first.
+        if (startBefore < scroll + shift) shift += size - previous;
       } else if (first) {
         // Same size as the estimate, so nothing moves — but the item is
         // measured now, and `item.measured` says so.
@@ -526,7 +547,7 @@ export function createVirtualizer(options: VirtualizerOptions): Virtualizer {
    * Held so that the measurements arriving from that landing can correct it.
    * Not a signal: nothing renders from it.
    */
-  let pending: { index: number; align: VirtualAlignment; tries: number } | null = null;
+  let pending: { index: number; align: VirtualAlignment; frames: number } | null = null;
 
   /** Where the scroller must be for `index` to sit as `align` asks. */
   const offsetForIndex = (index: number, align: VirtualAlignment): number | null => {
@@ -574,7 +595,7 @@ export function createVirtualizer(options: VirtualizerOptions): Virtualizer {
     // A smooth scroll is deliberately never corrected: the animation's own
     // scroll events are indistinguishable from the user's, so a correction
     // would either fight the animation or refuse to let go of the user.
-    if (measuring && behavior !== 'smooth') pending = { index, align, tries: 0 };
+    if (measuring && behavior !== 'smooth') pending = { index, align, frames: 0 };
   };
 
   const scrollToOffset = (offset: number, opts: VirtualScrollOptions = {}): void => {
@@ -653,23 +674,28 @@ export function createVirtualizer(options: VirtualizerOptions): Virtualizer {
       const request = pending;
       if (!request) return;
 
-      if (request.tries >= MAX_SCROLL_CORRECTIONS) {
+      // Every frame counts against the budget, not only the ones that needed
+      // correcting: landing on target with today's estimates is not the same
+      // as having landed correctly, and the measurement that proves it wrong
+      // is a frame away.
+      request.frames += 1;
+      if (request.frames > SETTLING_FRAMES) {
         pending = null;
         return;
       }
 
       const target = offsetForIndex(request.index, request.align);
-      if (target === null || Math.abs(target - scrollOffset.get()) < 1) {
+      if (target === null) {
         pending = null;
         return;
       }
+      if (Math.abs(target - scrollOffset.get()) < 1) return;
 
       const scroller = untrack(() => options.scroller());
       if (!scroller) {
         pending = null;
         return;
       }
-      request.tries += 1;
       commandScroll(scroller, target, 'auto');
     });
   }
@@ -789,15 +815,14 @@ export function createVirtualizer(options: VirtualizerOptions): Virtualizer {
 
     containerProps: () => {
       const offset = frame.get().offset;
+      // Transforms are physical and the collection runs the other way in RTL.
+      const signed = rtl.get() ? -offset : offset;
       return {
         style: {
           // A transform rather than a top or a left: it is a composited
           // property, it does not invalidate layout, and one on the container
-          // replaces one per row. In RTL the sign flips — transforms are
-          // physical, and the collection runs the other way.
-          transform: vertical
-            ? `translateY(${offset}px)`
-            : `translateX(${rtl.get() ? -offset : offset}px)`,
+          // replaces one on every row.
+          transform: vertical ? `translateY(${offset}px)` : `translateX(${signed}px)`,
         },
       };
     },

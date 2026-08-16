@@ -526,6 +526,25 @@ describe('skeleton: what is read and what is not', () => {
     expect(message()!.textContent).toBe('Loading…');
   });
 
+  it('does not gate a message when it was given no region to time', () => {
+    @Component({
+      selector: 'v-skeleton-bare',
+      render: compileTemplate(`
+        <span class="message" :if="skeleton.isMessageVisible()">{ skeleton.message() }</span>
+      `),
+    })
+    class Bare {
+      skeleton = createSkeleton({ defaultLoading: true });
+    }
+
+    track(mount(Bare, host));
+    flushSync();
+    // Nothing to observe, so the gate opens: hiding a message the consumer
+    // did render would be the worse failure of the two, and the only one
+    // nobody sighted would ever notice.
+    expect(host.querySelector('.message')!.textContent).toBe('Loading…');
+  });
+
   it('says nothing at all when nothing was ever loading', () => {
     const { skeleton, message } = setupSkeleton();
     advance(50);
@@ -583,13 +602,19 @@ describe('skeleton: when the placeholder is worth showing', () => {
     expect(skeleton.state()).toBe('idle');
   });
 
-  it('reports the wait it is sitting out', () => {
-    const { skeleton } = setupSkeleton({ defaultLoading: true, delay: 200 });
+  it('reports the wait it is sitting out, on the elements as well', () => {
+    const { skeleton, content, placeholder } = setupSkeleton({
+      defaultLoading: true,
+      delay: 200,
+    });
     flushSync();
     expect(skeleton.state()).toBe('delayed');
+    // CSS gets the same three states the component reasons in.
+    expect(content().getAttribute('data-state')).toBe('delayed');
 
     advance(200);
     expect(skeleton.state()).toBe('visible');
+    expect(placeholder()!.getAttribute('data-state')).toBe('visible');
   });
 
   it('stays up for its minimum once it is up', () => {
@@ -900,6 +925,37 @@ describe('empty state: linked to the collection it describes', () => {
 
     advance(50);
     expect(message()).not.toBeNull();
+  });
+
+  it('hides a message the consumer rendered unconditionally', () => {
+    @Component({
+      selector: 'v-results-eager',
+      render: compileTemplate(`
+        <div>
+          <ul class="list" :ref="list" :spread="empty.collectionProps()"></ul>
+          <div class="region" :ref="region" :spread="empty.rootProps()">
+            <p class="message" :spread="empty.messageProps()">{ empty.message() }</p>
+          </div>
+        </div>
+      `),
+    })
+    class Eager {
+      list = new Signal.State<Element | null>(null);
+      region = new Signal.State<Element | null>(null);
+      empty = createEmptyState({
+        collection: () => this.list.get(),
+        region: () => this.region.get(),
+        count: () => 0,
+      });
+    }
+
+    track(mount(Eager, host));
+    flushSync();
+    const message = () => host.querySelector('.message') as HTMLElement;
+    expect(message().hasAttribute('hidden')).toBe(true);
+
+    advance(50);
+    expect(message().hasAttribute('hidden')).toBe(false);
   });
 
   it('is a polite status region, unnamed', () => {

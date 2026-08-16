@@ -26,9 +26,13 @@
  *           :spread="dnd.itemProps({ id: track })"
  *           :style="{ transform: dnd.transformFor(track) }">{ track }</li>
  *     </ul>
- *     <div :spread="dnd.liveRegionProps()">{ dnd.announcement() }</div>
- *     <div :spread="dnd.instructionsProps()" hidden>{ dnd.instructions() }</div>
+ *     <div class="sr-only" :spread="dnd.liveRegionProps()">{ dnd.announcement() }</div>
+ *     <div class="sr-only" :spread="dnd.instructionsProps()">{ dnd.instructions() }</div>
  *   </div>
+ *
+ * Both of those last two are for screen readers alone, and both must be hidden
+ * the visual way — clipped, not `hidden` and not `display: none`, which would
+ * take the announcement out of the accessibility tree along with the pixels.
  *
  * Four decisions carry the rest:
  *
@@ -68,6 +72,13 @@
  * That is deliberate: dismissal listens on `document`, also capturing, so
  * without this an Escape meant to cancel a drag inside a dialog would close the
  * dialog instead and leave the drag running under it.
+ *
+ * What this deliberately does not cover is files dragged in from outside the
+ * page. Those arrive only through the native drag-and-drop API — no pointer
+ * ever enters the document — so a file drop zone is a different mechanism
+ * wearing the same word: `dragover` with `preventDefault`, a `dataTransfer`,
+ * and an `<input type="file">` beside it, because a drop zone on its own cannot
+ * be used from a keyboard at all. Sorting the files afterwards is this.
  *
  * One thing the consumer must supply in CSS: `touch-action` on the handle.
  * `touch-action: none` makes a touch drag start immediately but takes away
@@ -626,27 +637,33 @@ export function createDragDrop(options: DragDropOptions): DragDrop {
       return allows(empty, source) ? empty : null;
     }
 
-    // The item the pointer is over, or failing that the nearest one along the
-    // collection's axis — the gaps between rows, and the space past the last
-    // one, still have to resolve to somewhere.
-    let chosen: HTMLElement | null = null;
-    let nearest = Number.POSITIVE_INFINITY;
-    for (const item of items) {
-      const rect = item.getBoundingClientRect();
-      if (along(point) >= startOf(rect) && along(point) <= endOf(rect)) {
-        chosen = item;
-        break;
-      }
-      const distance = Math.abs(along(point) - (startOf(rect) + endOf(rect)) / 2);
-      if (distance < nearest) {
-        nearest = distance;
-        chosen = item;
-      }
-    }
+    const chosen = itemUnder(items, point);
     if (!chosen) return null;
 
     const target = makeTarget(container, source, chosen, zoneOf(chosen, point));
     return allows(target, source) ? target : null;
+  };
+
+  /**
+   * The item the pointer is over, or failing that the nearest one along the
+   * collection's axis — the gaps between rows, and all the space past the last
+   * one, still have to resolve to somewhere.
+   */
+  const itemUnder = (items: HTMLElement[], point: DragPoint): HTMLElement | null => {
+    let nearest: HTMLElement | null = null;
+    let distance = Number.POSITIVE_INFINITY;
+
+    for (const item of items) {
+      const rect = item.getBoundingClientRect();
+      if (along(point) >= startOf(rect) && along(point) <= endOf(rect)) return item;
+
+      const gap = Math.abs(along(point) - (startOf(rect) + endOf(rect)) / 2);
+      if (gap < distance) {
+        distance = gap;
+        nearest = item;
+      }
+    }
+    return nearest;
   };
 
   // -------------------------------------------------------------------------
@@ -721,6 +738,10 @@ export function createDragDrop(options: DragDropOptions): DragDrop {
     // Keys are taken on `window`, ahead of the `document` listeners dismissal
     // uses, so Escape cancels the drag instead of closing the layer around it.
     window.addEventListener('keydown', onDragKeyDown, true);
+    // A keyboard drag has no pointer to let go of, so a press anywhere ends it.
+    // Otherwise reaching for the mouse mid-drag leaves an item lifted with
+    // nothing on screen still able to put it down.
+    if (mode === 'keyboard') document.addEventListener('pointerdown', onOutsidePress, true);
 
     options.onDragStart?.(source, mode);
 
@@ -776,6 +797,7 @@ export function createDragDrop(options: DragDropOptions): DragDrop {
 
   const releaseDrag = (live: Session): void => {
     window.removeEventListener('keydown', onDragKeyDown, true);
+    document.removeEventListener('pointerdown', onOutsidePress, true);
     detachPointer();
 
     if (live.pointerId !== null && live.grip?.hasPointerCapture(live.pointerId)) {
@@ -800,7 +822,16 @@ export function createDragDrop(options: DragDropOptions): DragDrop {
       // leaving focus on `<body>` drops a keyboard user at the top of the
       // document with no way back to the list they were sorting.
       const item = restoreFocus === 'item' ? findItem(source.itemId) : null;
-      (item ?? containerById(source.containerId))?.focus();
+      const target = item ?? containerById(source.containerId);
+      if (!target) return;
+
+      // A collection is not focusable by default, and `focus()` on it would
+      // quietly do nothing. `tabindex="-1"` makes it able to hold focus without
+      // adding a stop to the tab order, which is the host's to decide.
+      if (target !== item && !target.hasAttribute('tabindex')) {
+        target.setAttribute('tabindex', '-1');
+      }
+      target.focus();
     });
   };
 
@@ -842,21 +873,27 @@ export function createDragDrop(options: DragDropOptions): DragDrop {
       grip: from.grip,
       origin: from.origin,
       point,
-      // Text selection follows a dragging pointer right across the page. This
-      // is the one thing here that touches style, and it is a behaviour rather
-      // than a look — the same trade a scroll lock makes.
-      restoreSelection: lockSelection(from.item.ownerDocument),
     });
 
-    if (!started) {
+    // Nothing is locked or captured until the drag is real, because a refused
+    // drag has no end to undo any of it at.
+    if (!started || !session) {
       detachPointer();
       return;
     }
 
+    // Text selection follows a dragging pointer right across the page. This is
+    // the one thing here that touches style, and it is a behaviour rather than
+    // a look — the same trade a scroll lock makes.
+    session.restoreSelection = lockSelection(from.item.ownerDocument);
     // Capture keeps the moves coming when the pointer leaves the handle, over
     // another element or past the edge of the document.
     from.grip.setPointerCapture(from.pointerId);
-    if (session && autoScroll) startAutoScroll(session);
+
+    // The travel that proved this was a drag counts towards the offset. Without
+    // it the item stays put until the next move and then jumps to catch up.
+    offsetSignal.set(constrain(session, point));
+    if (autoScroll) startAutoScroll(session);
   };
 
   function onPointerMove(event: Event): void {
@@ -887,7 +924,7 @@ export function createDragDrop(options: DragDropOptions): DragDrop {
 
   function onPointerUp(event: Event): void {
     if (!(event instanceof PointerEvent)) return;
-    if (pending && event.pointerId === pending.pointerId) {
+    if (pending?.pointerId === event.pointerId) {
       clearPending();
       return;
     }
@@ -900,7 +937,7 @@ export function createDragDrop(options: DragDropOptions): DragDrop {
 
   function onPointerCancel(event: Event): void {
     if (!(event instanceof PointerEvent)) return;
-    if (pending && event.pointerId === pending.pointerId) {
+    if (pending?.pointerId === event.pointerId) {
       clearPending();
       return;
     }
@@ -984,13 +1021,19 @@ export function createDragDrop(options: DragDropOptions): DragDrop {
   // Keyboard
   // -------------------------------------------------------------------------
 
+  /**
+   * The collection the arrows are working in: wherever the target is now, or
+   * the one the item came from before anything has moved.
+   */
+  const activeContainer = (live: Session, current: DropTarget | null): HTMLElement | null =>
+    (current ? containerById(current.containerId) : null) ?? containerOf(live.source.element);
+
   const move = (delta: number): void => {
     const live = session;
     if (!live) return;
 
     const current = untrack(() => targetSignal.get());
-    const container =
-      (current ? containerById(current.containerId) : null) ?? containerOf(live.source.element);
+    const container = activeContainer(live, current);
     if (!container) return;
 
     const placements = placementsIn(container, live.source);
@@ -1006,9 +1049,9 @@ export function createDragDrop(options: DragDropOptions): DragDrop {
   const moveToEdge = (end: boolean): void => {
     const live = session;
     if (!live) return;
+
     const current = untrack(() => targetSignal.get());
-    const container =
-      (current ? containerById(current.containerId) : null) ?? containerOf(live.source.element);
+    const container = activeContainer(live, current);
     if (!container) return;
 
     const placements = placementsIn(container, live.source);
@@ -1022,8 +1065,7 @@ export function createDragDrop(options: DragDropOptions): DragDrop {
 
     const open = openContainers(live.source);
     const current = untrack(() => targetSignal.get());
-    const container =
-      (current ? containerById(current.containerId) : null) ?? containerOf(live.source.element);
+    const container = activeContainer(live, current);
     if (!container) return;
 
     // Keep going past a collection that has nowhere valid to put this item,
@@ -1107,6 +1149,10 @@ export function createDragDrop(options: DragDropOptions): DragDrop {
         return false;
     }
   };
+
+  function onOutsidePress(): void {
+    if (session?.mode === 'keyboard') cancel();
+  }
 
   function onDragKeyDown(event: Event): void {
     if (!(event instanceof KeyboardEvent)) return;
@@ -1377,8 +1423,8 @@ function scrolls(overflow: string): boolean {
  * Stop the page selecting text under a dragging pointer, and put it back
  * afterwards.
  */
-function lockSelection(document: Document): () => void {
-  const body = document.body;
+function lockSelection(owner: Document): () => void {
+  const body = owner.body;
   const previous = body.style.userSelect;
   body.style.userSelect = 'none';
   return () => {

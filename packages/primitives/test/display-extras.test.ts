@@ -549,7 +549,7 @@ describe('chip keys it must not answer', () => {
 // Image
 // ---------------------------------------------------------------------------
 
-function mountImage(options: ImageOptions extends never ? never : Partial<ImageOptions> = {}) {
+function mountImage(options: Partial<ImageOptions> = {}) {
   @Component({
     selector: 'v-figure',
     render: compileTemplate(`

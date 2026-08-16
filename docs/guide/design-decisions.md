@@ -140,3 +140,75 @@ Volt avoids them in the common cases: an element whose children are all text
 compiles to one text binding with no marker, and a block whose only root is
 dynamic returns the accessor directly rather than wrapping it. Markers remain
 only where structure genuinely requires one.
+
+## Compared with other frameworks
+
+What Volt took from each, and what it declined.
+
+| | taken | declined |
+|---|---|---|
+| Vue | HTML templates, the ergonomics | the virtual DOM |
+| Svelte | compiler-first: do it at build time or not at all | its own reactivity syntax |
+| Solid | fine-grained reactivity, no component re-render | a bespoke signal implementation |
+| Angular | classes, decorators, opinionated structure | dependency injection |
+| Astro | islands | a separate authoring model for them |
+| Qwik | lazy execution | resumability |
+| TanStack | resource primitives | — (a shared query cache is planned) |
+| Tailwind | design tokens | utility classes as the styling model |
+| React | the component model as an idea | hooks, and the re-render that requires them |
+
+## No proxies
+
+A property is reactive because it holds a signal, never because something
+wrapped it. That is why `@Prop() accessor` was removed, and why there is no
+reactive object.
+
+A proxy makes `obj.count++` work, at the cost of never being able to tell by
+reading the code whether a property access is tracked. It also cannot see
+`Map`, `Set`, class instances or anything crossing a serialization boundary
+without a second implementation for each. The trade is one line of ceremony —
+`.get()` — against knowing what your code does.
+
+## No resumability
+
+Qwik serializes the reactive graph into the HTML so the client never replays
+setup. It is a real answer to a real cost in frameworks that hydrate by
+re-rendering.
+
+Volt does not hydrate by re-rendering. Codegen resolves every dynamic node by
+a `firstChild`/`nextSibling` path computed at build time, so hydration is an
+attach, not a reconstruction — the thing resumability avoids is already
+cheap here. Buying it anyway would cost a serialization format for every
+closure in the application.
+
+## The compiler is TypeScript, not Rust
+
+Compiling a real template takes **0.124ms**, so a thousand-component
+application spends about **124ms** compiling templates — inside a build
+measured in seconds. A Rust rewrite would optimise that away in exchange for
+per-platform native binaries, a much higher barrier to contributing, and a
+second toolchain in a project that deliberately has one.
+
+It would also miss the part that will actually be slow. Once templates are
+type-checked, the cost is TypeScript's type system, and no amount of Rust in
+the parser touches that.
+
+## No `:show`
+
+Hiding an element is a style binding. `:class` and `:style` already express
+it, and CSS is where "hidden but still in the DOM" belongs — including for a
+component library, where content must stay mounted to animate out or to keep
+its state.
+
+## Animation is CSS
+
+SwiftUI and Compose treat a transition as a value described beside the state
+that drives it. It reads well. But CSS already owns transitions and
+animations, runs them off the main thread, and honours
+`prefers-reduced-motion` without being asked.
+
+Volt's `createPresence` exists precisely so CSS can stay in charge: it holds a
+node in the DOM until the exit animation the stylesheet declared has finished,
+and asks the element whether anything is animating rather than being told a
+duration. A JavaScript animation layer would duplicate all of that and lose
+the off-main-thread part.

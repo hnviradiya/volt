@@ -54,9 +54,6 @@ leaning it found nothing: removing a per-write allocation made writes slower
       until the element reports its exit animation finished. Keeping this out
       of the core is the better outcome — CSS stays the source of truth for
       duration, and a library that never animates pays nothing.
-- [ ] **`:show`** — removed as redundant with `:class`. A component library
-      wants DOM kept alive while hidden, to preserve state and allow CSS to
-      animate. Worth reopening as a decision, not reintroducing silently.
 - [ ] **SSR** — not needed for v1, but it constrains API shape, so decide
       before the primitives harden.
 - [ ] **Error boundaries** — no equivalent feature today.
@@ -326,11 +323,6 @@ declining to ship the JavaScript behind it — which is the same analysis as
 `deferrable` in the compiler, applied to a different question: not "can this
 appear later" but "can this ever change".
 
-Resumability, in the Qwik sense of serializing the reactive graph so the
-client never replays setup, is deliberately not planned. It buys the least on
-a framework whose hydration is already an attach rather than a re-render, and
-it costs a serialization format for every closure in the application.
-
 ## Server-side rendering
 
 Committed, and it constrains work already underway — a primitive that touches
@@ -533,6 +525,104 @@ This is one of the larger V1 items — comparable to SSR, smaller than the grid.
 It is also the one that most changes what the framework feels like to use, and
 the one hardest to add later: every escape hatch shipped before it exists is
 one the checker then has to tolerate.
+
+## Automatic change tracking
+
+The developer should not have to tell the framework what changed. Mostly they
+already do not, and it is worth being precise about where the line is.
+
+**What is already automatic.** A test asserts this: 100,000 rows, the array
+replaced wholesale with one element different, and every one of the 100,000
+DOM nodes is reused while exactly one text node is rewritten. No `memo`, no
+`trackBy`, no manual comparison. Two independent things make it work — keyed
+reconciliation reuses a row whose key is unchanged, and a row's item signal
+only propagates when the item is not the same object, so only the changed
+row's bindings wake. The same holds for a derived value: a `Signal.Computed`
+recomputes only when a dependency actually changed, and a binding writes to
+the DOM only when its value differs.
+
+**What costs something.** Applying that update takes ~50ms for 100,000 rows,
+and almost all of it is the reconcile pass — building a key map and walking
+every entry to discover what any human already knew, that one row changed.
+That is the part worth attacking:
+
+- [ ] Same-length, same-keys-in-order is the overwhelmingly common case for
+      "one row changed". Detect it with a single positional scan and skip the
+      key map entirely, falling back to the full algorithm at the first
+      mismatch. Turns an edit in a large table into one pass of comparisons
+      with no allocation.
+- [ ] Reuse the keys, rows and nodes buffers across reconciles rather than
+      allocating three arrays per update.
+
+**What is not possible, and why that is acceptable.** Detecting "row 573
+changed" in less than O(n), given a plain array replaced wholesale, requires
+either observing the mutation — proxies, which are ruled out — or a data
+structure that carries its own change information, which is a different kind
+of babysitting. So O(n) is the floor. It is a floor of pointer comparisons
+rather than DOM work, and the DOM work is already proportional to what
+actually changed, which is the part that costs milliseconds.
+
+**Where a compiler could still help.** An expensive pure call in a template —
+`expensiveCalculation(documents(), filters())` — currently re-runs whenever
+either dependency changes, which is correct but unmemoised. The compiler can
+see that its arguments are all tracked reads and hoist it into a computed
+automatically, so the result is cached without anyone writing `computed`. That
+is a real compile-time optimisation and fits the same analysis the rest of the
+compiler already does.
+
+## Gaps found by comparison
+
+Three things a survey of other frameworks showed missing from the plan. What
+was considered and declined is in
+[Design decisions](docs/guide/design-decisions.md), not here.
+
+### Router
+
+Nothing in the plan delivers one; routing appeared only as "integration" under
+cross-cutting concerns. An application cannot be built without it, so it is a
+deliverable.
+
+- File-based and configuration-based routes, with types generated for params
+- Nested routes and layouts that persist across navigation, since re-mounting
+  a layout on every navigation is what makes an SPA feel worse than an MPA
+- Lazy route components, which is what the compiler's `deferrable` analysis and
+  `preload()` were built for — preload on hover, load on navigate
+- Per-route rendering mode, feeding the hybrid plan above
+- Data loading tied to the route so a navigation can fetch and render together
+  rather than mounting, then discovering it needs data
+- Scroll restoration, view transitions, and blocking navigation on unsaved work
+- `<a>` that works — a real href, so middle-click, open-in-new-tab and crawlers
+  all behave, with interception layered over it rather than replacing it
+
+### Shared server-state cache
+
+`createResource` owns its own state, which is right for a combobox search and
+wrong for data two components both want. What is missing is the layer TanStack
+Query is actually valued for:
+
+- One cache keyed by query, so two components asking the same question make one
+  request
+- Staleness and revalidation — serve cached data immediately, refetch behind it
+- Invalidation by key or predicate after a mutation
+- Optimistic updates with rollback on failure
+- Paginated and infinite queries that keep previous data while the next page
+  loads
+- Deduplication of in-flight requests, and garbage collection of unused entries
+
+It belongs beside `createResource`, not inside it: a resource is one request's
+lifecycle, a cache is the application's.
+
+### Testing
+
+The library tests itself thoroughly; nothing helps anyone test an application
+built with it.
+
+- A component test runtime: mount, interact, assert, unmount cleanly
+- Helpers that drive the accessibility surface rather than the DOM — find by
+  role and name, so a test breaks when the semantics break
+- Playwright fixtures for end-to-end, and axe assertions in both
+- Fake timers that cooperate with the scheduler, since faking `queueMicrotask`
+  stops effects running at all — a trap already hit while testing `createResource`
 
 ## Developer tools
 
