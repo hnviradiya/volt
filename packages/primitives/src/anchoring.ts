@@ -245,13 +245,11 @@ export function createAnchor(options: AnchorOptions): Anchor {
 
     setPlacement,
 
-    anchorProps: () => {
-      // Nothing else belongs here. A reference is whatever the consumer's
-      // markup already says it is — a button, a cell, a word in a paragraph —
-      // and being pointed at by a floating element changes none of that.
-      if (!supportsAnchorPositioning()) return {};
-      return { style: { 'anchor-name': name } };
-    },
+    // A name, and nothing else. A reference is whatever the consumer's markup
+    // already says it is — a button, a cell, a word in a paragraph — and being
+    // pointed at by a floating element changes none of that, so no role, no
+    // tab stop, and nothing for a screen reader to read out twice.
+    anchorProps: () => (supportsAnchorPositioning() ? { style: { 'anchor-name': name } } : {}),
 
     floatingProps: () => {
       const placement = state.get();
@@ -465,11 +463,12 @@ export function writingDirection(el: Element | null | undefined): WritingDirecti
 
   const declared = el.closest('[dir]')?.getAttribute('dir')?.toLowerCase();
   if (declared === 'rtl' || declared === 'ltr') return declared;
-  // `dir="auto"` is a deferral, not a direction: the browser decides it from
-  // the first strong character, and the only place that answer exists is the
-  // computed style. Treating it as a declaration would read an Arabic comment
-  // on an English page as left-to-right.
 
+  // What is left is `dir="auto"`, which is a deferral rather than a direction:
+  // the browser decides it from the first strong character, and computed style
+  // is the only place that answer exists. Skipping past it to the nearest
+  // explicit ancestor instead would read an Arabic comment on an English page
+  // as left-to-right, which is the exact case `auto` was written for.
   const view = el.ownerDocument?.defaultView;
   return view?.getComputedStyle?.(el).direction === 'rtl' ? 'rtl' : 'ltr';
 }

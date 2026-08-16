@@ -416,6 +416,9 @@ export function createVirtualizer(options: VirtualizerOptions): Virtualizer {
    */
   let observer: ResizeObserver | null = null;
   const observed = new Set<Element>();
+  /** What the observed set was last built for, so it is not rebuilt per scroll. */
+  let observedRange: VirtualRange | null = null;
+  let observedIn: Element | null = null;
 
   const ensureObserver = (node: Element): ResizeObserver | null => {
     if (observer) return observer;
@@ -612,9 +615,6 @@ export function createVirtualizer(options: VirtualizerOptions): Virtualizer {
   });
 
   if (measuring) {
-    let observedRange: VirtualRange | null = null;
-    let observedIn: Element | null = null;
-
     effect(() => {
       const { range } = frame.get();
       const container = containerElement();
@@ -721,9 +721,12 @@ export function createVirtualizer(options: VirtualizerOptions): Virtualizer {
 
       // Unobserve what is on screen so that re-observing it delivers a fresh
       // entry. A ResizeObserver only reports a change, and nothing here has
-      // changed size — only what is known about it.
+      // changed size — only what is known about it. Forgetting the observed
+      // range is what makes the effect below re-observe rather than recognise
+      // the same window and do nothing.
       for (const el of observed) observer?.unobserve(el);
       observed.clear();
+      observedRange = null;
 
       measurementVersion.set(measurementVersion.get() + 1);
     },

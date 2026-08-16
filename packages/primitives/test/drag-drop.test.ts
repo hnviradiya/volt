@@ -1,72 +1,974 @@
-import { describe, expect, it } from 'vitest';
+/**
+ * Drag and drop, driven through real mounted components.
+ *
+ * The behaviour worth asserting is the part that is usually missing: the whole
+ * keyboard map, what the live region says at each step, the index a drop
+ * reports once the source has been taken out of the list, and the refusals —
+ * a press that was a scroll, a node dropped into its own children, a key that
+ * belongs to the drag reaching the dialog behind it.
+ *
+ * happy-dom gives every element a zero rect, so the pointer tests lay the page
+ * out by hand. That is a fair trade: it makes the geometry the test is about
+ * explicit rather than incidental.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { compileTemplate } from '@voltjs/core/jit';
+import { Component, Signal, flushSync, mount } from '@voltjs/core';
+import {
+  DRAG_CONTAINER_ATTRIBUTE,
+  DRAG_HANDLE_ATTRIBUTE,
+  DRAG_ITEM_ATTRIBUTE,
+  createDragDrop,
+  type DragDrop,
+  type DragDropOptions,
+  type DragEndReason,
+  type DropEvent,
+  type DropTarget,
+} from '../src/drag-drop.js';
 
-describe('probe', () => {
-  it('capture ordering and styles', () => {
-    document.body.innerHTML = '<div id="a"><button id="b">x</button></div>';
-    const a = document.querySelector('#a') as HTMLElement;
-    const b = document.querySelector('#b') as HTMLElement;
+let host: HTMLElement;
+let mounted: { unmount(): void }[] = [];
+/** Handed to whichever component the test mounts, since decorators run once. */
+let boardOptions: Partial<DragDropOptions> = {};
+let drops: DropEvent[] = [];
+let ends: DragEndReason[] = [];
 
-    const order: string[] = [];
-    const onWin = () => order.push('window');
-    const onDoc = () => order.push('document');
-    document.addEventListener('keydown', onDoc, true);
-    window.addEventListener('keydown', onWin, true);
-    b.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    console.log('capture order', order);
+beforeEach(() => {
+  document.body.innerHTML = '<div id="app"></div>';
+  host = document.querySelector('#app')!;
+  boardOptions = {};
+  drops = [];
+  ends = [];
+});
 
-    order.length = 0;
-    const onWin2 = (e: Event) => {
-      order.push('window');
-      e.stopPropagation();
-    };
-    window.removeEventListener('keydown', onWin, true);
-    window.addEventListener('keydown', onWin2, true);
-    b.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    console.log('after stopPropagation at window', order);
-    window.removeEventListener('keydown', onWin2, true);
-    document.removeEventListener('keydown', onDoc, true);
+afterEach(() => {
+  for (const handle of mounted) handle.unmount();
+  mounted = [];
+  flushSync();
+  vi.useRealTimers();
+});
 
-    a.style.overflowY = 'auto';
-    console.log('computed overflowY', getComputedStyle(a).overflowY, '|', getComputedStyle(a).overflow);
-    console.log('checkVisibility opts', a.checkVisibility({ visibilityProperty: true }));
-    console.log('scrollIntoView', typeof a.scrollIntoView);
-    console.log('body userSelect', typeof document.body.style.userSelect);
+// ---------------------------------------------------------------------------
+// Components
+// ---------------------------------------------------------------------------
 
-    // pointer events to window capture
-    const pointerSeen: string[] = [];
-    const onPtr = () => pointerSeen.push('doc');
-    document.addEventListener('pointermove', onPtr, true);
-    b.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 1, clientY: 2 }));
-    console.log('pointermove to document capture', pointerSeen);
-    document.removeEventListener('pointermove', onPtr, true);
+/** Two connected lists, the live region, and the instructions items point at. */
+@Component({
+  selector: 'v-board',
+  render: compileTemplate(`
+    <div :ref="root"
+         :pointerdown="dnd.onPointerDown($event)"
+         :keydown="dnd.onKeyDown($event)">
+      <ul class="todo" :spread="dnd.containerProps({ id: 'todo', label: 'Todo' })">
+        <li :for="item in todo.get()" :key="item" tabindex="0"
+            :spread="dnd.itemProps({ id: item, disabled: item === 'Numb' })">{ item }</li>
+      </ul>
+      <ul class="done" :spread="dnd.containerProps({ id: 'done', label: 'Done' })">
+        <li :for="item in done.get()" :key="item" tabindex="0"
+            :spread="dnd.itemProps({ id: item })">{ item }</li>
+      </ul>
+      <div class="live" :spread="dnd.liveRegionProps()">{ dnd.announcement() }</div>
+      <p class="instructions" :spread="dnd.instructionsProps()">{ dnd.instructions() }</p>
+    </div>
+  `),
+})
+class Board {
+  root = new Signal.State<Element | null>(null);
+  todo = new Signal.State(['Kite', 'Grace', 'Sway']);
+  done = new Signal.State<string[]>([]);
 
-    console.log('setPointerCapture throws?', (() => {
-      try {
-        b.setPointerCapture(1);
-        return 'no';
-      } catch (error) {
-        return String(error);
-      }
-    })());
-
-    const stub = document.createElement('div');
-    stub.getBoundingClientRect = () => new DOMRect(0, 10, 100, 20);
-    console.log('stubbed rect', JSON.stringify(stub.getBoundingClientRect()));
-    expect(true).toBe(true);
+  dnd: DragDrop = createDragDrop({
+    root: () => this.root.get(),
+    onDrop: (event) => {
+      drops.push(event);
+      this.apply(event);
+    },
+    onDragEnd: (reason) => ends.push(reason),
+    ...boardOptions,
   });
 
-  it('raf timing', async () => {
-    let frames = 0;
-    const start = Date.now();
+  /** Move the item for real, so the tests see what a consumer would. */
+  apply({ source, target }: DropEvent) {
+    const lists: Record<string, Signal.State<string[]>> = { todo: this.todo, done: this.done };
+    const from = lists[source.containerId];
+    const to = lists[target.containerId];
+    if (!from || !to) return;
+
+    const next = from.get().filter((id) => id !== source.itemId);
+    if (from === to) {
+      next.splice(target.index, 0, source.itemId);
+      from.set(next);
+      return;
+    }
+    const arrived = [...to.get()];
+    arrived.splice(target.index, 0, source.itemId);
+    from.set(next);
+    to.set(arrived);
+  }
+}
+
+/** A tree: a collection nested inside one of its own items. */
+@Component({
+  selector: 'v-tree',
+  render: compileTemplate(`
+    <div :ref="root"
+         :pointerdown="dnd.onPointerDown($event)"
+         :keydown="dnd.onKeyDown($event)">
+      <ul class="root" :spread="dnd.containerProps({ id: 'root', label: 'Files' })">
+        <li class="folder" tabindex="0"
+            :spread="dnd.itemProps({ id: 'work', label: 'Work', dropsOn: true })">
+          <span class="handle" :spread="dnd.handleProps({ label: 'Reorder Work' })">::</span>
+          <ul class="inner" :spread="dnd.containerProps({ id: 'work-children', label: 'Work' })">
+            <li class="leaf" tabindex="0" :spread="dnd.itemProps({ id: 'notes', label: 'Notes' })">n</li>
+          </ul>
+        </li>
+        <li class="other" tabindex="0"
+            :spread="dnd.itemProps({ id: 'home', label: 'Home', dropsOn: true })">h</li>
+      </ul>
+      <div class="live" :spread="dnd.liveRegionProps()">{ dnd.announcement() }</div>
+    </div>
+  `),
+})
+class Tree {
+  root = new Signal.State<Element | null>(null);
+  dnd: DragDrop = createDragDrop({
+    root: () => this.root.get(),
+    onDrop: (event) => drops.push(event),
+    onDragEnd: (reason) => ends.push(reason),
+    ...boardOptions,
+  });
+}
+
+/** One list inside a scrolling pane, for the auto-scroll and boundary tests. */
+@Component({
+  selector: 'v-pane',
+  render: compileTemplate(`
+    <div :ref="root"
+         :pointerdown="dnd.onPointerDown($event)"
+         :keydown="dnd.onKeyDown($event)">
+      <div class="scroller" style="overflow-y: auto">
+        <ul class="list" :spread="dnd.containerProps({ id: 'list', label: 'List' })">
+          <li :for="item in items.get()" :key="item" tabindex="0"
+              :spread="dnd.itemProps({ id: item })">{ item }</li>
+        </ul>
+      </div>
+    </div>
+  `),
+})
+class Pane {
+  root = new Signal.State<Element | null>(null);
+  items = new Signal.State(['one', 'two', 'three']);
+  dnd: DragDrop = createDragDrop({
+    root: () => this.root.get(),
+    onDrop: (event) => drops.push(event),
+    onDragEnd: (reason) => ends.push(reason),
+    ...boardOptions,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function track<T extends { unmount(): void }>(handle: T): T {
+  mounted.push(handle);
+  return handle;
+}
+
+function setRect(el: Element, x: number, y: number, width: number, height: number) {
+  el.getBoundingClientRect = () => new DOMRect(x, y, width, height);
+}
+
+/** Lay every list out in its own 100px column, with 50px rows. */
+function layout() {
+  let column = 0;
+  for (const list of document.querySelectorAll<HTMLElement>('ul')) {
+    setRect(list, column, 0, 100, 300);
+    [...list.children].forEach((item, index) => setRect(item, column, index * 50, 100, 50));
+    column += 100;
+  }
+}
+
+function board(options: Partial<DragDropOptions> = {}) {
+  boardOptions = options;
+  const handle = track(mount(Board, host));
+  flushSync();
+  layout();
+
+  return {
+    instance: handle.instance as Board,
+    handle,
+    dnd: (handle.instance as Board).dnd,
+    items: () => [...host.querySelectorAll<HTMLElement>('li')],
+    item: (id: string) => host.querySelector<HTMLElement>(`[${DRAG_ITEM_ATTRIBUTE}="${id}"]`)!,
+    list: (id: string) => host.querySelector<HTMLElement>(`[${DRAG_CONTAINER_ATTRIBUTE}="${id}"]`)!,
+    said: () => host.querySelector('.live')!.textContent,
+    todo: () => (handle.instance as Board).todo.get(),
+    done: () => (handle.instance as Board).done.get(),
+  };
+}
+
+function key(el: Element, k: string, init: KeyboardEventInit = {}) {
+  const event = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init });
+  el.dispatchEvent(event);
+  flushSync();
+  return event;
+}
+
+function pointer(
+  type: 'pointerdown' | 'pointermove' | 'pointerup' | 'pointercancel',
+  el: Element,
+  x: number,
+  y: number,
+  init: PointerEventInit = {},
+) {
+  el.dispatchEvent(
+    new PointerEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      isPrimary: true,
+      button: 0,
+      pointerId: 1,
+      pointerType: 'mouse',
+      clientX: x,
+      clientY: y,
+      ...init,
+    }),
+  );
+  flushSync();
+}
+
+/** Press, then travel far enough to be a drag rather than a click. */
+function startPointerDrag(el: Element, x: number, y: number, init: PointerEventInit = {}) {
+  pointer('pointerdown', el, x, y, init);
+  pointer('pointermove', el, x, y + 10, init);
+}
+
+async function frames(count = 2) {
+  for (let i = 0; i < count; i++) {
     await new Promise<void>((resolve) => {
-      const step = () => {
-        frames++;
-        if (frames >= 3) resolve();
-        else requestAnimationFrame(step);
-      };
-      requestAnimationFrame(step);
+      requestAnimationFrame(() => resolve());
     });
-    console.log('frames', frames, 'ms', Date.now() - start);
-    expect(frames).toBe(3);
+  }
+  flushSync();
+}
+
+/** Let the queued microtasks — including the focus restore — run. */
+async function settle() {
+  flushSync();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('what assistive technology is told', () => {
+  it('describes an item without claiming a role or a tab stop', () => {
+    const { item } = board();
+    const kite = item('Kite');
+
+    expect(kite.getAttribute('aria-roledescription')).toBe('draggable');
+    // The component this composes into owns the role and the roving tab stop:
+    // a tree item, a grid row and a tab are all draggable and none is a button.
+    expect(kite.hasAttribute('role')).toBe(false);
+    expect(kite.getAttribute('tabindex')).toBe('0');
+    // Otherwise the native drag starts on any image or link in the row and
+    // fights the pointer drag for the same gesture.
+    expect(kite.getAttribute('draggable')).toBe('false');
+  });
+
+  it('points every item at one set of instructions', () => {
+    const { item } = board();
+    const instructions = host.querySelector('.instructions')!;
+
+    expect(instructions.id).not.toBe('');
+    expect(item('Kite').getAttribute('aria-describedby')).toBe(instructions.id);
+    expect(instructions.textContent).toContain('Space');
+    expect(instructions.textContent).toContain('Escape');
+  });
+
+  it('omits the description when no instructions were rendered', () => {
+    @Component({
+      selector: 'v-bare',
+      render: compileTemplate(
+        `<div :ref="root"><ul :spread="dnd.containerProps({ id: 'l' })">` +
+          `<li :spread="dnd.itemProps({ id: 'x' })">x</li></ul></div>`,
+      ),
+    })
+    class Bare {
+      root = new Signal.State<Element | null>(null);
+      dnd = createDragDrop({ root: () => this.root.get() });
+    }
+
+    track(mount(Bare, host));
+    flushSync();
+    // A dangling aria-describedby is worse than none: both leave the item
+    // undescribed, but the dangling one hides the mistake.
+    expect(host.querySelector('li')!.hasAttribute('aria-describedby')).toBe(false);
+  });
+
+  it('lets every string be replaced, including the role description', () => {
+    const { item, said, dnd } = board({
+      labels: {
+        item: '',
+        instructions: 'Leertaste hebt an.',
+        lifted: (drag) => `Aufgenommen: ${drag.itemLabel}`,
+      },
+    });
+
+    expect(item('Kite').hasAttribute('aria-roledescription')).toBe(false);
+    expect(host.querySelector('.instructions')!.textContent).toBe('Leertaste hebt an.');
+
+    dnd.lift('Kite');
+    flushSync();
+    expect(said()).toBe('Aufgenommen: Kite');
+  });
+
+  it('announces through an assertive region that is read whole', () => {
+    board();
+    const live = host.querySelector('.live')!;
+    expect(live.getAttribute('role')).toBe('status');
+    // Polite would read the position three arrow presses after the user left
+    // it, which is worse than saying nothing.
+    expect(live.getAttribute('aria-live')).toBe('assertive');
+    expect(live.getAttribute('aria-atomic')).toBe('true');
+  });
+
+  it('names a handle and marks it as the thing that drags', () => {
+    track(mount(Tree, host));
+    flushSync();
+    const handle = host.querySelector('.handle')!;
+    expect(handle.hasAttribute(DRAG_HANDLE_ATTRIBUTE)).toBe(true);
+    expect(handle.getAttribute('aria-label')).toBe('Reorder Work');
+    expect(handle.getAttribute('aria-roledescription')).toBe('drag handle');
+  });
+});
+
+describe('the keyboard drag', () => {
+  it('lifts on Space and says where the item is', () => {
+    const { item, said, dnd } = board();
+    const kite = item('Kite');
+    kite.focus();
+
+    const event = key(kite, ' ');
+    expect(dnd.isDragging()).toBe(true);
+    expect(dnd.mode()).toBe('keyboard');
+    // Space would otherwise scroll the list out from under the drag.
+    expect(event.defaultPrevented).toBe(true);
+    expect(said()).toBe('Picked up Kite. Item 1 of 3 in Todo.');
+    expect(kite.hasAttribute('data-dragging')).toBe(true);
+  });
+
+  it('leaves Space alone when the item cannot be picked up', () => {
+    const { item, dnd } = board();
+    // `Sway` is disabled, and the host still wants Space for its own selection.
+    const event = key(item('Sway'), ' ');
+    expect(dnd.isDragging()).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('ignores a modified Space, which is a shortcut and not a lift', () => {
+    const { item, dnd } = board();
+    key(item('Kite'), ' ', { ctrlKey: true });
+    expect(dnd.isDragging()).toBe(false);
+  });
+
+  it('moves one position per arrow press and reports the index after removal', () => {
+    const { item, said, dnd } = board();
+    const kite = item('Kite');
+    key(kite, ' ');
+
+    key(kite, 'ArrowDown');
+    // Kite came out of the list first, so landing after Grace is index 1 —
+    // the off-by-one every sortable list gets wrong.
+    expect(dnd.target()).toMatchObject({ containerId: 'todo', itemId: 'Sway', position: 'before', index: 1 });
+    expect(said()).toBe('Kite is now item 2 of 3 in Todo.');
+  });
+
+  it('counts positions over disabled items too', () => {
+    const { item, dnd } = board();
+    const kite = item('Kite');
+    key(kite, ' ');
+    key(kite, 'ArrowDown');
+    key(kite, 'ArrowDown');
+
+    // Sway is disabled: it cannot be picked up, but it still holds its place,
+    // or the index would not be an index into the consumer's array.
+    expect(dnd.target()?.index).toBe(2);
+  });
+
+  it('does not wrap at the ends', () => {
+    const { item, dnd } = board();
+    const kite = item('Kite');
+    key(kite, ' ');
+    key(kite, 'End');
+    expect(dnd.target()?.index).toBe(2);
+
+    key(kite, 'ArrowDown');
+    // Wrapping would move the item the whole length of the list on a press
+    // that promised one step.
+    expect(dnd.target()?.index).toBe(2);
+
+    key(kite, 'Home');
+    expect(dnd.target()?.index).toBe(0);
+    key(kite, 'ArrowUp');
+    expect(dnd.target()?.index).toBe(0);
+  });
+
+  it('crosses to the connected collection sideways', () => {
+    const { item, said, dnd } = board();
+    const kite = item('Kite');
+    key(kite, ' ');
+
+    key(kite, 'ArrowRight');
+    expect(dnd.target()).toMatchObject({ containerId: 'done', itemId: null, index: 0 });
+    expect(said()).toBe('Kite is now item 1 of 1 in Done.');
+
+    key(kite, 'ArrowLeft');
+    expect(dnd.target()?.containerId).toBe('todo');
+  });
+
+  it('swaps the sideways keys under dir="rtl"', () => {
+    const { item, dnd } = board();
+    host.setAttribute('dir', 'rtl');
+    const kite = item('Kite');
+    key(kite, ' ');
+
+    key(kite, 'ArrowLeft');
+    expect(dnd.target()?.containerId).toBe('done');
+    host.removeAttribute('dir');
+  });
+
+  it('drops on Space, reports it once, and puts the item where it said', async () => {
+    const view = board();
+    const kite = view.item('Kite');
+    key(kite, ' ');
+    key(kite, 'ArrowDown');
+    key(kite, ' ');
+
+    expect(drops).toHaveLength(1);
+    expect(drops[0]).toMatchObject({ mode: 'keyboard' });
+    expect(drops[0]!.target.index).toBe(1);
+    expect(ends).toEqual(['drop']);
+    expect(view.todo()).toEqual(['Grace', 'Kite', 'Sway']);
+    expect(view.said()).toBe('Dropped Kite. Item 2 of 3 in Todo.');
+    expect(view.dnd.isDragging()).toBe(false);
+
+    await settle();
+  });
+
+  it('follows the item to its new place with focus', async () => {
+    const view = board();
+    const kite = view.item('Kite');
+    kite.focus();
+    key(kite, ' ');
+    key(kite, 'ArrowDown');
+    key(kite, ' ');
+    await settle();
+
+    // The element the drag started on may not have survived the re-render, so
+    // the item is found again by id.
+    expect(document.activeElement?.getAttribute(DRAG_ITEM_ATTRIBUTE)).toBe('Kite');
+    expect(view.todo()).toEqual(['Grace', 'Kite', 'Sway']);
+  });
+
+  it('cancels on Escape and puts nothing anywhere', () => {
+    const view = board();
+    const kite = view.item('Kite');
+    key(kite, ' ');
+    key(kite, 'ArrowDown');
+    key(kite, 'Escape');
+
+    expect(drops).toHaveLength(0);
+    expect(ends).toEqual(['cancel']);
+    expect(view.todo()).toEqual(['Kite', 'Grace', 'Sway']);
+    expect(view.said()).toBe('Cancelled. Kite is back where it started.');
+    expect(view.dnd.target()).toBeNull();
+  });
+
+  it('keeps Escape away from the layer the list is inside', () => {
+    const { item, dnd } = board();
+    const seen: string[] = [];
+    // Dismissal listens exactly like this, on the document and capturing.
+    const dismissal = () => seen.push('dismissed');
+    document.addEventListener('keydown', dismissal, true);
+
+    const kite = item('Kite');
+    key(kite, ' ');
+    key(kite, 'Escape');
+
+    document.removeEventListener('keydown', dismissal, true);
+    // One press cancels the drag. It must not also close the dialog around it
+    // and leave the drag running underneath.
+    expect(seen).toEqual([]);
+    expect(dnd.isDragging()).toBe(false);
+  });
+
+  it('swallows Tab rather than leaving a lifted item behind', () => {
+    const { item, dnd } = board();
+    const kite = item('Kite');
+    key(kite, ' ');
+    const event = key(kite, 'Tab');
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(dnd.isDragging()).toBe(true);
+  });
+
+  it('marks the target for the drop indicator, before and after', () => {
+    const { item, list, dnd } = board();
+    const kite = item('Kite');
+    key(kite, ' ');
+    key(kite, 'ArrowDown');
+
+    expect(item('Sway').getAttribute('data-drop-position')).toBe('before');
+    expect(item('Grace').hasAttribute('data-drop-position')).toBe(false);
+    expect(list('todo').hasAttribute('data-drop-target')).toBe(true);
+
+    key(kite, 'End');
+    expect(item('Sway').getAttribute('data-drop-position')).toBe('after');
+    expect(dnd.indicator()).toMatchObject({ position: 'after', y: 150, width: 100, height: 0 });
+  });
+});
+
+describe('dropping onto an item', () => {
+  it('offers on as a step of its own between before and after', () => {
+    track(mount(Tree, host));
+    flushSync();
+    const notes = host.querySelector<HTMLElement>('.leaf')!;
+    const live = host.querySelector('.live')!;
+    const tree = (mounted[0] as unknown as { instance: Tree }).instance.dnd;
+
+    // Notes lives in the nested collection; sideways moves it up to the root.
+    tree.lift(notes);
+    key(notes, 'ArrowRight');
+    flushSync();
+    expect(tree.target()?.containerId).toBe('root');
+
+    const seen: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const target = tree.target();
+      seen.push(`${target?.itemId}:${target?.position}`);
+      key(notes, 'ArrowDown');
+    }
+
+    expect(seen).toEqual(['work:before', 'work:on', 'home:before', 'home:on']);
+    expect(live.textContent).toBe('Drop Notes on Home.');
+  });
+
+  it('reports an on drop with no index, because nothing was inserted', () => {
+    track(mount(Tree, host));
+    flushSync();
+    const notes = host.querySelector<HTMLElement>('.leaf')!;
+    const tree = (mounted[0] as unknown as { instance: Tree }).instance.dnd;
+
+    tree.lift(notes);
+    key(notes, 'ArrowRight');
+    key(notes, 'ArrowDown');
+    key(notes, ' ');
+
+    expect(drops[0]!.target).toMatchObject({ containerId: 'root', itemId: 'work', position: 'on', index: -1 });
+  });
+
+  it('refuses to drop a node into its own subtree', () => {
+    track(mount(Tree, host));
+    flushSync();
+    const work = host.querySelector<HTMLElement>('.folder')!;
+    const tree = (mounted[0] as unknown as { instance: Tree }).instance.dnd;
+
+    tree.lift(work);
+    flushSync();
+
+    const reachable = new Set<string | null>();
+    for (let i = 0; i < 8; i++) {
+      reachable.add(tree.target()?.containerId ?? null);
+      key(work, 'ArrowDown');
+      key(work, 'ArrowRight');
+    }
+
+    // Losing a subtree into itself is the classic way to lose a subtree.
+    expect(reachable.has('work-children')).toBe(false);
+    expect(reachable).toContain('root');
+  });
+});
+
+describe('validation and refusal', () => {
+  it('skips rejected positions with the arrows rather than stopping on them', () => {
+    const { item, dnd } = board({
+      // Nothing may go last.
+      canDrop: (target: DropTarget) => !(target.containerId === 'todo' && target.index === 2),
+    });
+    const kite = item('Kite');
+    key(kite, ' ');
+    key(kite, 'End');
+
+    expect(dnd.target()?.index).toBe(1);
+  });
+
+  it('will not lift an item canDrag refuses', () => {
+    const { item, dnd } = board({ canDrag: () => false });
+    key(item('Kite'), ' ');
+    expect(dnd.isDragging()).toBe(false);
+  });
+
+  it('turns a drop with nowhere to go into a cancel', () => {
+    const { item, dnd } = board({ canDrop: () => false });
+    const kite = item('Kite');
+    key(kite, ' ');
+
+    expect(dnd.target()).toBeNull();
+    expect(key(kite, ' ')).toBeTruthy();
+    expect(drops).toHaveLength(0);
+    expect(ends).toEqual(['cancel']);
+  });
+
+  it('says so when there is nowhere to drop', () => {
+    const view = board({ canDrop: (target: DropTarget) => target.containerId !== 'done' });
+    const kite = view.item('Kite');
+    key(kite, ' ');
+    key(kite, 'ArrowRight');
+    // The move is refused, so the target stays put rather than going quiet.
+    expect(view.dnd.target()?.containerId).toBe('todo');
+  });
+
+  it('skips a collection that takes no drops', () => {
+    @Component({
+      selector: 'v-locked',
+      render: compileTemplate(
+        `<div :ref="root" :keydown="dnd.onKeyDown($event)">` +
+          `<ul :spread="dnd.containerProps({ id: 'a' })">` +
+          `<li tabindex="0" :spread="dnd.itemProps({ id: 'x' })">x</li></ul>` +
+          `<ul :spread="dnd.containerProps({ id: 'b', dropDisabled: true })">` +
+          `<li tabindex="0" :spread="dnd.itemProps({ id: 'y' })">y</li></ul></div>`,
+      ),
+    })
+    class Locked {
+      root = new Signal.State<Element | null>(null);
+      dnd = createDragDrop({ root: () => this.root.get() });
+    }
+
+    const handle = track(mount(Locked, host));
+    flushSync();
+    const dnd = (handle.instance as Locked).dnd;
+    const x = host.querySelector<HTMLElement>('li')!;
+
+    dnd.lift(x);
+    key(x, 'ArrowRight');
+    flushSync();
+    expect(dnd.target()?.containerId).toBe('a');
+  });
+});
+
+describe('the pointer drag', () => {
+  it('waits for travel before treating a press as a drag', () => {
+    const { item, dnd } = board();
+    const kite = item('Kite');
+
+    pointer('pointerdown', kite, 50, 25);
+    pointer('pointermove', kite, 51, 26);
+    // A click is a press that moved a pixel; starting a drag on it makes every
+    // list item impossible to click.
+    expect(dnd.isDragging()).toBe(false);
+
+    pointer('pointermove', kite, 50, 40);
+    expect(dnd.isDragging()).toBe(true);
+    expect(dnd.mode()).toBe('pointer');
+  });
+
+  it('ignores the secondary button and a second finger', () => {
+    const { item, dnd } = board();
+    const kite = item('Kite');
+
+    startPointerDrag(kite, 50, 25, { button: 2 });
+    expect(dnd.isDragging()).toBe(false);
+
+    startPointerDrag(kite, 50, 25, { isPrimary: false, pointerId: 7 });
+    expect(dnd.isDragging()).toBe(false);
+  });
+
+  it('captures the pointer so the drag survives leaving the handle', () => {
+    const { item } = board();
+    const kite = item('Kite');
+    startPointerDrag(kite, 50, 25);
+    expect(kite.hasPointerCapture(1)).toBe(true);
+
+    pointer('pointerup', kite, 50, 25);
+    expect(kite.hasPointerCapture(1)).toBe(false);
+  });
+
+  it('only drags from the handle when the item declares one', () => {
+    track(mount(Tree, host));
+    flushSync();
+    layout();
+    const work = host.querySelector<HTMLElement>('.folder')!;
+    const handle = host.querySelector<HTMLElement>('.handle')!;
+    const tree = (mounted[0] as unknown as { instance: Tree }).instance.dnd;
+
+    startPointerDrag(work, 50, 10);
+    // The rest of the row stays available for selection, links and buttons.
+    expect(tree.isDragging()).toBe(false);
+
+    startPointerDrag(handle, 50, 10);
+    expect(tree.isDragging()).toBe(true);
+  });
+
+  it('resolves the half of the row the pointer is in', () => {
+    const { item, dnd } = board();
+    const kite = item('Kite');
+    startPointerDrag(kite, 50, 25);
+
+    // Grace occupies y 50..100.
+    pointer('pointermove', kite, 50, 60);
+    expect(dnd.target()).toMatchObject({ itemId: 'Grace', position: 'before', index: 0 });
+
+    pointer('pointermove', kite, 50, 90);
+    expect(dnd.target()).toMatchObject({ itemId: 'Grace', position: 'after', index: 1 });
+  });
+
+  it('gives an item that takes children a middle third', () => {
+    track(mount(Tree, host));
+    flushSync();
+    layout();
+    const notes = host.querySelector<HTMLElement>('.leaf')!;
+    const tree = (mounted[0] as unknown as { instance: Tree }).instance.dnd;
+    // Home is the second row of the root list, y 50..100.
+    startPointerDrag(notes, 150, 10);
+
+    pointer('pointermove', notes, 50, 55);
+    expect(tree.target()).toMatchObject({ itemId: 'home', position: 'before' });
+
+    pointer('pointermove', notes, 50, 75);
+    expect(tree.target()).toMatchObject({ itemId: 'home', position: 'on', index: -1 });
+
+    pointer('pointermove', notes, 50, 95);
+    expect(tree.target()).toMatchObject({ itemId: 'home', position: 'after' });
+  });
+
+  it('carries an item into another collection', () => {
+    const view = board();
+    const kite = view.item('Kite');
+    startPointerDrag(kite, 50, 25);
+
+    // The Done list is the second column, and it is empty.
+    pointer('pointermove', kite, 150, 40);
+    expect(view.dnd.target()).toMatchObject({ containerId: 'done', itemId: null, index: 0 });
+
+    pointer('pointerup', kite, 150, 40);
+    expect(view.todo()).toEqual(['Grace', 'Sway']);
+    expect(view.done()).toEqual(['Kite']);
+  });
+
+  it('treats a release over nothing as a cancel', () => {
+    const view = board();
+    const kite = view.item('Kite');
+    startPointerDrag(kite, 50, 25);
+
+    pointer('pointermove', kite, 500, 500);
+    expect(view.dnd.target()).toBeNull();
+
+    pointer('pointerup', kite, 500, 500);
+    // The missing indicator was saying this: there was nowhere to put it.
+    expect(drops).toHaveLength(0);
+    expect(ends).toEqual(['cancel']);
+    expect(view.todo()).toEqual(['Kite', 'Grace', 'Sway']);
+  });
+
+  it('cancels on Escape and on the platform taking the gesture away', () => {
+    const view = board();
+    let kite = view.item('Kite');
+    startPointerDrag(kite, 50, 25);
+    key(kite, 'Escape');
+    expect(view.dnd.isDragging()).toBe(false);
+    expect(ends).toEqual(['cancel']);
+
+    kite = view.item('Kite');
+    startPointerDrag(kite, 50, 25);
+    pointer('pointercancel', kite, 50, 25);
+    expect(view.dnd.isDragging()).toBe(false);
+    expect(ends).toEqual(['cancel', 'cancel']);
+  });
+
+  it('leaves the arrows alone while the pointer is driving', () => {
+    const view = board();
+    const kite = view.item('Kite');
+    startPointerDrag(kite, 50, 25);
+    const before = view.dnd.target();
+
+    key(kite, 'ArrowDown');
+    // Two things moving one target at once is worse than either.
+    expect(view.dnd.target()).toEqual(before);
+  });
+
+  it('stops the page selecting text under the drag, and puts it back', () => {
+    const { item } = board();
+    const kite = item('Kite');
+    startPointerDrag(kite, 50, 25);
+    expect(document.body.style.userSelect).toBe('none');
+
+    pointer('pointerup', kite, 50, 25);
+    expect(document.body.style.userSelect).not.toBe('none');
+  });
+
+  it('offsets only along the locked axis', () => {
+    const { item, dnd } = board({ axis: 'y' });
+    const kite = item('Kite');
+    pointer('pointerdown', kite, 50, 25);
+    pointer('pointermove', kite, 90, 65);
+
+    expect(dnd.offset()).toEqual({ x: 0, y: 40 });
+    expect(dnd.transformFor('Kite')).toBe('translate(0px, 40px)');
+    expect(dnd.transformFor('Grace')).toBeUndefined();
+  });
+
+  it('keeps the item inside its boundary', () => {
+    const holder = document.createElement('div');
+    host.append(holder);
+    setRect(holder, 0, 0, 100, 200);
+
+    const { item, dnd } = board({ boundary: () => holder });
+    const kite = item('Kite');
+    // Kite's box is y 0..50, so it can fall 150px and rise none.
+    pointer('pointerdown', kite, 50, 25);
+    pointer('pointermove', kite, 50, 925);
+    expect(dnd.offset().y).toBe(150);
+
+    pointer('pointermove', kite, 50, -75);
+    expect(dnd.offset().y).toBe(0);
+  });
+});
+
+describe('touch', () => {
+  it('does not drag until the press has been held', () => {
+    vi.useFakeTimers();
+    const { item, dnd } = board({ touchDelay: 250 });
+    const kite = item('Kite');
+
+    pointer('pointerdown', kite, 50, 25, { pointerType: 'touch' });
+    vi.advanceTimersByTime(200);
+    flushSync();
+    expect(dnd.isDragging()).toBe(false);
+
+    vi.advanceTimersByTime(60);
+    flushSync();
+    expect(dnd.isDragging()).toBe(true);
+  });
+
+  it('gives the gesture up to a scroll', () => {
+    vi.useFakeTimers();
+    const { item, dnd } = board({ touchDelay: 250, touchTolerance: 5 });
+    const kite = item('Kite');
+
+    pointer('pointerdown', kite, 50, 25, { pointerType: 'touch' });
+    // A finger that travels during the hold was scrolling the list, not
+    // pulling a row out of it.
+    pointer('pointermove', kite, 50, 60, { pointerType: 'touch' });
+    vi.advanceTimersByTime(400);
+    flushSync();
+
+    expect(dnd.isDragging()).toBe(false);
+  });
+
+  it('drags a finger that stayed put', () => {
+    vi.useFakeTimers();
+    const { item, dnd } = board({ touchDelay: 250 });
+    const kite = item('Kite');
+
+    pointer('pointerdown', kite, 50, 25, { pointerType: 'touch' });
+    pointer('pointermove', kite, 52, 27, { pointerType: 'touch' });
+    vi.advanceTimersByTime(300);
+    flushSync();
+    expect(dnd.isDragging()).toBe(true);
+  });
+});
+
+describe('auto-scroll', () => {
+  function pane(options: Partial<DragDropOptions> = {}) {
+    boardOptions = options;
+    const handle = track(mount(Pane, host));
+    flushSync();
+
+    const scroller = host.querySelector<HTMLElement>('.scroller')!;
+    setRect(scroller, 0, 0, 100, 100);
+    Object.defineProperty(scroller, 'scrollHeight', { value: 600, configurable: true });
+    Object.defineProperty(scroller, 'clientHeight', { value: 100, configurable: true });
+    layout();
+    // The list is taller than its pane, which is the case worth scrolling.
+    setRect(host.querySelector('.list')!, 0, 0, 100, 600);
+
+    return { scroller, dnd: (handle.instance as Pane).dnd, item: () => host.querySelector('li')! };
+  }
+
+  it('scrolls the nearest scrollable ancestor near its edge', async () => {
+    const { scroller, item } = pane({ autoScrollThreshold: 30, autoScrollSpeed: 10 });
+    startPointerDrag(item(), 50, 10);
+
+    pointer('pointermove', item(), 50, 95);
+    await frames(2);
+    expect(scroller.scrollTop).toBeGreaterThan(0);
+  });
+
+  it('stays still away from the edges, and stops when the drag ends', async () => {
+    const { scroller, item } = pane({ autoScrollThreshold: 30, autoScrollSpeed: 10 });
+    startPointerDrag(item(), 50, 10);
+
+    pointer('pointermove', item(), 50, 50);
+    await frames(2);
+    expect(scroller.scrollTop).toBe(0);
+
+    pointer('pointermove', item(), 50, 95);
+    await frames(2);
+    const scrolled = scroller.scrollTop;
+    expect(scrolled).toBeGreaterThan(0);
+
+    pointer('pointerup', item(), 50, 95);
+    await frames(2);
+    expect(scroller.scrollTop).toBe(scrolled);
+  });
+
+  it('can be turned off', async () => {
+    const { scroller, item } = pane({ autoScroll: false });
+    startPointerDrag(item(), 50, 10);
+    pointer('pointermove', item(), 50, 99);
+    await frames(2);
+    expect(scroller.scrollTop).toBe(0);
+  });
+});
+
+describe('a target owned from outside', () => {
+  it('takes the drop from the signal it was given', () => {
+    const target = new Signal.State<DropTarget | null>(null);
+    const view = board({ target });
+    const kite = view.item('Kite');
+    key(kite, ' ');
+
+    // A tree that has just auto-expanded a folder redirects the drop like this.
+    target.set({ containerId: 'done', itemId: null, position: 'before', index: 0 });
+    flushSync();
+    expect(view.dnd.target()?.containerId).toBe('done');
+
+    key(kite, ' ');
+    expect(drops[0]!.target.containerId).toBe('done');
+    expect(view.done()).toEqual(['Kite']);
+  });
+});
+
+describe('teardown', () => {
+  it('lets go of the page when unmounted mid-drag', () => {
+    const { item, handle } = board();
+    const kite = item('Kite');
+    startPointerDrag(kite, 50, 25);
+    expect(document.body.style.userSelect).toBe('none');
+
+    handle.unmount();
+    flushSync();
+
+    expect(document.body.style.userSelect).not.toBe('none');
+    expect(kite.hasPointerCapture(1)).toBe(false);
+    // The window listener has to go with it, or the next Escape anywhere on the
+    // page is swallowed by a drag nobody can see.
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    document.body.dispatchEvent(escape);
+    expect(escape.defaultPrevented).toBe(false);
   });
 });

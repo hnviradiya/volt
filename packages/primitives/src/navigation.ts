@@ -1263,10 +1263,10 @@ interface NavigationParts {
  *
  *   class SiteNav {
  *     bar = new Signal.State<Element | null>(null);
- *     panels = new Map<string, Signal.State<Element | null>>();
+ *     docsPanel = new Signal.State<Element | null>(null);
  *     nav = createNavigationMenu({
  *       menubar: () => this.bar.get(),
- *       submenu: (key) => this.panels.get(key)?.get() ?? null,
+ *       submenu: (key) => (key === 'docs' ? this.docsPanel.get() : null),
  *     });
  *   }
  *
@@ -1316,10 +1316,14 @@ interface NavigationParts {
  * of twenty. A site whose navigation is a handful of links is better served by
  * a plain list of them, where Tab reaches each and every one is announced as
  * what it is.
+ *
+ * The bar is horizontal, and there is no option for anything else. A menubar
+ * is horizontal by definition in ARIA, and a column of navigation links down
+ * the side of a page is a different pattern with a different keyboard map —
+ * one this would only half implement.
  */
 export function createNavigationMenu(options: NavigationMenuOptions): NavigationMenu {
   const labels = options.labels ?? {};
-  const orientation: Orientation = options.orientation ?? 'horizontal';
 
   const open = new Signal.State<string | null>(null);
   /** The bar's tab stop, held as a key so a re-rendered bar keeps one. */
@@ -1391,11 +1395,11 @@ export function createNavigationMenu(options: NavigationMenuOptions): Navigation
     },
     (el) => active.set(keyOf(el)),
     {
-      orientation,
+      orientation: 'horizontal',
       loop: options.loop !== false,
       typeahead: options.typeahead,
-      // Enter and Space are intercepted before this ever sees them, so the
-      // link contract holds; nothing else here selects.
+      // No `onSelect`: Enter and Space are intercepted before this ever sees
+      // them, so that the link contract holds.
     },
   );
 
@@ -1451,15 +1455,18 @@ export function createNavigationMenu(options: NavigationMenuOptions): Navigation
         return;
 
       case 'ArrowDown':
-      case 'ArrowUp': {
-        // Down and Up along a horizontal bar mean "into the submenu"; in a
-        // vertical bar they are how you move along it, and roving takes them.
-        if (orientation === 'vertical') break;
+      case 'ArrowUp':
+        // Down and Up across a horizontal bar mean "into the submenu". On an
+        // item without one they are left alone, so the page still scrolls.
         if (!trigger || key === null) return;
         event.preventDefault();
         openSubmenu(key, event.key === 'ArrowDown' ? 'first' : 'last');
         return;
-      }
+
+      case 'ArrowLeft':
+      case 'ArrowRight':
+        if (moveAlongBar(event)) event.preventDefault();
+        return;
 
       case 'Escape':
         // Dismissal owns Escape while a submenu is open, on the document and
@@ -1476,11 +1483,7 @@ export function createNavigationMenu(options: NavigationMenuOptions): Navigation
         break;
     }
 
-    if (orientation === 'horizontal' && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
-      if (moveAlongBar(event)) event.preventDefault();
-      return;
-    }
-
+    // Home, End and typeahead.
     if (barRoving.onKeyDown(event)) event.preventDefault();
   };
 
@@ -1507,13 +1510,11 @@ export function createNavigationMenu(options: NavigationMenuOptions): Navigation
         return;
 
       case 'ArrowLeft':
-      case 'ArrowRight': {
-        if (orientation !== 'horizontal') break;
+      case 'ArrowRight':
         // Handed to the bar's own handler so that Left and Right still mirror
         // under `dir="rtl"` — the one place that rule is written down.
         if (moveAlongBar(event)) event.preventDefault();
         return;
-      }
 
       default:
         break;
@@ -1621,11 +1622,9 @@ export function createNavigationMenu(options: NavigationMenuOptions): Navigation
 
     menubarProps: () => ({
       role: 'menubar',
-      // Horizontal is ARIA's own default for a menubar, so it is only worth
-      // saying when it is not true.
-      'aria-orientation': orientation === 'vertical' ? 'vertical' : undefined,
+      // No `aria-orientation`: horizontal is ARIA's own default for a menubar,
+      // and this bar is never anything else.
       'aria-label': labels.menubar ?? 'Main navigation',
-      'data-orientation': orientation,
       onkeydown: onBarKeyDown,
       onclick: onBarClick,
       onfocusin: onBarFocusIn,

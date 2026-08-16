@@ -766,12 +766,16 @@ describe('keyboard key', () => {
   });
 
   it('draws names and joins with a plus everywhere else', () => {
-    const shortcut = kbd({ platform: 'other' });
+    const shortcut = kbd({ platform: 'other', keys: () => ['Control', 'K'] });
     expect(shortcut.text()).toBe('Ctrl+K');
-    expect(shortcut.label()).toBe('Windows K');
+    expect(shortcut.label()).toBe('Control K');
   });
 
-  it('names the same modifier differently per platform', () => {
+  it('gives one key different symbols and different names per platform', () => {
+    // Meta is ⌘ and "Command" on one, Win and "Windows" on the other — the
+    // same physical key, and nothing about it transfers.
+    expect(kbd({ platform: 'other' }).text()).toBe('Win+K');
+    expect(kbd({ platform: 'other' }).label()).toBe('Windows K');
     expect(kbd({ platform: 'apple', keys: () => ['Alt', 'F'] }).label()).toBe('Option F');
     expect(kbd({ platform: 'other', keys: () => ['Alt', 'F'] }).label()).toBe('Alt F');
   });
@@ -1063,8 +1067,15 @@ describe('relative time text', () => {
 
   it('uses the word for it when there is one', () => {
     vi.setSystemTime(new Date(2026, 7, 18, 9, 0, 0));
-    const { texts } = mountTimes([new Date(2026, 7, 17, 20, 0, 0)]);
+    const { texts } = mountTimes([new Date(2026, 7, 17, 8, 0, 0)]);
     expect(texts()).toEqual(['yesterday']);
+  });
+
+  it('prefers hours to "yesterday" while hours are still the better answer', () => {
+    // Thirteen hours ago, over a midnight. "Yesterday" is true and useless.
+    vi.setSystemTime(new Date(2026, 7, 18, 9, 0, 0));
+    const { texts } = mountTimes([new Date(2026, 7, 17, 20, 0, 0)]);
+    expect(texts()).toEqual(['13 hours ago']);
   });
 
   it('does not call nine days a month', () => {
@@ -1149,7 +1160,7 @@ describe('the shared ticker', () => {
     const { texts } = mountTimes([new Date(NOW - 10_000), new Date(NOW - 40_000)]);
     expect(texts()).toEqual(['10 seconds ago', '40 seconds ago']);
 
-    vi.setSystemTime(NOW + 5_000);
+    // One timer moving the clock, so both texts move by the same five seconds.
     vi.advanceTimersByTime(5_000);
     flushSync();
     expect(texts()).toEqual(['15 seconds ago', '45 seconds ago']);
@@ -1172,14 +1183,12 @@ describe('the shared ticker', () => {
     mountTimes([new Date(NOW - 3 * 24 * 60 * 60 * 1000)], { labels: { relative } });
     const rendered = relative.mock.calls.length;
 
-    vi.setSystemTime(NOW + 60_000);
     vi.advanceTimersByTime(60_000);
     flushSync();
     // A minute is nothing to a timestamp measured in days; re-rendering it
     // would be work with no output.
     expect(relative).toHaveBeenCalledTimes(rendered);
 
-    vi.setSystemTime(NOW + 5 * 60_000);
     vi.advanceTimersByTime(4 * 60_000);
     flushSync();
     expect(relative.mock.calls.length).toBeGreaterThan(rendered);

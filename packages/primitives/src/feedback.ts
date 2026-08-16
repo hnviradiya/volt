@@ -336,45 +336,59 @@ export function createAlert(options: AlertOptions): Alert {
 
   const isMessageVisible = (): boolean => state.get() && timing.isReady();
 
-  const setOpen = (next: boolean): void => {
-    if (untrack(() => state.get()) === next) return;
-    state.set(next);
-    options.onOpenChange?.(next);
-  };
+  /** Where focus was before it entered the alert, so a dismiss can put it back. */
+  let focusOrigin: HTMLElement | null = null;
 
-  // Registered before presence, so that when the alert closes this effect's
-  // cleanup runs while the region is still in the document and focus can still
-  // be found inside it.
+  // An alert does not take focus, so this is only ever spent when the user
+  // walked into it themselves — to press dismiss.
   effect(() => {
     if (!state.get() || typeof document === 'undefined') return;
 
-    // Where focus was when the alert appeared, and thereafter wherever it goes
-    // outside the alert. An alert does not take focus, so this is only ever
-    // spent when the user walked into it themselves — to press dismiss.
-    let lastOutside = activeElement();
+    focusOrigin = activeElement();
 
     const onFocusIn = (event: Event) => {
       const target = event.target;
       if (!(target instanceof HTMLElement)) return;
+      // Moving between the alert's own controls is not an entry into it.
       if (options.region()?.contains(target)) return;
-      lastOutside = target;
+      focusOrigin = target;
     };
     document.addEventListener('focusin', onFocusIn, true);
 
     onCleanup(() => {
       document.removeEventListener('focusin', onFocusIn, true);
-
-      // Dismissed while it held focus. Without this the focused node is
-      // removed under the user and focus falls to `<body>`, which drops a
-      // keyboard user at the top of the document with no way back.
-      const region = options.region();
-      const active = activeElement();
-      if (!region || !active || !region.contains(active)) return;
-      // Only somewhere that still exists; otherwise leaving focus where the
-      // browser puts it beats sending it somewhere arbitrary.
-      if (lastOutside?.isConnected) lastOutside.focus();
+      focusOrigin = null;
     });
   });
+
+  /**
+   * Take focus out of the alert before the alert goes.
+   *
+   * Without this the focused node is removed under the user and focus falls to
+   * `<body>`, dropping a keyboard user at the top of the document with no way
+   * back to what they were doing.
+   */
+  const returnFocus = (): void => {
+    const region = options.region();
+    const active = activeElement();
+    if (!region || !active || !region.contains(active)) return;
+    // Only somewhere that still exists; otherwise leaving focus where the
+    // browser puts it beats sending it somewhere arbitrary.
+    if (focusOrigin?.isConnected) focusOrigin.focus();
+  };
+
+  const setOpen = (next: boolean): void => {
+    if (untrack(() => state.get()) === next) return;
+    // Before the write rather than in an effect after it: the message is
+    // removed by a render effect reading this same signal, and render effects
+    // settle completely before any user effect runs, so by then the focused
+    // node has already gone and focus is already on `<body>`. The cost is that
+    // a consumer who writes their own `open` signal directly closes the alert
+    // without passing through here, and owns where focus lands.
+    if (!next) returnFocus();
+    state.set(next);
+    options.onOpenChange?.(next);
+  };
 
   const presence = createPresence(
     () => state.get(),

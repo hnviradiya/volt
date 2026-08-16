@@ -464,6 +464,76 @@ No claim about beating Fastify goes in the README until that harness exists
 and reports it. This project has already produced four optimisations that
 measured well in isolation and moved nothing in the macro benchmark.
 
+## Type-checked templates
+
+Today a template expression is invisible to TypeScript. The plugin parses
+`{ document.title }`, emits `_ctx.document.title` into the module, and `tsc`
+never sees it — it type-checks the source, where the template is a
+`templateUrl` string. So `{ document.foobar }` compiles, and fails at runtime
+as `undefined`.
+
+That has to change. The goal is not a framework beside a type system but one
+compiler that knows both: the template is TypeScript that happens to be
+written in HTML.
+
+### How it is done
+
+The established technique, and the one Angular and Vue both use, is a **type-
+check block**: for each component, generate a synthetic TypeScript function
+that restates every template expression with the component instance typed,
+hand it to the TypeScript compiler, and map the diagnostics back to the
+template.
+
+For a component with `document: Document` and `items: Signal.State<Item[]>`:
+
+```ts
+// generated, never written or read by a human
+function __check_DocumentCard(_ctx: DocumentCard) {
+  _ctx.document.title;                                    // { document.title }
+  if (_ctx.selected) { }                                  // :if="selected"
+  for (const item of _ctx.items.get()) { item.id; }        // :for + :key
+  ((_event: MouseEvent) => _ctx.select(item.id))(null!);   // :click
+}
+```
+
+Everything needed is already there. The expression parser produces an AST with
+source locations; the printer already resolves names against `_ctx` and knows
+which are loop-scoped accessors; the plugin already knows which class a
+template belongs to. The block is a different emit from the same analysis, in
+the way the server-function stub is a different emit from decorator lowering.
+
+### What it catches
+
+- A property that does not exist on the component, or on anything reachable
+  from it — the case in the example
+- A prop passed to a child component with the wrong type, or a required prop
+  omitted, checked against that child's `@Prop` declarations
+- `$event` typed by the event name, so `:input="handle($event.target.value)"`
+  knows `target` is an `EventTarget` and makes you narrow it
+- A `:for` item's type inferred from the collection, and used inside the row
+- `:key` referring to something the item does not have
+- A signal read without `.get()`, which currently renders `[object Object]`
+
+### What it costs
+
+- Diagnostics must map back to the `.html` file, line and column, or the
+  feature is worse than nothing — an error pointing at generated code is an
+  error nobody can act on.
+- The check is a separate pass. Vite's transform cannot report it, since oxc
+  strips types and never type-checks. It belongs in a `volt check` command and
+  in CI, alongside `tsc`.
+- An editor wants it live, which means a language server. That is a second,
+  larger piece of work, and the CLI has to exist first.
+- Some expressions are legitimately dynamic and will need an escape hatch, or
+  the strictness becomes something people turn off entirely.
+
+### Scale
+
+This is one of the larger V1 items — comparable to SSR, smaller than the grid.
+It is also the one that most changes what the framework feels like to use, and
+the one hardest to add later: every escape hatch shipped before it exists is
+one the checker then has to tolerate.
+
 ## Developer tools
 
 A browser extension plus the hooks in core it needs, all behind `__VOLT_DEV__`

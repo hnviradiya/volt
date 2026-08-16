@@ -347,47 +347,57 @@ export function createFormField(options: FormFieldOptions): FormField {
     return messages.length > 0 ? { state: 'invalid', messages } : VALID;
   };
 
-  const validate = async (): Promise<boolean> => {
-    hasValidated = true;
-    const token = ++generation;
+  const isValidNow = (): boolean => untrack(() => validity.get()).state === 'valid';
+
+  /** Ask the consumer's validator, if there is one and there is anything to ask about. */
+  const runValidator = (): ValidationOutcome | Promise<ValidationOutcome> => {
     const control = options.control();
+    if (!options.validate || !control || disabled() || readOnly()) return undefined;
+    return options.validate(untrack(() => value.get()), control);
+  };
 
-    if (options.validate && control && !disabled() && !readOnly()) {
-      const outcome = options.validate(untrack(() => value.get()), control);
-
-      if (isPromise(outcome)) {
-        // Kept, not cleared: the messages already on screen stay there while
-        // the answer is in flight, so a field does not flicker back to looking
-        // fine in the gap.
-        settle({ state: 'pending', messages: untrack(() => validity.get()).messages });
-        try {
-          const resolved = await outcome;
-          if (token !== generation) return untrack(() => validity.get()).state === 'valid';
-          validatorMessages = toMessages(resolved);
-        } catch {
-          if (token !== generation) return untrack(() => validity.get()).state === 'valid';
-          // A validator that threw has not said the value is good, and
-          // treating silence as approval is how bad values get through.
-          validatorMessages = [options.labels?.validationFailed ?? DEFAULT_VALIDATION_FAILED];
-        }
-      } else {
-        validatorMessages = toMessages(outcome);
-      }
-    } else {
-      validatorMessages = [];
-    }
-
+  const finish = (messages: readonly string[]): boolean => {
+    validatorMessages = messages;
     const result = evaluate();
     settle(result);
     return result.state === 'valid';
   };
 
+  /**
+   * Deliberately not an `async` function: awaiting a validator that answered
+   * synchronously would still defer the result by a microtask, and `report`
+   * depends on a synchronous answer being available synchronously.
+   */
+  const validate = (): Promise<boolean> => {
+    hasValidated = true;
+    const token = ++generation;
+    const outcome = runValidator();
+
+    if (!isPromise(outcome)) return Promise.resolve(finish(toMessages(outcome)));
+
+    // Kept, not cleared: the messages already on screen stay there while the
+    // answer is in flight, so the field does not flicker back to looking fine
+    // in the gap.
+    settle({ state: 'pending', messages: untrack(() => validity.get()).messages });
+
+    // A newer run has taken over, so this answer is about a value that is two
+    // edits old and has nothing left to say.
+    const conclude = (messages: readonly string[]) =>
+      token === generation ? finish(messages) : isValidNow();
+
+    return outcome.then(
+      (resolved) => conclude(toMessages(resolved)),
+      // A validator that threw has not said the value is good, and treating
+      // silence as approval is how bad values get through.
+      () => conclude([options.labels?.validationFailed ?? DEFAULT_VALIDATION_FAILED]),
+    );
+  };
+
   const report = (): boolean => {
-    // A sync validator settles before this returns, because nothing above the
-    // first `await` in `validate` is deferred; an async one leaves the field
-    // pending, which is not valid.
+    // A sync validator has settled by the time this returns; an async one
+    // leaves the field pending, which is not valid.
     void validate();
-    return untrack(() => validity.get()).state === 'valid';
+    return isValidNow();
   };
 
   const onTrigger = (trigger: ValidationTrigger): void => {
@@ -730,13 +740,16 @@ interface CheckableElement extends Element {
 /** A checkbox or radio: the thing that changes is its checkedness, not its value. */
 function isCheckable(el: Element): el is CheckableElement {
   if (el.tagName !== 'INPUT') return false;
-  const type = String((el as { type?: unknown }).type ?? '').toLowerCase();
-  return type === 'checkbox' || type === 'radio';
+  const type = (el as { type?: string }).type ?? '';
+  return type.toLowerCase() === 'checkbox' || type.toLowerCase() === 'radio';
 }
 
 function readValue(el: Element): string | null {
   if (isCheckable(el)) return String(el.checked);
-  if ('value' in el) return String((el as { value: unknown }).value);
+  // `value` is a string on every form control, and a number on the handful of
+  // elements that are not one — `<progress>`, `<li>` — which are not controls
+  // but cost nothing to allow for.
+  if ('value' in el) return String((el as { value: string | number }).value);
   // A custom widget with no value of its own. Dirty is then whatever
   // `markEdited` is told, which is the most the field can honestly know.
   return null;
@@ -751,7 +764,7 @@ function readValue(el: Element): string | null {
  */
 function readPristine(el: Element): string | null {
   if (isCheckable(el)) return String(el.defaultChecked);
-  if ('defaultValue' in el) return String((el as { defaultValue: unknown }).defaultValue);
+  if ('defaultValue' in el) return (el as { defaultValue: string }).defaultValue;
   return readValue(el);
 }
 

@@ -1469,9 +1469,12 @@ export function createResizable(options: ResizableOptions): Resizable {
           resizeTo(index, limit?.max ?? 100);
           break;
         case 'Enter': {
-          if (!limit?.collapsible) return false;
-          if (isCollapsed(index)) expand(index);
-          else collapse(index);
+          // The same panel a double-click would collapse, so the two ways of
+          // asking for the same thing cannot disagree.
+          const target = collapsibleAt(index);
+          if (target === -1) return false;
+          if (isCollapsed(target)) expand(target);
+          else collapse(target);
           break;
         }
         default:
@@ -1699,8 +1702,8 @@ function withPanelSize(
   limits: readonly Bound[],
 ): number[] {
   const next = [...sizes];
-  const difference = size - (next[index] ?? 0);
-  next[index] = size;
+  const wanted = size - (next[index] ?? 0);
+  if (Math.abs(wanted) <= SIZE_EPSILON) return next;
 
   const order: number[] = [];
   for (let distance = 1; distance < next.length; distance++) {
@@ -1708,12 +1711,13 @@ function withPanelSize(
     if (index - distance >= 0) order.push(index - distance);
   }
 
-  // Panel `index` is excluded from the redistribution, or it would take back
-  // what it just gave away.
-  const others = limits.map((limit, i) =>
-    i === index ? { floor: size, ceiling: size } : limit,
-  );
-  spread(next, order, Math.abs(difference), others, difference > 0 ? 'shrink' : 'grow');
+  const direction = wanted > 0 ? 'shrink' : 'grow';
+  // Only as much as the others can actually take or give, so the sizes still
+  // sum to 100 afterwards. A panel that cannot be fully expanded is expanded
+  // as far as there is room for.
+  const change = Math.min(Math.abs(wanted), capacity(next, order, limits, direction));
+  next[index] = (next[index] ?? 0) + (wanted > 0 ? change : -change);
+  distribute(next, order, change, limits, direction);
   return next;
 }
 
@@ -1723,7 +1727,9 @@ function distributeDefaults(
   limits: readonly PanelLimits[],
 ): number[] {
   const declared = panels.map((panel) =>
-    Number.isFinite(panel.defaultSize) ? (panel.defaultSize as number) : null,
+    typeof panel.defaultSize === 'number' && Number.isFinite(panel.defaultSize)
+      ? panel.defaultSize
+      : null,
   );
   const claimed = declared.reduce<number>((total, size) => total + (size ?? 0), 0);
   const unset = declared.filter((size) => size === null).length;
@@ -1765,7 +1771,7 @@ function normalise(sizes: number[], limits: readonly PanelLimits[]): number[] {
   if (Math.abs(difference) <= SIZE_EPSILON) return next;
 
   const order = next.map((_, index) => index);
-  spread(next, order, Math.abs(difference), bound, difference > 0 ? 'grow' : 'shrink');
+  distribute(next, order, Math.abs(difference), bound, difference > 0 ? 'grow' : 'shrink');
   return next;
 }
 

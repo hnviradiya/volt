@@ -172,19 +172,18 @@ describe('alert: the region exists before the words', () => {
   });
 
   it('hides a message the consumer rendered unconditionally', () => {
-    const { message } = setupAlert();
     // Nobody reads `isMessageVisible()` in this template, so the props have to
-    // carry the same rule — from the accessibility tree as well as the screen.
-    const handle = track(mount(EagerMessage, host));
-    void handle;
-
+    // carry the same rule — out of the accessibility tree as well as off the
+    // screen, since a message read early is a message read into silence.
+    alertOptions = {};
+    track(mount(EagerMessage, host));
     flushSync();
-    const eager = host.querySelector('.message') as HTMLElement;
-    expect(eager.hasAttribute('hidden')).toBe(true);
+
+    const message = () => host.querySelector('.message') as HTMLElement;
+    expect(message().hasAttribute('hidden')).toBe(true);
 
     advance(50);
-    expect(eager.hasAttribute('hidden')).toBe(false);
-    expect(message()).toBeNull();
+    expect(message().hasAttribute('hidden')).toBe(false);
   });
 
   it('re-arms the wait each time a removed region comes back', () => {

@@ -343,7 +343,7 @@ describe('writing direction', () => {
     expect(directionWatcherCount()).toBe(0);
   });
 
-  it('shares one watcher per anchor and releases it on unmount', () => {
+  it('gives back its watch on unmount', () => {
     expect(directionWatcherCount()).toBe(0);
 
     const first = mountAnchor();
@@ -354,8 +354,9 @@ describe('writing direction', () => {
     dispose(first.handle);
     expect(directionWatcherCount()).toBe(1);
     dispose(second.handle);
-    // A page that opens and closes a thousand tooltips must not accumulate a
-    // thousand observers of the same attribute.
+    // The document observer behind these is shared and is disconnected with
+    // the last of them. A page that opens and closes a thousand tooltips would
+    // otherwise be left observing on behalf of every one of them.
     expect(directionWatcherCount()).toBe(0);
   });
 
