@@ -59,6 +59,14 @@
  * Disabled options are skipped by every one of those, and stay in the
  * accessibility tree so they can be found and heard to be unavailable.
  *
+ * A listbox is entered on the option that is already selected rather than on
+ * the first one, which is what the APG asks for and what a Select showing
+ * "Cherry" has to do: the tab stop, the virtual cursor and the first arrow
+ * press all count from there. With nothing selected they fall back to the
+ * first option. Focus arriving from outside is heard, so the primitive's idea
+ * of the active option and the browser's idea of the focused element cannot
+ * drift apart.
+ *
  * **Virtual focus** keeps DOM focus where it is and moves an
  * `aria-activedescendant` instead. It is what a combobox needs — focus has to
  * stay in the text input or typing stops working — and it is what a listbox
@@ -410,7 +418,58 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
    */
   const rendered = new Map<number, T>();
 
+  /**
+   * The positions that have an element right now.
+   *
+   * Whether an option is rendered is the consumer's `:if` or `:for` to decide,
+   * and a `Select` whose popup is closed still knows its collection and its
+   * answer — so the count says six while the document holds none. Anything
+   * that must not name an option that is not there has to re-run when they
+   * change their mind, which is why presence is a signal and not a query.
+   *
+   * `optionProps` runs inside the effect that renders its option, so recording
+   * on the way in and releasing on that effect's cleanup follows mount and
+   * unmount exactly, with no observer. That effect also re-runs whenever the
+   * active option moves, which releases and re-records without the set
+   * actually changing; the extra invalidation costs one recompute of
+   * `listboxProps`, and every binding it feeds compares before it writes.
+   */
+  const present = new Set<number>();
+  const presence = new Signal.State(0);
+  const bumpPresence = (): void => presence.set(untrack(() => presence.get()) + 1);
+
+  const markPresent = (index: number): void => {
+    if (!present.has(index)) {
+      present.add(index);
+      bumpPresence();
+    }
+    onCleanup(() => {
+      if (present.delete(index)) bumpPresence();
+    });
+  };
+
+  /** Whether the option at a position currently has an element. */
+  const isPresent = (index: number): boolean => {
+    presence.get();
+    return present.has(index);
+  };
+
   const isListboxDisabled = (): boolean => options.disabled?.() ?? false;
+
+  /**
+   * Move the active option, and say so.
+   *
+   * Every path that changes it goes through here — keys, the pointer, DOM
+   * focus arriving from outside, and the clamp below — because a consumer
+   * mirroring `onActiveChange` into their own state is otherwise left holding
+   * a position that no longer exists. The alternative, reporting only from
+   * `focusIndex`, is what let the clamp move the highlight in silence.
+   */
+  const setActive = (index: number): void => {
+    if (untrack(() => active.get()) === index) return;
+    active.set(index);
+    options.onActiveChange?.(index);
+  };
 
   // --- The collection, as positions ----------------------------------------
 
@@ -492,16 +551,83 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
    */
   let pendingFocus: number | null = null;
 
+  /**
+   * Whether DOM focus is somewhere inside the listbox.
+   *
+   * Tracked rather than read off `document.activeElement` because the case
+   * that matters is the one where focus has already been lost: an option
+   * removed under the reader takes focus to `<body>`, and by then the document
+   * can no longer say where it came from.
+   */
+  let focusWithin = false;
+
+  /** The rendered window, or null when there is no virtualizer or no window. */
+  const windowRange = (): { first: number; last: number } | null => {
+    if (!virtualizer) return null;
+    const range = virtualizer.range();
+    if (range.startIndex < 0) return null;
+    return { first: range.startIndex, last: range.endIndex };
+  };
+
+  /** Whether the virtualizer is currently rendering this position. */
+  const isWindowed = (index: number): boolean => {
+    if (!virtualizer) return true;
+    const range = windowRange();
+    return range !== null && index >= range.first && index <= range.last;
+  };
+
+  /**
+   * The nearest position that is actually rendered.
+   *
+   * A tab stop on an option outside the window is a tab stop on nothing: the
+   * element carrying `tabindex="0"` does not exist, so Tab skips the listbox
+   * entirely and a keyboard user has no way back into it. The alternative —
+   * pinning the active option into the window so it always renders — was
+   * rejected because it puts an option the reader has scrolled away from back
+   * under their cursor, and lies to the virtualizer about its own geometry.
+   */
+  const withinWindow = (index: number): number => {
+    const range = windowRange();
+    if (!range || index < 0 || (index >= range.first && index <= range.last)) return index;
+    const near = index < range.first ? range.first : range.last;
+    const direction = index < range.first ? 1 : -1;
+    // A disabled option must not be the one holding the tab stop.
+    for (let i = near; i >= range.first && i <= range.last; i += direction) {
+      if (!disabledAt(i)) return i;
+    }
+    return near;
+  };
+
   if (virtualizer && !virtualFocus) {
     effect(() => {
       // Re-runs as the window changes, which is the event being waited for.
       virtualizer.items();
       const index = pendingFocus;
-      if (index === null) return;
-      const el = elementAt(index);
-      if (!el) return;
-      pendingFocus = null;
-      el.focus();
+      if (index !== null) {
+        const el = elementAt(index);
+        if (!el) return;
+        pendingFocus = null;
+        el.focus();
+        return;
+      }
+
+      // Scrolling the focused option out of the window unmounts the element
+      // holding focus, and the platform drops focus to `<body>` rather than
+      // finding a neighbour. Nothing else puts it back: no rendered option is
+      // the active one, and under roving focus the listbox root is not a tab
+      // stop either, so the reader is left at the top of the document.
+      if (!focusWithin) return;
+      const root = options.listbox();
+      if (!root) return;
+      const here = root.ownerDocument.activeElement;
+      // Focus that went somewhere real is focus the user moved; only focus
+      // that went nowhere is focus that was dropped.
+      if (here !== null && here !== root.ownerDocument.body) return;
+      const current = untrack(() => active.get());
+      if (current < 0 || elementAt(current) !== null) return;
+      // `preventScroll`, because the reader is mid-wheel: scrolling back to
+      // wherever focus landed would undo the scroll they just asked for.
+      elementAt(withinWindow(current))?.focus({ preventScroll: true });
     });
   }
 
@@ -517,7 +643,7 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
     const n = count();
     const index = untrack(() => active.get());
     if (index < n) return;
-    active.set(n === 0 ? -1 : n - 1);
+    setActive(n === 0 ? -1 : n - 1);
   });
 
   // --- Selection -----------------------------------------------------------
@@ -634,6 +760,25 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
   const clear = (): void => commit([]);
 
   /**
+   * The first selected option's position, or -1.
+   *
+   * The APG enters a listbox on the selected option rather than on the first
+   * one: a Select showing Cherry whose tab stop is Apple makes the reader walk
+   * back to where they already were, and tells a screen reader nothing about
+   * what is currently chosen. Scanning is only done while something is
+   * selected, so the common empty case costs one set lookup.
+   */
+  const selectedIndex = (): number => {
+    if (selectedKeys.get().size === 0) return -1;
+    const n = count();
+    for (let index = 0; index < n; index++) {
+      const value = valueAt(index);
+      if (value !== undefined && isSelected(value)) return index;
+    }
+    return -1;
+  };
+
+  /**
    * Ctrl+A toggles rather than only selecting, because the same press has to
    * undo itself — there is no other key for "none of them", and pressing it
    * twice is what everyone tries.
@@ -652,7 +797,7 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
     () => elementAt(untrack(() => active.get())),
     (el) => {
       const index = indexOf(el);
-      if (index >= 0) active.set(index);
+      if (index >= 0) setActive(index);
     },
     {
       orientation: horizontal ? 'horizontal' : 'vertical',
@@ -664,6 +809,16 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
   );
 
   const rtl = (): boolean => resolveDirection(options.listbox()) === 'rtl';
+
+  /**
+   * Where a move counts from: the active option, or — before anything has been
+   * moved to — the option the listbox was entered on. A listbox opened on
+   * Cherry arrows to Elderberry, not back to Apple.
+   */
+  const startIndex = (): number => {
+    const current = untrack(() => active.get());
+    return current >= 0 ? current : selectedIndex();
+  };
 
   /** The nearest option at or after `from` that can be moved to, or -1. */
   const scanEnabled = (from: number, direction: number): number => {
@@ -691,7 +846,7 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
     const n = count();
     if (n === 0) return -1;
 
-    const from = untrack(() => active.get());
+    const from = startIndex();
     // With nothing active, forward starts before the first option and backward
     // after the last, so one press lands on an end rather than two.
     const start = from < 0 ? (delta > 0 ? -1 : n) : from;
@@ -742,10 +897,7 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
 
   const focusIndex = (index: number): void => {
     if (index < 0 || index >= count()) return;
-    if (untrack(() => active.get()) !== index) {
-      active.set(index);
-      options.onActiveChange?.(index);
-    }
+    setActive(index);
     reveal(index);
 
     if (virtualFocus) return;
@@ -805,7 +957,7 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
     const query =
       search.length > 1 && [...search].every((char) => char === search[0]) ? search[0]! : search;
 
-    const from = untrack(() => active.get());
+    const from = startIndex();
     // A repeated character must move on from the current option; a growing
     // search must be allowed to match it, or typing the second letter of the
     // option you are already on jumps away from it. With nothing active both
@@ -816,11 +968,18 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
   /**
    * Apply a move, and whatever it does to the selection.
    *
+   * `extend` is passed rather than read back off the event, because Shift is
+   * only a range gesture on the keys that are moves. A capital F is a shifted
+   * keypress that means "jump to Fig", and reading `shiftKey` there swept the
+   * whole selection from the anchor to the match. Synthesising an unshifted
+   * event for the typeahead path was the alternative, and it loses the real
+   * modifier state for anything that later wants it.
+   *
    * Returns true whether or not anything moved: an arrow key inside a listbox
    * is consumed either way, or the page scrolls underneath a list that has
    * simply reached its end.
    */
-  const applyMove = (target: number, event: KeyboardEvent, modified: boolean): boolean => {
+  const applyMove = (target: number, extend: boolean, modified: boolean): boolean => {
     if (target < 0) return true;
 
     const previous = untrack(() => active.get());
@@ -835,7 +994,7 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
     // building a selection as you go. In an extended-selection listbox it
     // extends a contiguous range from the anchor instead, which is the
     // convention every desktop file list uses.
-    if (event.shiftKey && multiselect) {
+    if (extend && multiselect) {
       if (mode === 'multiple') {
         toggleAt(target);
         // The anchor follows the last option actually selected, because that
@@ -877,19 +1036,21 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
     const forward = horizontal ? (rtl() ? 'ArrowLeft' : 'ArrowRight') : 'ArrowDown';
     const back = horizontal ? (rtl() ? 'ArrowRight' : 'ArrowLeft') : 'ArrowUp';
 
+    const extend = event.shiftKey;
+
     switch (event.key) {
       case forward:
-        return applyMove(step(1, false), event, modified);
+        return applyMove(step(1, false), extend, modified);
       case back:
-        return applyMove(step(-1, false), event, modified);
+        return applyMove(step(-1, false), extend, modified);
       case 'PageDown':
-        return applyMove(step(pageStep(), true), event, modified);
+        return applyMove(step(pageStep(), true), extend, modified);
       case 'PageUp':
-        return applyMove(step(-pageStep(), true), event, modified);
+        return applyMove(step(-pageStep(), true), extend, modified);
       case 'Home':
-        return applyMove(scanEnabled(0, 1), event, modified);
+        return applyMove(scanEnabled(0, 1), extend, modified);
       case 'End':
-        return applyMove(scanEnabled(count() - 1, -1), event, modified);
+        return applyMove(scanEnabled(count() - 1, -1), extend, modified);
 
       case 'Enter':
       case ' ': {
@@ -922,7 +1083,9 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
 
     const match = typeahead(event.key);
     if (match < 0) return false;
-    return applyMove(match, event, false);
+    // Never extending: a capital letter is how a listbox of proper nouns is
+    // searched, not a request for a range.
+    return applyMove(match, false, false);
   };
 
   // --- Pointer -------------------------------------------------------------
@@ -971,6 +1134,62 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
     focusIndex(index);
   };
 
+  // --- Focus entering ------------------------------------------------------
+
+  /**
+   * Keep this primitive's idea of the active option and the browser's idea of
+   * the focused element in agreement when focus arrives from outside.
+   *
+   * Tab puts DOM focus on whichever option holds the tab stop and says nothing
+   * about it. Without hearing that, `active` is still -1 while the user is
+   * plainly standing on an option, and the first ArrowDown "moves" to the
+   * option they are already on. Listening here rather than asking the consumer
+   * to bind a `:focusin`: an invariant that the widget breaks on its own is
+   * not something a consumer should have to remember to repair.
+   *
+   * Only under roving focus. Virtual focus deliberately leaves DOM focus
+   * wherever it is, so focus landing inside the listbox means nothing there.
+   */
+  if (!virtualFocus) {
+    effect(() => {
+      const root = options.listbox();
+      if (!root) return;
+
+      const onFocusIn = (event: Event): void => {
+        // A disabled listbox has no active option to have, whichever way focus
+        // arrived, so there is nothing here to hear.
+        if (isListboxDisabled()) return;
+        focusWithin = true;
+        const index = indexOf(optionFrom(event.target));
+        // A browser focuses a `tabindex="-1"` element on mousedown, so a
+        // disabled option can hold DOM focus even though navigation refuses it
+        // everywhere else. Making it active would move the listbox's only tab
+        // stop onto an `aria-disabled` element, stranding Tab there.
+        if (index >= 0 && !disabledAt(index)) setActive(index);
+      };
+
+      const onFocusOut = (event: Event): void => {
+        // An option unmounted under the reader blurs with nowhere to go. That
+        // is focus being dropped, not focus leaving, and the virtualized
+        // recovery above needs to tell the two apart. Engines differ on
+        // whether they announce it at all, so both are handled.
+        const target = event.target;
+        if (target instanceof Element && !target.isConnected) return;
+        // `Element` has no typed map entry for focusout, so the event arrives
+        // as a bare `Event` and `relatedTarget` has to be asked for.
+        const next = 'relatedTarget' in event ? event.relatedTarget : null;
+        focusWithin = next instanceof Node && root.contains(next);
+      };
+
+      root.addEventListener('focusin', onFocusIn);
+      root.addEventListener('focusout', onFocusOut);
+      onCleanup(() => {
+        root.removeEventListener('focusin', onFocusIn);
+        root.removeEventListener('focusout', onFocusOut);
+      });
+    });
+  }
+
   // --- Naming --------------------------------------------------------------
 
   const groupIds = new Map<string | number, string>();
@@ -983,19 +1202,60 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
     return id;
   };
 
+  /**
+   * Whether a heading was actually rendered for a group.
+   *
+   * `groupLabelProps` being called is the only honest evidence there is one. A
+   * group named by its own `aria-label`, or whose heading sits behind an
+   * `:if`, would otherwise carry an `aria-labelledby` pointing at nothing —
+   * and a dangling reference hides a missing name rather than reporting it,
+   * which is the rule dialog.ts states for the same attribute. Probing the DOM
+   * the way dialog.ts does cannot work here: a group's props are computed
+   * before its own children exist, so the probe would always say no.
+   *
+   * It has to come back down as well as go up. A heading behind an `:if` that
+   * turns false is exactly the case above, arriving late: the answer was true
+   * once and the reference would outlive it. So the flag is released on the
+   * cleanup of the effect that rendered the heading, the same way an option
+   * releases its position.
+   */
+  const groupLabelled = new Map<string | number, Signal.State<boolean>>();
+  const hasGroupLabel = (key: string | number): Signal.State<boolean> => {
+    let state = groupLabelled.get(key);
+    if (state === undefined) {
+      state = new Signal.State(false);
+      groupLabelled.set(key, state);
+    }
+    return state;
+  };
+
   const selectedLabel =
     options.labels?.selected ?? ((n: number) => locale.t('selected', { n }));
 
   // --- Props ---------------------------------------------------------------
 
-  /** The option the tab stop sits on while nothing has been chosen yet. */
+  /** The option the tab stop sits on. */
   const tabStopIndex = (): number => {
     const current = active.get();
-    if (current >= 0) return current;
-    // Reading the DOM here is not reactive, so this settles on the first option
-    // and stays there until something is made active — which is the only thing
-    // that should move a tab stop nobody has used yet.
-    return scanEnabled(0, 1);
+    // Before anything has been moved to, the selected option holds it — and
+    // only then the first option, which is where a listbox with no answer yet
+    // should be entered.
+    const entry = current >= 0 ? current : selectedIndex();
+    return withinWindow(entry >= 0 ? entry : scanEnabled(0, 1));
+  };
+
+  /**
+   * The option `aria-activedescendant` may name, or undefined.
+   *
+   * Never an option that is not rendered: an id that left with a virtualized
+   * window leaves the reader with no virtual cursor at all, and no way to tell
+   * that is what happened. Reporting nothing at least reports honestly.
+   */
+  const cursorId = (): string | undefined => {
+    const current = active.get();
+    const index = current >= 0 ? current : selectedIndex();
+    if (index < 0 || !isWindowed(index) || !isPresent(index)) return undefined;
+    return optionId(index);
   };
 
   return {
@@ -1033,14 +1293,14 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
       'aria-labelledby': options.labelledBy,
       'aria-label': options.labelledBy ? undefined : options.label,
       'aria-disabled': isListboxDisabled() ? 'true' : undefined,
-      'aria-activedescendant':
-        virtualFocus && focusable && active.get() >= 0 ? optionId(active.get()) : undefined,
+      'aria-activedescendant': virtualFocus && focusable ? cursorId() : undefined,
       tabindex: focusable ? '0' : undefined,
       'data-orientation': horizontal ? 'horizontal' : 'vertical',
     }),
 
     optionProps: (option) => {
       const { index } = option;
+      markPresent(index);
       const value = option.value ?? valueAt(index);
       if (value !== undefined) rendered.set(index, value);
 
@@ -1078,20 +1338,25 @@ export function createListbox<T>(options: ListboxOptions<T>): Listbox<T> {
 
     groupProps: (key) => ({
       role: 'group',
-      'aria-labelledby': groupId(key),
+      'aria-labelledby': hasGroupLabel(key).get() ? groupId(key) : undefined,
     }),
 
-    groupLabelProps: (key) => ({
-      id: groupId(key),
-      // A heading between a listbox and its options would be an extra child in
-      // the accessibility tree that the role does not allow, and would be read
-      // twice — once as itself and once as the group's name.
-      role: 'presentation',
-    }),
+    groupLabelProps: (key) => {
+      // Rendering the heading is what makes the reference above true, and
+      // un-rendering it is what makes it false again.
+      const labelled = hasGroupLabel(key);
+      labelled.set(true);
+      onCleanup(() => labelled.set(false));
+      return {
+        id: groupId(key),
+        // A heading between a listbox and its options would be an extra child
+        // in the accessibility tree that the role does not allow, and would be
+        // read twice — once as itself and once as the group's name.
+        role: 'presentation',
+      };
+    },
 
-    activeDescendantProps: () => ({
-      'aria-activedescendant': active.get() >= 0 ? optionId(active.get()) : undefined,
-    }),
+    activeDescendantProps: () => ({ 'aria-activedescendant': cursorId() }),
 
     virtualItems: () => virtualizer?.items() ?? [],
 

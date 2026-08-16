@@ -55,8 +55,16 @@
  *   Space                    select, or toggle the checkbox
  *   printable characters     typeahead, accumulating for 500ms
  *   Shift + Down / Up        move and toggle selection (multi-select)
- *   Shift + Home / End       extend the selection to the first / last node
+ *   Shift + Space            select from the last chosen node to this one
+ *   Ctrl + Shift + Home/End  extend the selection to the first / last node
+ *   Shift + Home / End       the same, without the Ctrl the practice asks for
  *   Ctrl + A                 select everything (multi-select)
+ *
+ * The tree pattern spells the range chords `Ctrl + Shift + Home / End`, where
+ * the multi-select listbox spells them without the Ctrl. Both are accepted:
+ * the practice's own chord has to work, and a reader arriving from a list with
+ * the shorter one in their fingers finds it does what they meant rather than
+ * nothing at all.
  *
  * Left and Right are resolved against writing direction, so they swap under
  * `dir="rtl"`; Up and Down never swap, because vertical order is not mirrored.
@@ -732,30 +740,52 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
   // ---------------------------------------------------------------------------
 
   /**
-   * The next node waiting for its children, in model order.
+   * The nodes waiting for their children, oldest request first.
    *
-   * A queue of one: the head stays the head until its children land, it fails,
-   * or it is collapsed — and only then does the source change, which is what
-   * makes the requests sequential rather than simultaneous.
+   * A queue of one at a time: the head stays the head until its children land,
+   * it fails, or it is collapsed — and only then does the source change, which
+   * is what makes the requests sequential rather than simultaneous.
+   *
+   * Held as history in a signal rather than derived from the model, because
+   * model order is not the order the nodes were opened. Deriving it meant that
+   * opening a second folder which happened to sit *above* one already on the
+   * wire took the head out from under it: the source changed, the resource
+   * aborted a request that was nearly answered, and the folder the user opened
+   * first was the last one to fill in.
    */
-  const pendingHead = new Signal.Computed<string | null>(() => {
-    if (!options.loadChildren) return null;
-    const loaded = loadedState.get();
-    const failed = failedState.get();
+  const queueState = new Signal.State<readonly string[]>([]);
 
-    for (const row of rows()) {
-      const node = row.node;
-      if (!row.expanded || node.hasChildren !== true) continue;
-      if (node.children !== undefined) continue;
-      if (loaded.has(node.id) || failed.has(node.id)) continue;
-      return node.id;
-    }
-    return null;
-  });
+  if (options.loadChildren) {
+    effect(() => {
+      const loaded = loadedState.get();
+      const failed = failedState.get();
 
-  // Cached, because `itemProps` asks whether each rendered row is loading and
-  // walking the whole model once per row is the one O(n²) this must not have.
-  const pendingId = (): string | null => pendingHead.get();
+      const waiting = new Set<string>();
+      for (const row of rows()) {
+        const node = row.node;
+        if (!row.expanded || node.hasChildren !== true) continue;
+        if (node.children !== undefined) continue;
+        if (loaded.has(node.id) || failed.has(node.id)) continue;
+        waiting.add(node.id);
+      }
+
+      untrack(() => {
+        const current = queueState.get();
+        // Answered, failed and collapsed nodes leave; newly opened ones join
+        // the back. Nothing ever moves forward. Several opened in one flush
+        // have no order between them, so they take the model's.
+        const next = current.filter((id) => waiting.has(id));
+        for (const id of waiting) if (!next.includes(id)) next.push(id);
+        if (next.length === current.length && next.every((id, i) => id === current[i])) return;
+        queueState.set(next);
+      });
+    });
+  }
+
+  // A signal read rather than a walk of the model, because `itemProps` asks
+  // whether each rendered row is loading, and walking once per row is the one
+  // O(n²) this must not have.
+  const pendingId = (): string | null => queueState.get()[0] ?? null;
 
   const load = options.loadChildren;
 
@@ -881,31 +911,69 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
     return checkedStates.get().get(id) ?? false;
   };
 
+  /**
+   * Write a checked state onto a node and everything under it.
+   *
+   * One recursion, shared by the immediate cascade and the one that finishes
+   * when lazy children arrive. Two of them is how the deferred half came to
+   * disagree with this one: it added descendants without noticing that some of
+   * them were themselves unloaded, so a check on a folder two lazy levels deep
+   * silently evaporated as the second level landed.
+   */
+  const cascadeInto = (target: TreeNode<T>, checked: boolean, next: Set<string>): void => {
+    // A disabled node's state is not the user's to change, in either
+    // direction — the refusal `select`, `toggleSelected` and `selectAll` all
+    // make. The cascade still passes through it, because a node is not
+    // disabled by having a disabled parent.
+    if (target.disabled !== true) {
+      if (checked) next.add(target.id);
+      else next.delete(target.id);
+    }
+    if (!cascade) return;
+
+    const list = untrack(() => childrenOf(target));
+    if (list) {
+      for (const child of list) cascadeInto(child, checked, next);
+      return;
+    }
+    // Children that have not arrived cannot be cascaded onto now, so the node
+    // is remembered until they do.
+    if (target.hasChildren === true && checked) pendingCascade.add(target.id);
+    else pendingCascade.delete(target.id);
+  };
+
   const setChecked = (id: string, checked: boolean): void => {
     const node = untrack(() => nodeById(id));
     if (!node) return;
 
     const next = new Set(untrack(() => selectedState.get()));
-
-    const apply = (target: TreeNode<T>): void => {
-      if (checked) next.add(target.id);
-      else next.delete(target.id);
-      if (!cascade) return;
-
-      const list = untrack(() => childrenOf(target));
-      if (list) {
-        for (const child of list) apply(child);
-        return;
-      }
-      // Children that have not arrived cannot be cascaded onto now, so the
-      // node is remembered until they do.
-      if (target.hasChildren === true && checked) pendingCascade.add(target.id);
-      else pendingCascade.delete(target.id);
-    };
-
-    apply(node);
+    cascadeInto(node, checked, next);
     setSelection(next);
   };
+
+  /**
+   * Which way a press on a node's checkbox goes.
+   *
+   * Not `checkedState(id) !== true`. A subtree holding a disabled node in the
+   * other state can never report anything but `indeterminate`, because the
+   * cascade will not touch that node — so that rule asks for the same check on
+   * every press, and the control never turns off. What a press really asks is
+   * whether there is anything here left for it to check.
+   */
+  const wouldCheck = (id: string): boolean =>
+    untrack(() => {
+      const node = nodeById(id);
+      if (!node) return false;
+      const set = selectedState.get();
+
+      const unchecked = (target: TreeNode<T>): boolean => {
+        if (target.disabled !== true && !set.has(target.id)) return true;
+        if (!cascade) return false;
+        return childrenOf(target)?.some(unchecked) ?? false;
+      };
+
+      return unchecked(node);
+    });
 
   if (mode === 'checkbox' && cascade) {
     effect(() => {
@@ -916,23 +984,22 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
 
       untrack(() => {
         const next = new Set(selectedState.get());
-        let changed = false;
+        const before = next.size;
 
+        // A copy, because cascading into a subtree whose own children are
+        // still unloaded puts those nodes straight back into the set.
         for (const id of [...pendingCascade]) {
           const node = nodes.get(id);
           const list = node ? childrenOf(node) : undefined;
           if (!node || !list) continue;
           pendingCascade.delete(id);
-
-          const add = (target: TreeNode<T>): void => {
-            next.add(target.id);
-            for (const child of childrenOf(target) ?? []) add(child);
-          };
-          for (const child of list) add(child);
-          changed = true;
+          for (const child of list) cascadeInto(child, true, next);
         }
 
-        if (changed) setSelection(next);
+        // The deferred cascade only ever checks, so a set that did not grow
+        // changed nothing — and publishing it would report a selection change
+        // that never happened.
+        if (next.size !== before) setSelection(next);
       });
     });
   }
@@ -962,7 +1029,7 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
     if (row?.disabled) return;
 
     if (mode === 'checkbox') {
-      setChecked(id, untrack(() => checkedState(id)) !== true);
+      setChecked(id, wouldCheck(id));
       anchorId = id;
       return;
     }
@@ -995,7 +1062,7 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
     if (row?.disabled) return;
 
     if (mode === 'checkbox') {
-      setChecked(id, untrack(() => checkedState(id)) !== true);
+      setChecked(id, wouldCheck(id));
       anchorId = id;
       return;
     }
@@ -1069,8 +1136,57 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
     },
   );
 
-  /** A row was asked for that is not in the DOM yet. */
-  let wantsFocus = false;
+  /** Whether DOM focus is inside the tree at this moment. */
+  const holdsFocus = (): boolean => {
+    const root = options.tree();
+    if (!root) return false;
+    const active = root.ownerDocument.activeElement;
+    return active !== null && root.contains(active);
+  };
+
+  /** Whether something outside the tree holds focus, as opposed to nobody. */
+  const focusTakenElsewhere = (): boolean => {
+    const root = options.tree();
+    if (!root) return false;
+    const doc = root.ownerDocument;
+    const active = doc.activeElement;
+    // `<body>` is where a browser leaves focus when the focused element is
+    // removed: nobody holding it rather than somebody else holding it.
+    if (active === null || active === doc.body) return false;
+    return !root.contains(active);
+  };
+
+  /**
+   * The row element focus was last put on, kept once it has left the document.
+   *
+   * After the fact `document.activeElement` cannot tell a row that was removed
+   * from under the reader from focus that was never in the tree at all: the
+   * browser answers `<body>` to both. This element can — it is disconnected in
+   * the first case and connected in the second — and it is the only evidence
+   * of the removal that survives it.
+   */
+  let focusedEl: HTMLElement | null = null;
+
+  const takeFocus = (el: HTMLElement): void => {
+    focusedEl = el;
+    roving.focus(el);
+  };
+
+  /** Whether focus went to `<body>` because the row holding it was removed. */
+  const lostFocusWithRow = (): boolean =>
+    focusedEl !== null && !focusedEl.isConnected && !focusTakenElsewhere();
+
+  /**
+   * A row that was asked for before it was rendered, and is still wanted.
+   *
+   * The id rather than a flag, so the request expires: it is honoured only
+   * while it is still the active row and nothing outside the tree has taken
+   * focus in the meantime. A bare flag survived until the next render of any
+   * kind, whenever that happened, and pulled focus out of whatever the reader
+   * had moved on to. Expiring it after one flush instead would be simpler and
+   * wrong — a scroll that has not landed yet is precisely what this is for.
+   */
+  let pendingFocusId: string | null = null;
 
   const activeIndex = (): number => {
     const id = activeState.get();
@@ -1087,11 +1203,11 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
 
     const el = elementOf(row.id);
     if (el) {
-      wantsFocus = false;
-      roving.focus(el);
+      pendingFocusId = null;
+      takeFocus(el);
       return;
     }
-    wantsFocus = true;
+    pendingFocusId = row.id;
   };
 
   const focusIndex = (index: number): void => {
@@ -1106,19 +1222,79 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
   };
 
   /**
-   * The one node in the tab order.
+   * The one node in the tab order, or null when no node can hold it.
    *
-   * Taken from the model rather than from `createRovingFocus`, which resolves
-   * it against the DOM: on the first render no element exists yet, and in a
-   * windowed tree the active row may have been scrolled out of it — and in both
-   * cases the group would be left with no tab stop at all.
+   * Taken from the rows that are actually rendered rather than from the whole
+   * model: the active row of a windowed tree may have been scrolled out of the
+   * DOM, and naming it leaves the tab order pointing at an element that does
+   * not exist — a tree a keyboard user tabs straight past with no way back
+   * into. The first row on screen takes the stop instead, which is where a
+   * reader tabbing in expects to land anyway.
+   *
+   * Not resolved through `createRovingFocus`, which reads the DOM: on the
+   * first render no element exists yet, and the group would have no tab stop.
    */
-  const tabStopId = (): string | null => {
-    const { rows: list, byId } = model.get();
+  const tabStop = new Signal.Computed<string | null>(() => {
+    const list = rendered();
+    if (list.length === 0) return null;
     const active = activeState.get();
-    if (active !== null && byId.has(active)) return active;
+    if (active !== null && list.some((row) => row.id === active)) return active;
     return list[0]?.id ?? null;
+  });
+
+  const tabStopId = (): string | null => tabStop.get();
+
+  /**
+   * Keep the active node in the model when the tree closes underneath it.
+   *
+   * `activeId()` naming a node the model no longer holds leaves the tab stop
+   * on a row that is not there, and the browser has meanwhile dropped focus on
+   * `<body>` — the reader returned to the top of the page with no way back to
+   * where they were.
+   *
+   * The nearest ancestor still in the model is where the branch went, so that
+   * is where the tab stop and, when the tree had focus, focus follow it to. A
+   * filter takes the ancestors as well, and then the first surviving row is
+   * where a reader tabbing in would land anyway.
+   */
+  const keepActiveInModel = (): void => {
+    const id = activeState.get();
+    if (id === null) return;
+    const { rows: list, byId } = model.get();
+    if (byId.has(id)) return;
+
+    const { parents } = structure.get();
+    let ancestorId = parents.get(id) ?? null;
+    while (ancestorId !== null && !byId.has(ancestorId)) {
+      ancestorId = parents.get(ancestorId) ?? null;
+    }
+
+    const row = (ancestorId === null ? undefined : byId.get(ancestorId)) ?? list[0];
+    if (!row) {
+      // Nothing survived at all — the search box's "no results". Naming no
+      // node is the honest answer; naming a gone one is what this is here for.
+      activeState.set(null);
+      return;
+    }
+
+    // A router closing a branch while the reader is typing in a search box
+    // must move the tab stop and nothing else. Taking focus off what they are
+    // using would be a worse bug than the one this fixes.
+    if (!holdsFocus() && !lostFocusWithRow()) {
+      activeState.set(row.id);
+      return;
+    }
+    focusRow(row);
   };
+
+  // The model is the dependency, rather than the calls that happen to close a
+  // branch: the active row leaves by every route the model has — the signal a
+  // router owns, a filter, the consumer's own nodes changing — and those are
+  // exactly the routes no call site could cover.
+  effect(() => {
+    model.get();
+    untrack(keepActiveInModel);
+  });
 
   // ---------------------------------------------------------------------------
   // Typeahead
@@ -1193,11 +1369,20 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
   // has actually been rendered, which is a frame later than it was asked for.
   effect(() => {
     rendered();
-    if (!wantsFocus) return;
-    const el = elementOf(untrack(() => activeState.get()));
+    const id = pendingFocusId;
+    if (id === null) return;
+
+    // The reader moved on while the row was on its way. Taking focus back now
+    // would be a steal, not a delivery.
+    if (focusTakenElsewhere() || untrack(() => activeState.get()) !== id) {
+      pendingFocusId = null;
+      return;
+    }
+
+    const el = elementOf(id);
     if (!el) return;
-    wantsFocus = false;
-    roving.focus(el);
+    pendingFocusId = null;
+    takeFocus(el);
   });
 
   // ---------------------------------------------------------------------------
@@ -1308,9 +1493,11 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
   // Events
   // ---------------------------------------------------------------------------
 
+  const itemFrom = (target: EventTarget | null): HTMLElement | null =>
+    target instanceof Element ? target.closest<HTMLElement>(`[${TREE_ITEM_ATTRIBUTE}]`) : null;
+
   const rowFrom = (target: EventTarget | null): TreeRow<T> | null => {
-    if (!(target instanceof Element)) return null;
-    const el = target.closest<HTMLElement>(`[${TREE_ITEM_ATTRIBUTE}]`);
+    const el = itemFrom(target);
     const id = el ? idOf(el) : null;
     return id === null ? null : rowOf(id);
   };
@@ -1349,9 +1536,14 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
       expand(row.id);
       return;
     }
+    if (!row.expanded) return;
+
     // Already open: the first child is the row straight after it, by
-    // construction of the flat model.
-    if (row.expanded) focusIndex(row.index + 1);
+    // construction of the flat model — but only once there is one. A node
+    // whose children are still being fetched is followed by its next sibling,
+    // and moving there throws the reader out of the branch they just opened.
+    const next = untrack(rows)[row.index + 1];
+    if (next?.parentId === row.id) focusRow(next);
   };
 
   const onCollapseKey = (row: TreeRow<T>): void => {
@@ -1436,6 +1628,22 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
         return;
       }
 
+      // The practice's own range chords. They have to be taken before the
+      // guard below, which would otherwise throw away every combination that
+      // is not Ctrl+A — and did, leaving the pattern's two documented chords
+      // doing nothing at all.
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        event.shiftKey &&
+        !event.altKey &&
+        (event.key === 'Home' || event.key === 'End')
+      ) {
+        if (!isMulti) return;
+        moveToEdge(event.key === 'End', true);
+        event.preventDefault();
+        return;
+      }
+
       // Anything else with a modifier is a shortcut, not navigation. Shift is
       // not one of them: it is how the selection is extended, and how `*` is
       // typed on most keyboards.
@@ -1480,7 +1688,13 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
             if (drag?.onKeyDown(event)) return;
             break;
           }
-          toggleSelected(current.id);
+          // Shift+Space selects from the most recently chosen node to this
+          // one: the keyboard's only door to the range the pointer reaches
+          // with a shift-click. A checkbox tree has no range to draw — every
+          // node's state is a fact about its own subtree — so there it stays a
+          // toggle.
+          if (event.shiftKey && mode === 'multiple') select(current.id, { range: true });
+          else toggleSelected(current.id);
           break;
         default: {
           if (options.typeahead === false) return;
@@ -1510,7 +1724,7 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
         return;
       }
       if (event.target.closest(`[${TREE_CHECKBOX_ATTRIBUTE}]`)) {
-        if (!row.disabled) setChecked(row.id, untrack(() => checkedState(row.id)) !== true);
+        if (!row.disabled) setChecked(row.id, wouldCheck(row.id));
         return;
       }
 
@@ -1532,7 +1746,7 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
           });
           return;
         case 'checkbox':
-          setChecked(row.id, untrack(() => checkedState(row.id)) !== true);
+          setChecked(row.id, wouldCheck(row.id));
           return;
         default:
           return;
@@ -1544,10 +1758,16 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
     },
 
     onFocusIn(event) {
-      const row = rowFrom(event.target);
-      if (!row) return;
-      if (untrack(() => activeState.get()) === row.id) return;
-      activeState.set(row.id);
+      const el = itemFrom(event.target);
+      if (el === null) return;
+      const id = idOf(el);
+      if (id === null) return;
+
+      // Recorded even when the active node is already this one: what the
+      // browser focused is the evidence a removal is read from later.
+      focusedEl = el;
+      if (untrack(() => activeState.get()) === id) return;
+      activeState.set(id);
     },
 
     treeProps: () => ({
@@ -1560,9 +1780,10 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
       // describe a selection model it does not have.
       'aria-multiselectable': mode === 'multiple' ? 'true' : undefined,
       'aria-busy': children?.isLoading() ? 'true' : undefined,
-      // An empty tree has no roving tab stop, and would drop out of the tab
-      // order altogether — including the search box's own "no results" case.
-      tabindex: rows().length === 0 ? '0' : undefined,
+      // A tree with no rendered row has no roving tab stop, and would drop out
+      // of the tab order altogether — the search box's "no results" case, and
+      // a windowed tree whose scroller has not been measured yet.
+      tabindex: tabStopId() === null ? '0' : undefined,
     }),
 
     // Both wrappers exist for geometry alone. A `tree` owns `treeitem`

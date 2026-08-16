@@ -88,12 +88,17 @@ let selectors = 0;
 /** Options for the listbox the next `setup` will build. */
 let boxOptions: Omit<ListboxOptions<Fruit>, 'listbox' | 'items'>;
 let items: Signal.State<readonly Fruit[]>;
+/** What a consumer's own `:if` renders a heading, and the options, behind. */
+let showHeading: Signal.State<boolean>;
+let showOptions: Signal.State<boolean>;
 
 beforeEach(() => {
   document.body.innerHTML = '<div id="app"></div><div id="outside">page</div>';
   host = document.querySelector('#app')!;
   boxOptions = {};
   items = new Signal.State<readonly Fruit[]>(FRUITS);
+  showHeading = new Signal.State(true);
+  showOptions = new Signal.State(true);
 
   FakeResizeObserver.live = [];
   const view = window as unknown as { ResizeObserver: unknown };
@@ -135,6 +140,42 @@ const GROUPED = `
   </div>
 `;
 
+/** A group that names itself, and never renders the heading element. */
+const SELF_NAMED_GROUP = `
+  <div class="lb" :ref="root" :spread="lb.listboxProps()" :keydown="onKey($event)">
+    <div class="group" :spread="lb.groupProps('citrus')" aria-label="Citrus">
+      <div class="option" :for="(item, i) in items.get()" :key="item.id"
+           :spread="lb.optionProps({ index: i, value: item, disabled: item.disabled })"
+      >{ item.label }</div>
+    </div>
+  </div>
+`;
+
+/** A group whose heading comes and goes, the way a filtered section's does. */
+const OPTIONAL_HEADING_GROUP = `
+  <div class="lb" :ref="root" :spread="lb.listboxProps()" :keydown="onKey($event)">
+    <div class="group" :spread="lb.groupProps('citrus')" aria-label="Citrus">
+      <div class="heading" :if="showHeading.get()"
+           :spread="lb.groupLabelProps('citrus')">Citrus</div>
+      <div class="option" :for="(item, i) in items.get()" :key="item.id"
+           :spread="lb.optionProps({ index: i, value: item, disabled: item.disabled })"
+      >{ item.label }</div>
+    </div>
+  </div>
+`;
+
+/**
+ * A popup that can be closed: the collection is known throughout, and none of
+ * it is in the DOM while `showOptions` is false.
+ */
+const CLOSABLE = `
+  <div class="lb" :ref="root" :spread="lb.listboxProps()" :keydown="onKey($event)">
+    <div class="option" :for="(item, i) in shownItems()" :key="item.id"
+         :spread="lb.optionProps({ index: i, value: item, disabled: item.disabled })"
+    >{ item.label }</div>
+  </div>
+`;
+
 const VIRTUAL = `
   <div class="lb" :ref="root" :spread="lb.listboxProps()" :keydown="onKey($event)"
        :click="lb.onOptionClick($event)">
@@ -170,6 +211,7 @@ function build(template: string): Harness {
     root = new Signal.State<Element | null>(null);
     box = new Signal.State<Element | null>(null);
     items = items;
+    showHeading = showHeading;
     handled = false;
     lb = createListbox<Fruit>({
       ...boxOptions,
@@ -182,6 +224,11 @@ function build(template: string): Harness {
 
     labelAt(index: number): string {
       return this.items.get()[index]?.label ?? '';
+    }
+
+    /** The options a closed popup renders, which is none of them. */
+    shownItems(): readonly Fruit[] {
+      return showOptions.get() ? this.items.get() : [];
     }
 
     onKey(event: KeyboardEvent): void {
@@ -241,6 +288,13 @@ function press(el: HTMLElement, key: string, modifiers: Partial<KeyboardEventIni
 
 function click(el: HTMLElement, modifiers: Partial<MouseEventInit> = {}): void {
   el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...modifiers }));
+  flushSync();
+}
+
+/** Scroll the listbox the way a wheel does: the browser moves it, then tells. */
+function scrollTo(root: HTMLElement, offset: number): void {
+  root.scrollTop = offset;
+  root.dispatchEvent(new Event('scroll'));
   flushSync();
 }
 
@@ -365,6 +419,92 @@ describe('the tab stop', () => {
     press(root, 'ArrowDown');
     expect(document.activeElement).toBe(option(0));
   });
+
+  it('puts the tab stop on the selected option, not the first', () => {
+    boxOptions = { defaultValue: [FRUITS[2]!] };
+    const { options } = setup();
+
+    // The APG sets focus on the selected option when a listbox is entered. A
+    // Select showing Cherry whose Tab stop is Apple makes the reader walk back
+    // to where they already were.
+    expect(options().map((el) => el.getAttribute('tabindex'))).toEqual([
+      '-1',
+      '-1',
+      '0',
+      '-1',
+      '-1',
+      '-1',
+    ]);
+  });
+
+  it('follows a selection made from outside before anything was focused', () => {
+    const value = new Signal.State<readonly Fruit[]>([]);
+    boxOptions = { value };
+    const { options } = setup();
+
+    value.set([FRUITS[5]!]);
+    flushSync();
+    expect(options().map((el) => el.getAttribute('tabindex'))).toEqual([
+      '-1',
+      '-1',
+      '-1',
+      '-1',
+      '-1',
+      '0',
+    ]);
+  });
+
+  it('steps on from wherever Tab put focus', () => {
+    const { lb, option } = setup();
+
+    // Exactly what Tab does: option 0 is the one holding `tabindex="0"`, and
+    // the browser says nothing about having focused it.
+    option(0).focus();
+    flushSync();
+
+    press(option(0), 'ArrowDown');
+    // Down Arrow moves to the *next* option. Without hearing the focus, the
+    // listbox still thinks nothing is active and moves to the option the user
+    // is already standing on, so Banana costs two presses.
+    expect(lb.activeIndex()).toBe(1);
+    expect(document.activeElement).toBe(option(1));
+  });
+
+  it('refuses the tab stop to a disabled option focus landed on', () => {
+    boxOptions = { defaultValue: [FRUITS[5]!] };
+    const { lb, option, options } = setup();
+
+    // A browser focuses a `tabindex="-1"` element on mousedown, so this is
+    // what pressing a disabled option does before any click is dispatched.
+    option(3).focus();
+    flushSync();
+
+    // Date is disabled: navigation refuses it everywhere else, and letting
+    // focus make it active would move the listbox's only tab stop off Fig and
+    // onto an `aria-disabled` element.
+    expect(lb.activeIndex()).toBe(-1);
+    expect(options().map((el) => el.getAttribute('tabindex'))).toEqual([
+      '-1',
+      '-1',
+      '-1',
+      '-1',
+      '-1',
+      '0',
+    ]);
+  });
+
+  it('hears no focus at all in a listbox that is disabled', () => {
+    const onActiveChange = vi.fn();
+    boxOptions = { disabled: () => true, onActiveChange };
+    const { lb, option } = setup();
+
+    option(2).focus();
+    flushSync();
+
+    // No navigation and no selection, whichever way focus arrived.
+    expect(lb.activeIndex()).toBe(-1);
+    expect(onActiveChange).not.toHaveBeenCalled();
+  });
 });
 
 describe('virtual focus', () => {
@@ -396,6 +536,49 @@ describe('virtual focus', () => {
 
     press(root, 'ArrowDown');
     expect(lb.activeDescendantProps()['aria-activedescendant']).toBe(option(0).id);
+  });
+
+  it('names the selected option as the cursor before a key is pressed', () => {
+    boxOptions = { virtualFocus: true, defaultValue: [FRUITS[2]!] };
+    const { root, lb, option } = setup();
+
+    // Otherwise a screen reader is told nothing about which option is current
+    // until something moves, and a listbox opened on Cherry reads as empty.
+    expect(root.getAttribute('aria-activedescendant')).toBe(option(2).id);
+
+    root.focus();
+    press(root, 'ArrowDown');
+    // And the first arrow steps on from Cherry rather than restarting at
+    // Apple. Date, at 3, is disabled.
+    expect(lb.activeIndex()).toBe(4);
+  });
+
+  it('names no cursor while the option it would name is not rendered', () => {
+    boxOptions = { virtualFocus: true, defaultValue: [FRUITS[2]!] };
+    showOptions.set(false);
+    const harness = build(CLOSABLE);
+
+    // A Select whose popup is closed knows its collection and its answer, and
+    // has no element to point at. A cursor resolving to nothing is worse than
+    // none: the reader is given one, with no sign that it names nothing.
+    expect(harness.options()).toHaveLength(0);
+    expect(harness.root.hasAttribute('aria-activedescendant')).toBe(false);
+
+    showOptions.set(true);
+    flushSync();
+    // Opened, and Cherry is there to be named.
+    expect(harness.root.getAttribute('aria-activedescendant')).toBe(harness.option(2).id);
+  });
+
+  it('offers no activedescendant to an input while nothing is rendered', () => {
+    boxOptions = { defaultValue: [FRUITS[2]!] };
+    showOptions.set(false);
+    const harness = build(CLOSABLE);
+
+    // The same rule through the sibling API a combobox spreads onto its input,
+    // where DOM focus is roving rather than virtual and nothing is active.
+    expect(harness.lb.activeIndex()).toBe(-1);
+    expect(harness.lb.activeDescendantProps()['aria-activedescendant']).toBeUndefined();
   });
 });
 
@@ -507,6 +690,28 @@ describe('moving', () => {
     flushSync();
     expect(lb.activeIndex()).toBe(1);
   });
+
+  it('reports the move when the collection shrinks under the active option', () => {
+    const onActiveChange = vi.fn();
+    boxOptions = { onActiveChange };
+    const { root, lb } = setup();
+
+    press(root, 'End');
+    expect(onActiveChange.mock.calls).toEqual([[5]]);
+    onActiveChange.mockClear();
+
+    items.set(FRUITS.slice(0, 2));
+    flushSync();
+    // A consumer mirroring this into their own state would otherwise still be
+    // pointing at option 5, a position that no longer exists.
+    expect(lb.activeIndex()).toBe(1);
+    expect(onActiveChange.mock.calls).toEqual([[1]]);
+
+    items.set([]);
+    flushSync();
+    expect(lb.activeIndex()).toBe(-1);
+    expect(onActiveChange.mock.calls).toEqual([[1], [-1]]);
+  });
 });
 
 describe('typeahead', () => {
@@ -577,6 +782,35 @@ describe('typeahead', () => {
     const { root, lb } = setup();
     press(root, 'c', { ctrlKey: true });
     expect(lb.activeIndex()).toBe(-1);
+  });
+
+  it('does not sweep a range when the letter typed is a capital', () => {
+    boxOptions = { selectionMode: 'extended' };
+    const harness = setup();
+
+    click(harness.option(0));
+    expect(ids(harness)).toEqual(['ap']);
+
+    // A capital F is a shifted keypress that means "jump to Fig". Reading
+    // Shift off it made typeahead a range gesture and swept Apple to Fig.
+    press(harness.root, 'F', { shiftKey: true });
+    expect(harness.lb.activeIndex()).toBe(5);
+    // Extended selection follows focus, so Fig is the selection now — Fig
+    // alone, which is what a move that is not an extension means.
+    expect(ids(harness)).toEqual(['fi']);
+  });
+
+  it('does not toggle the option a capital letter lands on', () => {
+    boxOptions = { selectionMode: 'multiple' };
+    const harness = setup();
+
+    click(harness.option(1));
+    press(harness.root, 'B', { shiftKey: true });
+
+    // Shift+Arrow toggles in multiple mode; a shifted letter must not, or
+    // typing the first letter of the option you are on deselects it.
+    expect(harness.lb.activeIndex()).toBe(1);
+    expect(ids(harness)).toEqual(['ba']);
   });
 });
 
@@ -905,6 +1139,36 @@ describe('sections', () => {
     press(harness.root, 'End');
     expect(harness.lb.activeIndex()).toBe(5);
   });
+
+  it('leaves a group unnamed rather than pointing at a heading nobody rendered', () => {
+    build(SELF_NAMED_GROUP);
+    const group = host.querySelector('.group')!;
+
+    // A dangling `aria-labelledby` hides a missing name behind a reference
+    // that resolves to nothing, and outranks the `aria-label` that is there.
+    expect(group.hasAttribute('aria-labelledby')).toBe(false);
+    expect(group.getAttribute('aria-label')).toBe('Citrus');
+  });
+
+  it('gives up the name when the heading it points at is removed', () => {
+    build(OPTIONAL_HEADING_GROUP);
+    const group = host.querySelector('.group')!;
+    expect(group.getAttribute('aria-labelledby')).toBe(host.querySelector('.heading')!.id);
+
+    showHeading.set(false);
+    flushSync();
+
+    // The reference has outlived what it named, which is the same dangling
+    // reference as never rendering the heading at all — and it still outranks
+    // the `aria-label` that is right there.
+    expect(host.querySelector('.heading')).toBeNull();
+    expect(group.hasAttribute('aria-labelledby')).toBe(false);
+    expect(group.getAttribute('aria-label')).toBe('Citrus');
+
+    showHeading.set(true);
+    flushSync();
+    expect(group.getAttribute('aria-labelledby')).toBe(host.querySelector('.heading')!.id);
+  });
 });
 
 describe('virtualized', () => {
@@ -988,5 +1252,66 @@ describe('virtualized', () => {
 
     // A thousand values, none of which the DOM ever held more than seven of.
     expect(harness.lb.selectedValues()).toHaveLength(1000);
+  });
+
+  it('keeps a tab stop and focus when the focused option scrolls away', () => {
+    boxOptions = { virtual: { container: () => null, itemSize: 20 } };
+    const harness = setupVirtual();
+
+    press(harness.root, 'Home');
+    expect(document.activeElement).toBe(harness.option(0));
+
+    // The reader takes the wheel, and the option holding focus leaves the
+    // window under them.
+    scrollTo(harness.root, 10_000);
+    expect(harness.labels()[0]).not.toBe('Option 0');
+
+    // Focus dropped to <body> would strand a keyboard user at the top of the
+    // document: no rendered option holds the tab stop, and under roving focus
+    // the listbox root is not one either.
+    const stops = harness.options().filter((el) => el.getAttribute('tabindex') === '0');
+    expect(stops).toHaveLength(1);
+    expect(document.activeElement).toBe(stops[0]);
+    expect(harness.lb.activeIndex()).toBe(Number(stops[0]!.getAttribute(OPTION_ATTRIBUTE)));
+  });
+
+  it('keeps a tab stop in the window when focus has already left the listbox', () => {
+    boxOptions = { virtual: { container: () => null, itemSize: 20 } };
+    const harness = setupVirtual();
+
+    press(harness.root, 'Home');
+    (document.activeElement as HTMLElement).blur();
+    flushSync();
+
+    scrollTo(harness.root, 10_000);
+
+    // Nothing is focused, so nothing is taken back — the reader moved on
+    // deliberately. But Tab still has to find a way in, and the active option
+    // is now ten thousand pixels above the window.
+    const stops = harness.options().filter((el) => el.getAttribute('tabindex') === '0');
+    expect(stops).toHaveLength(1);
+    expect(document.activeElement).toBe(document.body);
+    expect(harness.lb.activeIndex()).toBe(0);
+  });
+
+  it('drops the activedescendant once the option it names has left the window', () => {
+    boxOptions = { virtualFocus: true, virtual: { container: () => null, itemSize: 20 } };
+    const harness = setupVirtual();
+
+    press(harness.root, 'Home');
+    const named = harness.root.getAttribute('aria-activedescendant')!;
+    expect(document.getElementById(named)).not.toBeNull();
+
+    scrollTo(harness.root, 10_000);
+
+    // A cursor pointing at an id that no longer exists is worse than none: the
+    // reader is given a virtual cursor that resolves to nothing, with no sign
+    // that is what happened. Scrolling moved no option, so option 0 is still
+    // the active one and is named again the moment it is rendered again.
+    expect(harness.root.hasAttribute('aria-activedescendant')).toBe(false);
+    expect(harness.lb.activeIndex()).toBe(0);
+
+    scrollTo(harness.root, 0);
+    expect(harness.root.getAttribute('aria-activedescendant')).toBe(named);
   });
 });

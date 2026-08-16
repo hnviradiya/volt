@@ -244,6 +244,13 @@ function bindTextValue(
       // is not an instruction to erase it.
       if (next === '' && el.value !== '') {
         state.set(el.value);
+        // Announced, not merely recorded. For a plain control this signal is
+        // the value and the callback is a courtesy; for a composite it is only
+        // the text, and whatever derives the real value from it — the number
+        // behind a spinbutton — is subscribed here and nowhere else. Adopting
+        // silently would leave the box showing a value the field would not
+        // submit, which is the opposite of what adoption is for.
+        onValueChange?.(el.value);
         return;
       }
     }
@@ -757,6 +764,28 @@ export function createNumberInput(options: NumberInputOptions): NumberInput {
     if (current === null) return;
     if (isValueControl(el) && el.ownerDocument.activeElement === el) return;
     text.set(format(current));
+  });
+
+  // A write to the caller's signal has to reach the box as well as the hidden
+  // input and `aria-valuenow`: a spinbutton announcing 42 over a box still
+  // reading 5 is worse than either alone.
+  //
+  // What the box says is parsed back rather than the last written value being
+  // remembered, because the two disagree exactly where it matters: while
+  // typing, the value is derived from the text, so the two already agree and
+  // nothing is rewritten — "1.50" keeps its trailing zero and an "abc" the
+  // field is refusing stays on screen to be corrected. Only a value the text
+  // does not say is a write from outside, and that one is shown.
+  //
+  // No focus guard, unlike the locale effect above: a caller who writes to the
+  // signal is stating the value, and `createInput` obeys the same write into a
+  // focused box. Moving the caret is the smaller harm than lying about it.
+  effect(() => {
+    const current = state.get();
+    untrack(() => {
+      if (parseLocaleNumber(text.get(), code()) === current) return;
+      text.set(current === null ? '' : format(current));
+    });
   });
 
   return {
@@ -1349,6 +1378,34 @@ export function createPinInput(options: PinInputOptions): PinInput {
     field.markEdited();
   });
 
+  // A reset is the other direction, and it fires no `input`. The browser
+  // restores the hidden input and every box to their default of empty; without
+  // this the value would not hear about it, so the boxes would read blank while
+  // the field still held — and `isComplete()` still claimed — the old code, and
+  // the next character typed would be distributed over it.
+  //
+  // Read back off the hidden input rather than assumed to be empty, because it
+  // is the control the platform reset and a consumer may have written a
+  // `value` attribute on it. Read after a microtask, since `reset` is
+  // dispatched partway through resetting, before the values have settled.
+  effect(() => {
+    const hidden = options.hiddenInput?.();
+    const anchor = isValueControl(hidden) ? hidden : options.container();
+    const form = anchor ? formOf(anchor) : null;
+    if (!form) return;
+
+    const onReset = () =>
+      queueMicrotask(() => {
+        setValue(isValueControl(hidden) ? hidden.value : '');
+        // The tab stop goes back to where the next character belongs, which is
+        // the first box now that there is nothing in any of them.
+        active.set(Math.min(untrack(() => state.get()).length, length - 1));
+      });
+
+    form.addEventListener('reset', onReset);
+    onCleanup(() => form.removeEventListener('reset', onReset));
+  });
+
   const distribute = (from: number, incoming: string): void => {
     const next = chars();
     let cursor = Math.min(from, next.length, length - 1);
@@ -1733,6 +1790,17 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
     const tag = current[index];
     if (tag === undefined) return;
 
+    // Focus is rescued before the tag goes, and here rather than at each call
+    // site: the remove control lives inside the tag it removes, so pressing it
+    // destroys the focused element, and `removeAt` is the only removal a
+    // consumer can wire that control to. A detached node also has no siblings
+    // left to measure from, so the destination has to be worked out first.
+    //
+    // Only when this tag is where focus actually is. A `removeAt` from a
+    // toolbar somewhere else on the page destroys nothing, and pulling focus
+    // into the field on its own would be a worse bug than the one being fixed.
+    if (focusedTag() === index) focusAfterRemoval(index);
+
     write(current.filter((_, i) => i !== index));
     duplicate.set(null);
     status.set(options.labels?.removed?.(tag) ?? `${tag} removed`);
@@ -1756,6 +1824,20 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
     const el = options.input();
     if (isValueControl(el)) el.focus();
   };
+
+  /**
+   * The tag holding focus, its remove control included, or -1.
+   *
+   * Asked of the list rather than of one index, because the question every
+   * removal has to answer is the same one — is the element about to be
+   * destroyed the one focus is in — and it is asked by `clear` as well, which
+   * destroys all of them at once.
+   */
+  const focusedTag = (): number =>
+    tagCollection.all().findIndex((tag) => {
+      const active = tag.ownerDocument.activeElement;
+      return active !== null && tag.contains(active);
+    });
 
   /** Where focus goes when the tag holding it is removed. */
   const focusAfterRemoval = (index: number): void => {
@@ -1818,8 +1900,15 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
     removeAt,
     removeLast: () => removeAt(untrack(() => state.get()).length - 1),
     clear: () => {
+      // The same rescue `removeAt` does: a "clear all" pressed from inside the
+      // row destroys the tag focus is in, and with every tag going there is no
+      // sibling left to land on.
+      if (focusedTag() !== -1) focusInput();
       write([]);
       duplicate.set(null);
+      // The tab stop belongs to the first tag again, or the row would come
+      // back with its only stop on an index that no longer exists.
+      activeTag.set(0);
     },
     isFull,
     duplicateIndex: () => duplicate.get(),
@@ -1852,7 +1941,10 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
         return true;
       }
 
-      if (event.key === 'ArrowLeft' && text === '') {
+      // The tags sit before the box in the row, so the key that reaches them
+      // is the one that moves backwards — Left where the writing runs left to
+      // right, Right where it runs the other way.
+      if (event.key === backKey(event) && text === '') {
         const last = tagCollection.last();
         if (!last) return false;
         event.preventDefault();
@@ -1877,17 +1969,18 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
 
       if (event.key === 'Backspace' || event.key === 'Delete') {
         event.preventDefault();
-        // Worked out before the tag goes: a detached node has no siblings to
-        // measure from, and a keyboard user whose focus lands on `<body>` has
-        // been thrown to the top of the document.
-        focusAfterRemoval(index);
+        // `removeAt` moves focus off the tag before it goes: a keyboard user
+        // whose focus lands on `<body>` has been thrown to the top of the
+        // document.
         removeAt(index);
         return true;
       }
 
-      // Right off the last tag lands in the text input, which is where the
-      // next thing typed belongs.
-      if (event.key === 'ArrowRight' && index === tagCollection.all().length - 1) {
+      // Forward off the last tag lands in the text input, which is where the
+      // next thing typed belongs. Resolved against writing direction, or the
+      // one key would mean both "leave the row" and "move along it" in the
+      // same RTL field — roving focus below mirrors, so this has to as well.
+      if (event.key === forwardKey(event) && index === tagCollection.all().length - 1) {
         event.preventDefault();
         focusInput();
         return true;
@@ -1992,6 +2085,34 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
 /** Escape a string for use inside a character class. */
 function escapeForClass(chars: string): string {
   return chars.replaceAll(/[\\\]^-]/g, (char) => `\\${char}`);
+}
+
+/** The arrow that moves along the row, where the press happened. */
+function forwardKey(event: KeyboardEvent): 'ArrowLeft' | 'ArrowRight' {
+  return isRtl(event.currentTarget ?? event.target) ? 'ArrowLeft' : 'ArrowRight';
+}
+
+/** The arrow that moves back along it. */
+function backKey(event: KeyboardEvent): 'ArrowLeft' | 'ArrowRight' {
+  return isRtl(event.currentTarget ?? event.target) ? 'ArrowRight' : 'ArrowLeft';
+}
+
+/**
+ * Writing direction at `target`.
+ *
+ * The nearest `dir` attribute wins over computed style: an application that
+ * marks up direction with `dir` is stating intent, and the attribute can also
+ * be read before styles resolve. The same rule roving focus applies, so a
+ * field that mixes the two agrees with itself.
+ */
+function isRtl(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+
+  const declared = target.closest('[dir]');
+  if (declared) return declared.getAttribute('dir')?.toLowerCase() === 'rtl';
+
+  const view = target.ownerDocument?.defaultView;
+  return view?.getComputedStyle?.(target).direction === 'rtl';
 }
 
 // ---------------------------------------------------------------------------
@@ -2135,8 +2256,21 @@ export function createRating(options: RatingOptions): Rating {
     group: options.group,
     value: selection,
     name: options.name,
-    required: options.required,
-    disabled: () => disabled() || readOnly(),
+    // `required` stops here while read-only. The platform bars a disabled
+    // control from constraint validation, and a read-only one is barred for
+    // the same reason: a constraint on an answer the user cannot give is a
+    // form that can never be submitted, and the browser's bubble would point
+    // at a radio nobody can act on. The field's own `validate` below still
+    // says so on screen where the rating is editable.
+    required: () => required() && !readOnly(),
+    // Read-only is deliberately not folded in here. It would reach the hidden
+    // radios as `disabled`, and a disabled control is left out of the submission
+    // altogether — which is the one thing that separates the two states. A
+    // read-only score is still the field's answer and still has to be sent.
+    // Nothing is editable without it: the read-only branches below hand out no
+    // radio role and no tab stop, `setValue` refuses while read-only, and
+    // `onKeyDown` never reaches the group.
+    disabled,
     // A rating is a row, and it does not wrap: arrowing past five stars back
     // to one is a misclick waiting to happen.
     loop: false,
@@ -2180,6 +2314,48 @@ export function createRating(options: RatingOptions): Rating {
       }
       return options.validate?.(value, control);
     },
+  });
+
+  /**
+   * The score a reset goes back to.
+   *
+   * A reset restores every control in the form to its default, and the hidden
+   * radios have none to restore to: their checkedness is a property rather
+   * than a `checked` attribute, so the browser finds `defaultChecked` false on
+   * all of them and unchecks the lot. What is left is a rating that still
+   * answers 4 and a form that submits nothing, which is the disagreement a
+   * hidden native control exists to prevent. So the default is remembered
+   * here, where it was declared.
+   */
+  const initial = untrack(() => state.get());
+
+  effect(() => {
+    const group = options.group();
+    const form = group ? formOf(group) : null;
+    if (!group || !form) return;
+
+    // Read after a microtask, since `reset` is dispatched partway through
+    // resetting, before the controls have settled.
+    const onReset = () =>
+      queueMicrotask(() => {
+        const restored = Math.min(Math.max(initial, 0), max);
+        // Not through `setValue`, which refuses while read-only or disabled —
+        // and a score nobody may change is exactly the one a reset has to put
+        // back rather than drop.
+        if (untrack(() => state.get()) !== restored) {
+          state.set(restored);
+          options.onValueChange?.(restored);
+        }
+        // The mirrors are written by hand as well, because a reset that lands
+        // on the score already held changes no signal, and nothing would then
+        // re-apply the props the browser has just cleared.
+        for (const mirror of group.querySelectorAll('input[type="radio"]')) {
+          if (isInputElement(mirror)) mirror.checked = mirror.value === String(restored);
+        }
+      });
+
+    form.addEventListener('reset', onReset);
+    onCleanup(() => form.removeEventListener('reset', onReset));
   });
 
   const displayValue = (): number => previewed.get() ?? state.get();
@@ -2228,13 +2404,22 @@ export function createRating(options: RatingOptions): Rating {
       });
 
       if (readOnly()) {
-        return {
+        return defined({
           ...shared,
           // One fact, said once. See the note above the function.
           role: 'img',
           'aria-label': valueText(),
+          // The borrowed reference has to go with it. `aria-labelledby` beats
+          // `aria-label` when a name is computed, so leaving both on would
+          // name this "Rating" and never speak the score — and the stars are
+          // aria-hidden, so there is no second chance at it. The alternative
+          // was to keep the reference and add this element's own id to the end
+          // of it, naming it "Rating Rated 4 of 5"; it lost because a
+          // self-reference inside `aria-labelledby` is a trick, and the label
+          // is still on screen beside the stars either way.
+          'aria-labelledby': undefined,
           'data-readonly': true,
-        };
+        });
       }
 
       return defined({
@@ -2309,8 +2494,12 @@ function sliceTo(value: string, length: number): string {
  * does not exist at all on a server, where the check would throw rather than
  * answer.
  */
-function isInputElement(el: Element | null | undefined): el is HTMLInputElement {
-  return el?.tagName === 'INPUT';
+function isInputElement(el: EventTarget | null | undefined): el is HTMLInputElement {
+  // Takes an `EventTarget` because every caller but one is holding an
+  // `event.target`. `tagName` rather than `instanceof HTMLInputElement`, so a
+  // box inside another document — an iframe, a print view — is still
+  // recognised as one.
+  return el instanceof Element && el.tagName === 'INPUT';
 }
 
 function isTextarea(el: Element | null | undefined): el is HTMLTextAreaElement {

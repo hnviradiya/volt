@@ -22,7 +22,7 @@
 import { Signal, effect, onCleanup } from '@voltjs/core';
 import { createFormField, type FormField, type ValidationOutcome } from './form-field.js';
 import { createProgress, type Progress } from './display.js';
-import { createLiveRegionTiming } from './feedback.js';
+import { createLiveRegionTiming, type LiveRegionTiming } from './feedback.js';
 import { exponentialBackoff } from './async.js';
 import { useLocale, resolveDirection, type Direction } from './i18n.js';
 import { VISUALLY_HIDDEN_INPUT_STYLE } from './form-controls.js';
@@ -371,9 +371,6 @@ export function createSlider(options: SliderOptions): Slider {
   function write(next: readonly number[]): void {
     raw.set(next);
     options.onValueChange?.(next);
-    // The field measures dirtiness from the control's own value, which for a
-    // slider is written by us rather than typed — so it has to be told.
-    field.markEdited();
   }
 
   function setValue(index: number, value: number): void {
@@ -448,7 +445,15 @@ export function createSlider(options: SliderOptions): Slider {
     const span = max - min;
     // A max at or below min is a caller bug; zero keeps the arithmetic finite
     // rather than putting NaN into a style.
-    return span > 0 ? clamp(((value - min) / span) * 100, 0, 100) : 0;
+    if (span <= 0) return 0;
+    const percent = clamp(((value - min) / span) * 100, 0, 100);
+    // Inversion is a fact about the track, so it belongs to every reading of
+    // the track — not only to the pointer. Direction is left out on purpose:
+    // the consumer positions with `inset-inline-start`, which mirrors itself
+    // under `dir=rtl`, and there is no CSS property that mirrors `inverted`.
+    // Leaving this to the consumer was the alternative; it puts the thumb at
+    // the opposite end of the track from the finger until they find out.
+    return inverted ? 100 - percent : percent;
   }
 
   /** Where a pointer is, as a value. */
@@ -579,6 +584,29 @@ export function createSlider(options: SliderOptions): Slider {
     onCleanup(() => form.removeEventListener('reset', onReset));
   });
 
+  /**
+   * Tell the field the value moved, once the DOM it reads has caught up.
+   *
+   * The field measures dirtiness by reading the control's own value, and that
+   * control is a mirror the consumer's `:spread` fills. Telling it from the
+   * write itself therefore reported the value the gesture had just replaced —
+   * one edit behind for ever, so the first move looked clean and the return to
+   * the default looked dirty. A user effect runs only after the render effects
+   * have settled, which is exactly when the mirror is true again; and because
+   * it watches the value rather than the calls that change it, a controlled
+   * signal set from outside is an edit too.
+   */
+  let edited: string | null = null;
+  effect(() => {
+    const values = current().join(',');
+    untrack(() => {
+      // The first pass is the mount, which is not an edit: the field reads its
+      // own starting point from the control at the same moment.
+      if (edited !== null && edited !== values) field.markEdited();
+    });
+    edited = values;
+  });
+
   const describedBy = (): string | undefined => text(field.controlProps()['aria-describedby']);
   const labelledBy = (): string | undefined => options.label?.()?.id || undefined;
 
@@ -606,12 +634,14 @@ export function createSlider(options: SliderOptions): Slider {
 
     fill() {
       const list = current();
-      // One thumb fills from the start of the track, because that is what the
-      // value means: everything below it is selected. Two or more fill between
-      // the ends, because what is selected is the span.
-      const start = list.length > 1 ? percentFor(list[0] ?? min) : 0;
-      const end = percentFor(list[list.length - 1] ?? min);
-      return { start, end };
+      // One thumb fills from the minimum, because that is what the value
+      // means: everything below it is selected. Two or more fill between the
+      // ends, because what is selected is the span. Both ends are read as
+      // positions rather than assumed to be 0 and the thumb, so an inverted
+      // track fills from the end the minimum is now at.
+      const from = list.length > 1 ? percentFor(list[0] ?? min) : percentFor(min);
+      const to = percentFor(list[list.length - 1] ?? min);
+      return from <= to ? { start: from, end: to } : { start: to, end: from };
     },
 
     marks: () => marks,
@@ -717,6 +747,10 @@ export function createSlider(options: SliderOptions): Slider {
       'aria-labelledby': labelledBy(),
       'data-orientation': orientation,
       'data-direction': direction(),
+      // Positions already account for inversion, so this is for decoration a
+      // percentage cannot carry: the direction a gradient runs, which end a
+      // scale is numbered from.
+      'data-inverted': inverted || undefined,
       'data-dragging': dragging.get() || undefined,
     }),
 
@@ -729,11 +763,13 @@ export function createSlider(options: SliderOptions): Slider {
     trackProps: () => ({
       'data-orientation': orientation,
       'data-direction': direction(),
+      'data-inverted': inverted || undefined,
       'data-disabled': disabled() || undefined,
     }),
 
     rangeProps: () => ({
       'data-orientation': orientation,
+      'data-inverted': inverted || undefined,
       'data-disabled': disabled() || undefined,
     }),
 
@@ -787,6 +823,14 @@ export function createSlider(options: SliderOptions): Slider {
         max: String(max),
         step: String(step),
         value: String(current()[index] ?? min),
+        // The `value` content attribute, which is the only thing `form.reset()`
+        // restores — the line above writes a property, and a property is not a
+        // default. Without it the platform resets a range input with no
+        // attribute to the midpoint of its bounds, so a reset that changed
+        // nothing would leave the mirrors submitting 50 under a slider showing
+        // 20. The reset listener below cannot cover that case on its own,
+        // because putting back a value the slider already has is a no-op.
+        defaultValue: String(initial[index] ?? min),
         disabled: disabled(),
         // Reachable to the platform, invisible to assistive technology and to
         // Tab: the thumb carries the role and the tab stop, and announcing
@@ -990,7 +1034,11 @@ export interface FileUploadOptions {
    * native submit — a drop zone alone can do none of those.
    */
   input: () => Element | null | undefined;
-  /** The drop zone, if there is one. */
+  /**
+   * The drop zone, if there is one. Supplying it scopes `onKeyDown`, so a
+   * handler wired further up than the zone does not swallow Enter from the
+   * fields underneath it.
+   */
   dropZone?: () => Element | null | undefined;
   /** A live region for progress announcements, so they are not announced too early. */
   liveRegion?: () => Element | null | undefined;
@@ -1205,7 +1253,8 @@ export function createFileUpload(options: FileUploadOptions): FileUpload {
   const concurrency = Math.max(1, options.concurrency ?? 3);
   const chunkSize = options.chunkSize && options.chunkSize > 0 ? options.chunkSize : 0;
   const retries = Math.max(0, options.retries ?? 0);
-  const retryDelay = options.retryDelay ?? exponentialBackoff;
+  const retryDelay: (attempt: number, error: unknown) => number =
+    options.retryDelay ?? ((attempt) => exponentialBackoff(attempt));
   const maxDepth = Math.max(0, options.maxDirectoryDepth ?? 8);
   const multiple = options.multiple !== false;
 
@@ -1217,7 +1266,20 @@ export function createFileUpload(options: FileUploadOptions): FileUpload {
   const pageDragging = new Signal.State(false);
   const finished = new Signal.State('');
 
-  const timing = createLiveRegionTiming(() => options.liveRegion?.());
+  /**
+   * The gate the announcement waits behind.
+   *
+   * Only armed when a region was actually named. Wrapping the optional
+   * accessor in an always-defined one instead leaves the timing waiting for an
+   * element that never arrives, and the announcement is then '' for the life
+   * of the page — including for a consumer who spread `liveRegionProps` onto a
+   * region of their own and never passed the accessor. Silence for a message
+   * that is on the screen is a worse failure than one announced a little
+   * early, which is the rule the rest of the library follows.
+   */
+  const timing: LiveRegionTiming = options.liveRegion
+    ? createLiveRegionTiming(options.liveRegion)
+    : { isReady: () => true };
 
   /** In-flight requests, by item id. */
   const controllers = new Map<string, AbortController>();
@@ -1226,6 +1288,16 @@ export function createFileUpload(options: FileUploadOptions): FileUpload {
   /** Pending retry waits, so unmounting does not leave one running. */
   const timers = new Set<ReturnType<typeof setTimeout>>();
   let active = 0;
+  /**
+   * Latched on teardown.
+   *
+   * Aborting the controllers is not enough on its own: every abort rejects a
+   * transport, and every rejection runs `run`'s own `finally`, which pumps the
+   * queue again. Emptying `wanted` there would stop the files queued at that
+   * moment; this also stops a `retry` or an `upload` called by a handler that
+   * outlived the component.
+   */
+  let stopped = false;
 
   // -------------------------------------------------------------------------
   // Queue
@@ -1306,6 +1378,36 @@ export function createFileUpload(options: FileUploadOptions): FileUpload {
   const occupied = (list: readonly UploadItem[]): number =>
     list.filter((item) => item.status !== 'rejected').length;
 
+  /**
+   * Put the queue back into the input's own list of selected files.
+   *
+   * That list is what makes a file part of a native submit and the only thing
+   * `required` counts — and a drop or a paste never goes near it, while the
+   * picker's list holds only the last pick rather than the queue. Emptying the
+   * input was what stood here, to make picking the same file twice raise
+   * `change` again; per the HTML spec that empties the platform's selected
+   * files, which un-submits every file already chosen and leaves a required
+   * upload impossible to satisfy. Rewriting the list from the queue buys the
+   * same thing honestly: a file that has left the queue leaves the input with
+   * it, so picking it again is a change again.
+   */
+  function syncInput(): void {
+    const input = options.input();
+    if (input instanceof HTMLInputElement && input.type === 'file') {
+      const data = new DataTransfer();
+      // Refused files are listed so the user can read why; they are never sent
+      // and must never be submitted.
+      for (const item of untrack(items)) {
+        if (item.status !== 'rejected') data.items.add(item.file);
+      }
+      input.files = data.files;
+    }
+    // Assigning the list raises no event, and neither does a drop, so the
+    // field is told by hand: it measures dirtiness and revalidates from the
+    // control's own events.
+    field.markEdited();
+  }
+
   function add(files: Iterable<File>): readonly UploadItem[] {
     if (disabled()) return [];
 
@@ -1342,15 +1444,25 @@ export function createFileUpload(options: FileUploadOptions): FileUpload {
 
     if (added.length === 0) return [];
 
+    // Replacing is a removal, and has to do everything `remove` does. A file
+    // dropped from the queue without being cancelled goes on holding its
+    // concurrency slot and sending bytes for a file the user has changed their
+    // mind about — and once it is out of `items()` nothing can reach it, not
+    // even `cancelAll`, which iterates the queue.
+    if (!multiple) {
+      for (const item of list) {
+        cancel(item.id);
+        bars.delete(item.id);
+      }
+    }
+
     const kept = multiple ? [...list, ...added] : added;
     replace(kept);
 
     if (auto) for (const item of added) if (item.status === 'pending') wanted.add(item.id);
 
     options.onFilesAdded?.(added);
-    // The field measures dirtiness and revalidates from the control's events,
-    // and a drop never touches the input that raises them.
-    field.markEdited();
+    syncInput();
     pump();
 
     return added;
@@ -1361,6 +1473,7 @@ export function createFileUpload(options: FileUploadOptions): FileUpload {
   // -------------------------------------------------------------------------
 
   function pump(): void {
+    if (stopped) return;
     const transport = options.transport;
     if (!transport) return;
 
@@ -1474,13 +1587,22 @@ export function createFileUpload(options: FileUploadOptions): FileUpload {
 
     const count = Math.max(1, Math.ceil(file.size / chunkSize));
     const resumeBytes = options.resumeFrom ? await options.resumeFrom(item) : item.chunk * chunkSize;
+    // `resumeFrom` is handed no signal and so cannot be cancelled; a cancel
+    // that lands while the server is being asked has to be caught on the way
+    // out instead.
+    signal.throwIfAborted();
     let index = clamp(Math.floor((Number.isFinite(resumeBytes) ? resumeBytes : 0) / chunkSize), 0, count);
 
     patch(id, { chunk: index, loaded: Math.min(index * chunkSize, file.size) });
 
     let response: unknown;
     for (; index < count; index++) {
-      if (signal.aborted) break;
+      // Thrown rather than broken out of. Leaving the loop returns the last
+      // chunk's response as though the file were finished, and `run` then
+      // records a success: the bar reads 100%, `onItemComplete` fires for a
+      // file that is half on the server, and the submit-blocking effect clears
+      // its custom validity so the form goes.
+      signal.throwIfAborted();
 
       const start = index * chunkSize;
       const end = Math.min(start + chunkSize, file.size);
@@ -1535,6 +1657,15 @@ export function createFileUpload(options: FileUploadOptions): FileUpload {
     // A rejection is a fact about the file, not about the request: sending it
     // again would fail in exactly the same way.
     if (!item || item.status === 'rejected') return;
+    // A request that is still running has nothing to retry, and `retryProps`
+    // already says so with `aria-disabled` — but an aria-disabled button still
+    // fires its click, so this is one press away in every consumer. Without
+    // the guard the press starts a second request for the same file and
+    // overwrites the controller the first one is cancelled through, leaving a
+    // live upload nothing can stop. Cancelling and restarting was the
+    // alternative; it throws away the bytes already sent to honour a press the
+    // interface had marked unavailable.
+    if (item.status === 'uploading') return;
     patch(id, { status: 'pending', error: null, attempts: 0 });
     wanted.add(id);
     pump();
@@ -1544,7 +1675,7 @@ export function createFileUpload(options: FileUploadOptions): FileUpload {
     cancel(id);
     bars.delete(id);
     replace(untrack(items).filter((item) => item.id !== id));
-    field.markEdited();
+    syncInput();
   }
 
   function clearAll(): void {
@@ -1552,7 +1683,7 @@ export function createFileUpload(options: FileUploadOptions): FileUpload {
     bars.clear();
     replace([]);
     finished.set('');
-    field.markEdited();
+    syncInput();
   }
 
   // Requests outlive nothing: the controllers live here, so a component that
@@ -1560,6 +1691,10 @@ export function createFileUpload(options: FileUploadOptions): FileUpload {
   // belongs to something above it, which is what the `queue` option is for —
   // and it would still need its own transport.
   onCleanup(() => {
+    stopped = true;
+    // Before the aborts, or the first rejection restarts the queue from under
+    // the loop below.
+    wanted.clear();
     for (const timer of timers) clearTimeout(timer);
     timers.clear();
     for (const controller of controllers.values()) controller.abort();
@@ -1726,9 +1861,24 @@ export function createFileUpload(options: FileUploadOptions): FileUpload {
     return files;
   }
 
+  /**
+   * Drops this upload has already taken.
+   *
+   * `stopPropagation` cannot do this job: Volt delegates `drop`, so the zone's
+   * handler and the page-wide listener are two listeners on the same node, and
+   * stopping propagation never reaches a sibling. The event object is the only
+   * thing that identifies one drop to both of them.
+   */
+  const taken = new WeakSet<Event>();
+
   function acceptDrop(event: DragEvent): void {
     // Without this the browser navigates to the file, replacing the page.
     event.preventDefault();
+    // Cancelled first, and only then refused: the second listener still has to
+    // stop the navigation, it just must not queue the files twice.
+    if (taken.has(event)) return;
+    taken.add(event);
+
     dragging.set(false);
     pageDragging.set(false);
     pageDepth = 0;
@@ -1821,7 +1971,24 @@ export function createFileUpload(options: FileUploadOptions): FileUpload {
     if (input instanceof HTMLElement) input.click();
   }
 
-  const opensPicker = () => options.dropZone !== undefined;
+  /**
+   * Whether a key belongs to the drop zone.
+   *
+   * The zone carries `role="button"`, and APG's button pattern says a button
+   * answers Enter and Space — so the handler must act whether or not the
+   * component was handed a `dropZone` accessor, which is a ref for finding an
+   * element and never a statement about the keyboard. What the accessor can
+   * honestly gate is *reach*: a consumer who wired this handler on the root
+   * would otherwise have Enter swallowed inside every field under it, so when
+   * a zone was named the key has to have come from it. With no zone named
+   * there is nothing to check against, and wiring the handler at all is the
+   * consumer saying which element it is for.
+   */
+  function fromZone(target: EventTarget | null): boolean {
+    const zone = options.dropZone?.();
+    if (!zone) return true;
+    return target instanceof Node && zone.contains(target);
+  }
 
   return {
     items,
@@ -1867,12 +2034,10 @@ export function createFileUpload(options: FileUploadOptions): FileUpload {
         const file = input.files[i];
         if (file) files.push(file);
       }
+      // `add` writes the whole queue back into the input, so the list the
+      // picker just handed over — which holds this pick alone — is replaced by
+      // every file the user has chosen, dropped or pasted.
       if (files.length > 0) add(files);
-
-      // Cleared so that picking the same file again still fires `change`. A
-      // user who cancelled an upload and reached for the same file would
-      // otherwise find the picker does nothing.
-      input.value = '';
     },
 
     onDragEnter(event) {
@@ -1907,7 +2072,7 @@ export function createFileUpload(options: FileUploadOptions): FileUpload {
     onKeyDown(event) {
       if (event.key !== 'Enter' && event.key !== ' ') return false;
       if (event.ctrlKey || event.metaKey || event.altKey) return false;
-      if (disabled() || !opensPicker()) return false;
+      if (disabled() || !fromZone(event.target)) return false;
       // Space would scroll the page, and Enter inside a form would submit it —
       // both behind a zone that has already opened the picker.
       event.preventDefault();
@@ -1929,7 +2094,12 @@ export function createFileUpload(options: FileUploadOptions): FileUpload {
       // renders, which is the right way round — a zone nobody can reach from a
       // keyboard is worse than one reached twice.
       role: 'button',
-      tabindex: disabled() ? undefined : '0',
+      // Always in the tab order, exactly as the slider's thumbs are: a control
+      // that says `aria-disabled` and then removes itself from the tab order
+      // contradicts itself, because nothing can reach the state to hear it. A
+      // disabled zone stays findable and answers "unavailable"; the `disabled`
+      // attribute, which would take it away, is what the whole library avoids.
+      tabindex: '0',
       'aria-label': labels.dropZone ?? 'Drop files here, or press to choose files',
       'aria-describedby': text(field.controlProps()['aria-describedby']),
       'aria-disabled': disabled() ? 'true' : undefined,
@@ -2037,7 +2207,7 @@ export interface HttpTransportOptions {
 function buildBody(
   request: UploadRequest,
   options: HttpTransportOptions,
-): { body: BodyInit; headers: Record<string, string> } {
+): { body: XMLHttpRequestBodyInit; headers: Record<string, string> } {
   const headers =
     typeof options.headers === 'function' ? options.headers(request) : { ...options.headers };
 

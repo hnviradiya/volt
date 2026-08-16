@@ -4,6 +4,10 @@
     { "path": "./packages/reactivity" },
     { "path": "./packages/compiler" },
     { "path": "./packages/core" },
-    { "path": "./packages/vite-plugin" }
+    { "path": "./packages/vite-plugin" },
+    { "path": "./packages/primitives" },
+    { "path": "./packages/ui" },
+    { "path": "./packages/grid" },
+    { "path": "./packages/editor" }
   ]
 }

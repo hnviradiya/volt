@@ -265,7 +265,13 @@ export function getRelativeTimeFormat(
 
 export type DateInput = Date | number | string;
 
-export interface RelativeTimeOptions extends Intl.RelativeTimeFormatOptions {
+/**
+ * Named for the `Intl` type it extends, rather than `RelativeTimeOptions`,
+ * which `createRelativeTime` in display-extras already owns — both are
+ * re-exported from the package root, and `export *` drops a name exported
+ * twice.
+ */
+export interface RelativeTimeFormatOptions extends Intl.RelativeTimeFormatOptions {
   /** What the value is measured against. Default: the current time. */
   now?: DateInput;
   /** Force a unit instead of choosing the largest one that fits. */
@@ -288,7 +294,7 @@ export interface Formatters {
   /** Takes a fraction: 0.42 formats as 42%. */
   percent(fraction: number, options?: Intl.NumberFormatOptions): string;
   date(value: DateInput, options?: Intl.DateTimeFormatOptions): string;
-  relativeTime(value: DateInput, options?: RelativeTimeOptions): string;
+  relativeTime(value: DateInput, options?: RelativeTimeFormatOptions): string;
   list(items: Iterable<string>, options?: Intl.ListFormatOptions): string;
   bytes(value: number, options?: BytesOptions): string;
 }
