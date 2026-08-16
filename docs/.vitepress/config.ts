@@ -10,6 +10,12 @@ export default defineConfig({
 
   head: [['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }]],
 
+  // Absolute URLs in the sitemap, and canonical links on every page.
+  sitemap: { hostname: 'https://voltjs.dev' },
+
+  // Maintainer notes that live next to the docs but are not part of them.
+  srcExclude: ['DEPLOY.md'],
+
   themeConfig: {
     logo: { light: '/logo.svg', dark: '/logo-dark.svg' },
     nav: [

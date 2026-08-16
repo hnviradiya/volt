@@ -1,17 +1,13 @@
 # Publishes the documentation site to GitHub Pages.
 #
-# GitHub Pages does not serve private repositories on the Free plan, so this
-# only takes effect once the repository is public and Pages is enabled with
-# "GitHub Actions" as the source. Until then, deploy via Cloudflare Pages —
-# see docs/DEPLOY.md.
-#
-# Manual trigger only for that reason: on every push it would fail at
-# `configure-pages` with "Get Pages site failed", which is not a signal about
-# the documentation. CI builds the site on every push, so nothing goes
-# unchecked in the meantime. Add the push trigger back once Pages is enabled.
+# The repository is public and Pages is enabled with "GitHub Actions" as the
+# source, so this runs on every push to main. The custom domain comes from
+# docs/public/CNAME, which VitePress copies into the published output.
 name: Docs
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:

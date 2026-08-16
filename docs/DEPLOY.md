@@ -6,38 +6,38 @@ The site is VitePress. Build output lands in `docs/.vitepress/dist`.
 pnpm docs:build
 ```
 
-## Cloudflare Pages (recommended while the repo is private)
-
-Free, works with private GitHub repos, unlimited bandwidth, and no
-non-commercial restriction.
-
-1. Cloudflare dashboard → **Workers & Pages** → **Create** → **Pages** →
-   **Connect to Git**
-2. Pick the repository
-3. Build settings:
-
-   | Setting | Value |
-   |---|---|
-   | Build command | `pnpm install && pnpm docs:build` |
-   | Build output directory | `docs/.vitepress/dist` |
-   | Root directory | *(leave empty)* |
-
-4. Environment variables:
-
-   | Variable | Value |
-   |---|---|
-   | `NODE_VERSION` | `22` |
-
-`wrangler.toml` in the repo root records the same settings.
-
-## Netlify
-
-`netlify.toml` in the repo root is ready to use. Free tier: 100 GB/month
-bandwidth, 300 build-minutes/month. Works with private repos.
+Not part of the published site — `srcExclude` in the VitePress config keeps
+this page out of it, since it is a note to whoever maintains the deployment
+rather than documentation of the framework.
 
 ## GitHub Pages
 
-Only once the repository is **public** — GitHub Pages does not serve private
-repositories on the Free plan. `.github/workflows/docs.yml` is included and
-will start working the moment the repo goes public and Pages is enabled with
-"GitHub Actions" as the source.
+What the site runs on. `.github/workflows/docs.yml` builds and deploys on
+every push to `main`, and needs Pages enabled with **GitHub Actions** as the
+source (Settings → Pages → Build and deployment → Source).
+
+The custom domain is `voltjs.dev`, served from `docs/public/CNAME`. VitePress
+copies everything in `docs/public` verbatim into the output, so the CNAME file
+is part of each deploy rather than a setting that can drift out of sync with
+the repository.
+
+DNS at the registrar:
+
+| Type | Name | Value |
+|---|---|---|
+| `A` | `@` | `185.199.108.153` |
+| `A` | `@` | `185.199.109.153` |
+| `A` | `@` | `185.199.110.153` |
+| `A` | `@` | `185.199.111.153` |
+| `CNAME` | `www` | `hnviradiya.github.io` |
+
+Then tick **Enforce HTTPS** once the certificate is issued, which takes a few
+minutes after the DNS resolves. `.dev` is on the HSTS preload list, so the
+site is unreachable over plain HTTP regardless — the certificate is not
+optional.
+
+## Alternatives
+
+`netlify.toml` and `wrangler.toml` are both present and both work. Neither is
+in use; they are kept so a move needs no new configuration, and either can be
+deleted once the choice has settled.
