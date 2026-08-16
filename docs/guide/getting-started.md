@@ -9,10 +9,9 @@ Volt targets current engines and carries no legacy support. You need **Node
 
 ```bash
 ::: warning Under active development
-Volt is pre-alpha. It is published under the `alpha` tag only, so
-`pnpm add @voltdev/core` will not resolve — the tag has to be asked for by
-name. Nothing here is stable, and versions may change shape without a
-deprecation path until a `latest` release exists.
+Volt is pre-alpha. Nothing here is stable: APIs may change shape between
+versions without a deprecation path, and there is no support commitment.
+Pin an exact version if you build anything on it.
 :::
 
 pnpm add @voltdev/core@alpha
