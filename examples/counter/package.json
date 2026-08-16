@@ -1,5 +1,5 @@
 {
-  "name": "@voltjs/example-counter",
+  "name": "@volt/example-counter",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,10 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@voltjs/core": "workspace:*"
+    "@volt/core": "workspace:*"
   },
   "devDependencies": {
-    "@voltjs/vite-plugin": "workspace:*",
+    "@volt/vite-plugin": "workspace:*",
     "sass": "^1.102.0",
     "vite": "^8.2.1"
   }

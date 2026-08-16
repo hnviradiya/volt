@@ -13,8 +13,8 @@
  * goes wrong when it lands late.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileTemplate } from '@voltjs/core/jit';
-import { Component, Signal, createRoot, flushSync, mount } from '@voltjs/core';
+import { compileTemplate } from '@volt/core/jit';
+import { Component, Signal, createRoot, flushSync, mount } from '@volt/core';
 import {
   VIRTUAL_ITEM_ATTRIBUTE,
   createVirtualizer,

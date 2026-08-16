@@ -7,8 +7,8 @@
  * engines break in ways unit tests of the happy path never reach.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileTemplate } from '@voltjs/core/jit';
-import { Component, Prop, Signal, flushSync, mount, onCleanup } from '@voltjs/core';
+import { compileTemplate } from '@volt/core/jit';
+import { Component, Prop, Signal, flushSync, mount, onCleanup } from '@volt/core';
 
 let host: HTMLElement;
 

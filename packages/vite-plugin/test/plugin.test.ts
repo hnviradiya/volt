@@ -42,7 +42,7 @@ function plugins(options?: Parameters<typeof volt>[0]) {
 }
 
 const COMPONENT = `
-import { Component, Signal } from '@voltjs/core';
+import { Component, Signal } from '@volt/core';
 
 @Component({
   selector: 'v-counter',
@@ -64,7 +64,7 @@ describe('template precompilation', () => {
     expect(output).not.toContain('templateUrl');
     // Static markup hoisted to module scope, parsed once per module.
     expect(output).toContain('__volt_rt.template("<button></button>")');
-    expect(output).toContain('import * as __volt_rt from "@voltjs/core/runtime"');
+    expect(output).toContain('import * as __volt_rt from "@volt/core/runtime"');
     // The handler is delegated rather than bound per element.
     expect(output).toContain('__volt_rt.delegate');
   });

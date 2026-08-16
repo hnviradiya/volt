@@ -9,8 +9,8 @@
  * and Enter must be left to the browser.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileTemplate } from '@voltjs/core/jit';
-import { Component, Signal, flushSync, mount } from '@voltjs/core';
+import { compileTemplate } from '@volt/core/jit';
+import { Component, Signal, flushSync, mount } from '@volt/core';
 import {
   CRUMB_ATTRIBUTE,
   CRUMB_OVERFLOW_ATTRIBUTE,

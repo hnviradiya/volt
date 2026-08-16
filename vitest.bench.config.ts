@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { resolve } from 'node:path';
-import { volt } from '@voltjs/vite-plugin';
+import { volt } from '@volt/vite-plugin';
 
 const root = import.meta.dirname;
 
@@ -11,11 +11,11 @@ export default defineConfig({
   plugins: [volt()],
   resolve: {
     alias: {
-      '@voltjs/reactivity': resolve(root, 'packages/reactivity/src/index.ts'),
-      '@voltjs/compiler': resolve(root, 'packages/compiler/src/index.ts'),
-      '@voltjs/core/runtime': resolve(root, 'packages/core/src/runtime.ts'),
-      '@voltjs/core/jit': resolve(root, 'packages/core/src/jit.ts'),
-      '@voltjs/core': resolve(root, 'packages/core/src/index.ts'),
+      '@volt/reactivity': resolve(root, 'packages/reactivity/src/index.ts'),
+      '@volt/compiler': resolve(root, 'packages/compiler/src/index.ts'),
+      '@volt/core/runtime': resolve(root, 'packages/core/src/runtime.ts'),
+      '@volt/core/jit': resolve(root, 'packages/core/src/jit.ts'),
+      '@volt/core': resolve(root, 'packages/core/src/index.ts'),
     },
   },
   test: {

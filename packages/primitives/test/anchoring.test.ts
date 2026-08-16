@@ -12,8 +12,8 @@
  * back with nothing but a name on it, and that the arrow is hidden.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileTemplate } from '@voltjs/core/jit';
-import { Signal, defineComponent, flushSync, mount } from '@voltjs/core';
+import { compileTemplate } from '@volt/core/jit';
+import { Signal, defineComponent, flushSync, mount } from '@volt/core';
 import {
   createAnchor,
   directionWatcherCount,

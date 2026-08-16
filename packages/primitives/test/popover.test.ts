@@ -7,8 +7,8 @@
  * real button is left to turn Enter into a click on its own.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileTemplate } from '@voltjs/core/jit';
-import { Signal, defineComponent, flushSync, mount } from '@voltjs/core';
+import { compileTemplate } from '@volt/core/jit';
+import { Signal, defineComponent, flushSync, mount } from '@volt/core';
 import { createPopover, type PopoverOptions } from '../src/popover.ts';
 import { dismissStackSize } from '../src/dismiss.ts';
 

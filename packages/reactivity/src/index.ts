@@ -1,5 +1,5 @@
 /**
- * @voltjs/reactivity
+ * @volt/reactivity
  *
  * The reactive core is the TC39 Signals proposal, implemented faithfully:
  *

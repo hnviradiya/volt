@@ -1,5 +1,5 @@
 {
-  "name": "@voltjs/primitives",
+  "name": "@volt/primitives",
   "version": "0.1.0",
   "description": "Headless, accessible component behaviour for Volt. No styles.",
   "type": "module",
@@ -22,7 +22,7 @@
     "build": "vite build && tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@voltjs/core": "workspace:*"
+    "@volt/core": "workspace:*"
   },
   "keywords": ["volt", "headless", "accessibility", "components"],
   "engines": {

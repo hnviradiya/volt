@@ -8,11 +8,11 @@
  * group would keep it alive after the row is gone.
  */
 import { describe, expect, it } from 'vitest';
-import { compile } from '@voltjs/compiler';
-import { Signal, flushSync } from '@voltjs/core';
-import type { RenderFn } from '@voltjs/core';
-import { createRoot } from '@voltjs/reactivity';
-import * as runtime from '@voltjs/core/runtime';
+import { compile } from '@volt/compiler';
+import { Signal, flushSync } from '@volt/core';
+import type { RenderFn } from '@volt/core';
+import { createRoot } from '@volt/reactivity';
+import * as runtime from '@volt/core/runtime';
 
 function render(source: string, grouped: boolean): RenderFn {
   const { body } = compile(source, { runtime: '_rt', groupRowBindings: grouped });

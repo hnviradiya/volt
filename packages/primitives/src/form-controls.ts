@@ -38,7 +38,7 @@
  * from its contents at all.
  */
 
-import { Signal, effect, onCleanup } from '@voltjs/core';
+import { Signal, effect, onCleanup } from '@volt/core';
 import { createCollection, ITEM_ATTRIBUTE } from './collection.js';
 import { createRovingFocus } from './roving-focus.js';
 

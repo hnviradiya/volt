@@ -87,7 +87,7 @@
  * right for every list, which is why this cannot be decided here.
  */
 
-import { Signal, effect, onCleanup } from '@voltjs/core';
+import { Signal, effect, onCleanup } from '@volt/core';
 import { createCollection } from './collection.js';
 import { createId } from './id.js';
 

@@ -1,7 +1,7 @@
 /**
- * @voltjs/ui
+ * @volt/ui
  *
- * Styled components built on @voltjs/primitives.
+ * Styled components built on @volt/primitives.
  *
  * This layer is meant to be replaceable: it must never be the only way to
  * reach a behaviour, or theming becomes something to fight rather than use.

@@ -135,7 +135,7 @@ nothing, which is why it works equally well as a module or through
 `compile()` reports what it removed:
 
 ```ts
-import { compile } from '@voltjs/compiler';
+import { compile } from '@volt/compiler';
 
 const { stats } = compile(source);
 // {

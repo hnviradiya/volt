@@ -10,7 +10,7 @@
  * onto a declared property.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
-import { compileTemplate } from '@voltjs/core/jit';
+import { compileTemplate } from '@volt/core/jit';
 import {
   Component,
   Prop,
@@ -20,7 +20,7 @@ import {
   mount,
   provideContext,
   useContext,
-} from '@voltjs/core';
+} from '@volt/core';
 
 let host: HTMLElement;
 

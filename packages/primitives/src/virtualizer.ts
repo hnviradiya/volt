@@ -42,7 +42,7 @@
  * handler instead.
  */
 
-import { Signal, effect, onCleanup } from '@voltjs/core';
+import { Signal, effect, onCleanup } from '@volt/core';
 
 // The proposal's own name for reading without subscribing; Volt adds no second
 // spelling for it.

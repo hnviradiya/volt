@@ -2,7 +2,7 @@
 
 ```ts
 import { defineConfig } from 'vite';
-import { volt } from '@voltjs/vite-plugin';
+import { volt } from '@volt/vite-plugin';
 
 export default defineConfig({
   plugins: [volt()],
@@ -60,7 +60,7 @@ interface VoltPluginOptions {
   include?: RegExp;              // default: /\.m?ts$/
   exclude?: RegExp;              // default: /[\\/]node_modules[\\/]/
   precompileTemplates?: boolean; // default: true
-  runtimeModule?: string;        // default: '@voltjs/core/runtime'
+  runtimeModule?: string;        // default: '@volt/core/runtime'
   debug?: boolean;               // default: false
 }
 ```
@@ -88,7 +88,7 @@ A missing file, or a syntax error inside one, fails the build with the
 build step — a test, a playground — supply `render` directly:
 
 ```ts
-import { compileTemplate } from '@voltjs/core/jit';
+import { compileTemplate } from '@volt/core/jit';
 
 @Component({
   selector: 'v-greeting',

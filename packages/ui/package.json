@@ -1,7 +1,7 @@
 {
-  "name": "@voltjs/ui",
+  "name": "@volt/ui",
   "version": "0.1.0",
-  "description": "Styled components built on @voltjs/primitives.",
+  "description": "Styled components built on @volt/primitives.",
   "type": "module",
   "license": "MIT",
   "sideEffects": false,
@@ -22,7 +22,7 @@
     "build": "vite build && tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@voltjs/core": "workspace:*"
+    "@volt/core": "workspace:*"
   },
   "keywords": ["volt", "components", "ui"],
   "engines": {

@@ -7,8 +7,8 @@
  * tested here.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createRoot, flushSync } from '@voltjs/core';
-import { createFocusScope, focusableWithin } from '@voltjs/primitives';
+import { createRoot, flushSync } from '@volt/core';
+import { createFocusScope, focusableWithin } from '@volt/primitives';
 
 let disposers: (() => void)[] = [];
 

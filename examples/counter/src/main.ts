@@ -1,4 +1,4 @@
-import { mount } from '@voltjs/core';
+import { mount } from '@volt/core';
 import { App } from './app.js';
 import './styles.scss';
 

@@ -13,7 +13,7 @@ A TypeScript UI framework built from three ideas that fit together:
 
 ```ts
 // counter.ts
-import { Component, Signal } from '@voltjs/core';
+import { Component, Signal } from '@volt/core';
 
 @Component({
   selector: 'v-counter',
@@ -40,7 +40,7 @@ export class Counter {
 ```
 
 ```ts
-import { mount } from '@voltjs/core';
+import { mount } from '@volt/core';
 mount(Counter, '#app');
 ```
 
@@ -96,22 +96,22 @@ outputs and custom events), `:prop-*` and `:attr-*` force the other direction.
 
 | Package | What it is |
 |---|---|
-| `@voltjs/reactivity` | The TC39 Signals implementation, plus effect scheduling and disposal scopes |
-| `@voltjs/compiler` | Template source → fine-grained DOM code. Pure `string → string`, no DOM needed |
-| `@voltjs/core` | The DOM runtime and the component layer |
-| `@voltjs/vite-plugin` | Lowers standard decorators and compiles templates at build time |
+| `@volt/reactivity` | The TC39 Signals implementation, plus effect scheduling and disposal scopes |
+| `@volt/compiler` | Template source → fine-grained DOM code. Pure `string → string`, no DOM needed |
+| `@volt/core` | The DOM runtime and the component layer |
+| `@volt/vite-plugin` | Lowers standard decorators and compiles templates at build time |
 
 ## Getting started
 
 ```bash
-pnpm add @voltjs/core
-pnpm add -D @voltjs/vite-plugin
+pnpm add @volt/core
+pnpm add -D @volt/vite-plugin
 ```
 
 ```ts
 // vite.config.ts
 import { defineConfig } from 'vite';
-import { volt } from '@voltjs/vite-plugin';
+import { volt } from '@volt/vite-plugin';
 
 export default defineConfig({ plugins: [volt()] });
 ```
@@ -124,7 +124,7 @@ currently can:
 2. **Compiles templates at build time**, so the compiler never reaches the
    browser.
 
-Without a build step, import `@voltjs/core/jit` to compile templates in the
+Without a build step, import `@volt/core/jit` to compile templates in the
 browser instead. Good for prototypes and playgrounds; it ships the compiler.
 
 ## Requirements

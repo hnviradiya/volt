@@ -34,7 +34,7 @@ import {
   runWithScope,
   type Dispose,
   type Scope,
-} from '@voltjs/reactivity';
+} from '@volt/reactivity';
 
 import { insert } from './dom.js';
 
@@ -65,7 +65,7 @@ export interface ComponentConfig {
    *
    * The preferred form: a real `.html` file gets syntax highlighting,
    * formatting and Emmet, none of which a template literal does. Resolved and
-   * compiled at build time by `@voltjs/vite-plugin`, which also watches the
+   * compiled at build time by `@volt/vite-plugin`, which also watches the
    * file so edits hot-reload.
    */
   templateUrl?: string;
@@ -73,8 +73,8 @@ export interface ComponentConfig {
   /**
    * A pre-compiled render function.
    *
-   * Normally filled in by `@voltjs/vite-plugin` from `templateUrl`. Supply it
-   * directly with `compileTemplate()` from `@voltjs/core/jit` when there is no
+   * Normally filled in by `@volt/vite-plugin` from `templateUrl`. Supply it
+   * directly with `compileTemplate()` from `@volt/core/jit` when there is no
    * build step — tests and playgrounds.
    */
   render?: RenderFn;
@@ -186,7 +186,7 @@ function readMetadata<T>(metadata: MetadataRecord | undefined, key: symbol): T[]
 /**
  * Register a class as a component without decorator syntax.
  *
- * This is what `@Component` reduces to, and what `@voltjs/vite-plugin` emits
+ * This is what `@Component` reduces to, and what `@volt/vite-plugin` emits
  * directly: knowing every prop at build time, it can drop both decorators from
  * the output rather than shipping a decorator runtime to evaluate them. Hand
  * calls are supported but rarely worth writing.
@@ -351,8 +351,8 @@ function getRenderFn(component: ComponentType<unknown>, resolved: ResolvedConfig
     if (__VOLT_DEV__) {
       throw new Error(
         `[volt] ${component.name} declares templateUrl "${config.templateUrl}", which is ` +
-          'resolved at build time. Add @voltjs/vite-plugin to your Vite config, or supply ' +
-          "`render` directly using compileTemplate() from '@voltjs/core/jit'.",
+          'resolved at build time. Add @volt/vite-plugin to your Vite config, or supply ' +
+          "`render` directly using compileTemplate() from '@volt/core/jit'.",
       );
     }
     throw new Error('[volt] templateUrl was not compiled');

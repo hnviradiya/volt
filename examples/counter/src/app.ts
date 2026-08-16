@@ -1,4 +1,4 @@
-import { Component, Signal } from '@voltjs/core';
+import { Component, Signal } from '@volt/core';
 import { Counter } from './counter.js';
 import { Todos } from './todos.js';
 

@@ -1,5 +1,5 @@
 import { describe, it } from 'vitest';
-import { compile } from '@voltjs/compiler';
+import { compile } from '@volt/compiler';
 
 /**
  * Not an assertion suite — this prints generated code so failures elsewhere

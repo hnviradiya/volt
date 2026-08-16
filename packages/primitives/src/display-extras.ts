@@ -16,7 +16,7 @@
  * without every timestamp on the page owning a timer to do it.
  */
 
-import { Signal, effect, onCleanup } from '@voltjs/core';
+import { Signal, effect, onCleanup } from '@volt/core';
 import { createCollection, ITEM_ATTRIBUTE } from './collection.js';
 
 // The proposal's own name for reading without subscribing; Volt adds no second

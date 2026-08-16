@@ -1,10 +1,10 @@
 {
-  "name": "@voltjs/benchmarks",
+  "name": "@volt/benchmarks",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@voltjs/core": "workspace:*"
+    "@volt/core": "workspace:*"
   },
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,7 @@
     "preview": "vite preview"
   },
   "devDependencies": {
-    "@voltjs/vite-plugin": "workspace:*",
+    "@volt/vite-plugin": "workspace:*",
     "vite": "^8.2.1"
   }
 }

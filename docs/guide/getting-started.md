@@ -8,8 +8,8 @@ Volt targets current engines and carries no legacy support. You need **Node
 ## Install
 
 ```bash
-pnpm add @voltjs/core
-pnpm add -D @voltjs/vite-plugin vite
+pnpm add @volt/core
+pnpm add -D @volt/vite-plugin vite
 ```
 
 ## Configure Vite
@@ -17,7 +17,7 @@ pnpm add -D @voltjs/vite-plugin vite
 ```ts
 // vite.config.ts
 import { defineConfig } from 'vite';
-import { volt } from '@voltjs/vite-plugin';
+import { volt } from '@volt/vite-plugin';
 
 export default defineConfig({
   plugins: [volt()],
@@ -36,7 +36,7 @@ else in the toolchain currently does:
    browser and no template is parsed at runtime.
 
 ::: tip No build step?
-Import `@voltjs/core/jit` once at startup to compile templates in the browser
+Import `@volt/core/jit` once at startup to compile templates in the browser
 instead. Convenient for prototypes and playgrounds — but it ships the
 compiler, so prefer the plugin for anything real.
 :::
@@ -65,7 +65,7 @@ supported.
 
 ```ts
 // src/counter.ts
-import { Component, Signal } from '@voltjs/core';
+import { Component, Signal } from '@volt/core';
 
 @Component({
   selector: 'v-counter',
@@ -113,7 +113,7 @@ with `@use` are watched too.
 
 ```ts
 // src/main.ts
-import { mount } from '@voltjs/core';
+import { mount } from '@volt/core';
 import { Counter } from './counter.js';
 
 mount(Counter, '#app');

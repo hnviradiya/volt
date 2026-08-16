@@ -16,7 +16,7 @@
  * ordering ambiguous.
  */
 
-import { onCleanup } from '@voltjs/core';
+import { onCleanup } from '@volt/core';
 import type { Collection } from './collection.js';
 
 export type Orientation = 'vertical' | 'horizontal' | 'both';

@@ -11,8 +11,8 @@
  * no `overflow` of its own, and `touch-action` nowhere near the viewport.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileTemplate } from '@voltjs/core/jit';
-import { Component, Signal, createRoot, flushSync, mount } from '@voltjs/core';
+import { compileTemplate } from '@volt/core/jit';
+import { Component, Signal, createRoot, flushSync, mount } from '@volt/core';
 import {
   center,
   container,

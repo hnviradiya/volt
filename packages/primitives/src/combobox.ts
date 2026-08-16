@@ -96,7 +96,7 @@
  * the locale's own catalogue, which is where the defaults come from.
  */
 
-import { Signal, effect, onCleanup } from '@voltjs/core';
+import { Signal, effect, onCleanup } from '@volt/core';
 import { createAnchor, type Anchor, type AnchorPlacement } from './anchoring.js';
 import { createResource, type Resource, type ResourceFetcher } from './async.js';
 import { createCollection, ITEM_ATTRIBUTE } from './collection.js';

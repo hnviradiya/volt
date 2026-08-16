@@ -12,8 +12,8 @@
  * not depend on how fast the machine running it is.
  */
 import { describe, expect, it } from 'vitest';
-import { compileTemplate } from '@voltjs/core/jit';
-import { Component, Prop, Signal, createRoot, flushSync, mount, renderEffect } from '@voltjs/core';
+import { compileTemplate } from '@volt/core/jit';
+import { Component, Prop, Signal, createRoot, flushSync, mount, renderEffect } from '@volt/core';
 
 interface Item {
   id: number;

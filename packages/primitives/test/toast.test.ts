@@ -10,8 +10,8 @@
  * is measured against.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileTemplate } from '@voltjs/core/jit';
-import { Component, Signal, flushSync, mount } from '@voltjs/core';
+import { compileTemplate } from '@volt/core/jit';
+import { Component, Signal, flushSync, mount } from '@volt/core';
 import { createToaster, type Toast, type ToasterOptions } from '../src/toast.ts';
 
 interface Message {

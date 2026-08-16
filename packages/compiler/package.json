@@ -1,5 +1,5 @@
 {
-  "name": "@voltjs/compiler",
+  "name": "@volt/compiler",
   "version": "0.1.0",
   "description": "Volt template compiler \u2014 parses ':'-prefixed templates and emits fine-grained DOM code.",
   "type": "module",

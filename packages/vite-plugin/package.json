@@ -1,5 +1,5 @@
 {
-  "name": "@voltjs/vite-plugin",
+  "name": "@volt/vite-plugin",
   "version": "0.1.0",
   "description": "Compile Volt templates at build time so no compiler ships to the browser.",
   "type": "module",
@@ -21,7 +21,7 @@
     "build": "vite build && tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@voltjs/compiler": "workspace:*",
+    "@volt/compiler": "workspace:*",
     "esbuild": "^0.28.2",
     "magic-string": "^0.30.21",
     "sass": "^1.102.0"

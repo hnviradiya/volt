@@ -11,7 +11,7 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
-      '@voltjs/vite-plugin':
+      '@volt/vite-plugin':
         specifier: workspace:*
         version: link:packages/vite-plugin
       esbuild:
@@ -38,11 +38,11 @@ importers:
 
   benchmarks:
     dependencies:
-      '@voltjs/core':
+      '@volt/core':
         specifier: workspace:*
         version: link:../packages/core
     devDependencies:
-      '@voltjs/vite-plugin':
+      '@volt/vite-plugin':
         specifier: workspace:*
         version: link:../packages/vite-plugin
       vite:
@@ -57,11 +57,11 @@ importers:
 
   examples/counter:
     dependencies:
-      '@voltjs/core':
+      '@volt/core':
         specifier: workspace:*
         version: link:../../packages/core
     devDependencies:
-      '@voltjs/vite-plugin':
+      '@volt/vite-plugin':
         specifier: workspace:*
         version: link:../../packages/vite-plugin
       sass:
@@ -75,28 +75,28 @@ importers:
 
   packages/core:
     dependencies:
-      '@voltjs/compiler':
+      '@volt/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@voltjs/reactivity':
+      '@volt/reactivity':
         specifier: workspace:*
         version: link:../reactivity
 
   packages/editor:
     dependencies:
-      '@voltjs/core':
+      '@volt/core':
         specifier: workspace:*
         version: link:../core
 
   packages/grid:
     dependencies:
-      '@voltjs/core':
+      '@volt/core':
         specifier: workspace:*
         version: link:../core
 
   packages/primitives:
     dependencies:
-      '@voltjs/core':
+      '@volt/core':
         specifier: workspace:*
         version: link:../core
 
@@ -104,13 +104,13 @@ importers:
 
   packages/ui:
     dependencies:
-      '@voltjs/core':
+      '@volt/core':
         specifier: workspace:*
         version: link:../core
 
   packages/vite-plugin:
     dependencies:
-      '@voltjs/compiler':
+      '@volt/compiler':
         specifier: workspace:*
         version: link:../compiler
       esbuild:

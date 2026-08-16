@@ -10,8 +10,8 @@
  * anyway, and a radio group with nothing selected that Tab cannot reach.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { compileTemplate } from '@voltjs/core/jit';
-import { Component, Signal, flushSync, mount } from '@voltjs/core';
+import { compileTemplate } from '@volt/core/jit';
+import { Component, Signal, flushSync, mount } from '@volt/core';
 import {
   createCheckbox,
   createRadioGroup,

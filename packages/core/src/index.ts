@@ -1,5 +1,5 @@
 /**
- * @voltjs/core
+ * @volt/core
  *
  * Volt is a TypeScript UI framework built from three ideas that fit together:
  *
@@ -49,7 +49,7 @@ export {
   provideContext,
   isSignal,
   isWritableSignal,
-} from '@voltjs/reactivity';
+} from '@volt/reactivity';
 
 export type {
   Context,
@@ -59,4 +59,4 @@ export type {
   ReadableSignal,
   Scope,
   SignalOptions,
-} from '@voltjs/reactivity';
+} from '@volt/reactivity';

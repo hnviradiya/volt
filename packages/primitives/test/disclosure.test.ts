@@ -9,8 +9,8 @@
  * arbitrary, but where it ends up is not.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileTemplate } from '@voltjs/core/jit';
-import { Component, Signal, flushSync, mount } from '@voltjs/core';
+import { compileTemplate } from '@volt/core/jit';
+import { Component, Signal, flushSync, mount } from '@volt/core';
 import {
   ACCORDION_TRIGGER_ATTRIBUTE,
   COLLAPSIBLE_HEIGHT_PROPERTY,

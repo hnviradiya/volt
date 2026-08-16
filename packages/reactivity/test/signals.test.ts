@@ -11,7 +11,7 @@ import {
   createContext,
   provideContext,
   useContext,
-} from '@voltjs/reactivity';
+} from '@volt/reactivity';
 
 describe('Signal.State', () => {
   it('reads and writes', () => {

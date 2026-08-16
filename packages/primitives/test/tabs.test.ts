@@ -7,8 +7,8 @@
  * tab. All of that is invisible to anyone testing with a mouse.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileTemplate } from '@voltjs/core/jit';
-import { Component, Signal, flushSync, mount } from '@voltjs/core';
+import { compileTemplate } from '@volt/core/jit';
+import { Component, Signal, flushSync, mount } from '@volt/core';
 import { createTabs, TAB_VALUE_ATTRIBUTE, type TabsOptions } from '../src/tabs.ts';
 
 let host: HTMLElement;

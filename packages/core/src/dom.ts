@@ -17,7 +17,7 @@ import {
   onCleanup,
   renderEffect,
   type Scope,
-} from '@voltjs/reactivity';
+} from '@volt/reactivity';
 
 // Annotated explicitly: the inferred type names an internal module, which
 // would leak a non-portable path into the emitted declarations.

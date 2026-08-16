@@ -1,9 +1,9 @@
 /**
- * @voltjs/grid
+ * @volt/grid
  *
  * A virtualized data grid.
  *
- * Separate from @voltjs/primitives because of its size, but deliberately not
+ * Separate from @volt/primitives because of its size, but deliberately not
  * self-sufficient: virtualization, collection and roving focus belong to the
  * shared primitives even while the grid is their only consumer. A private copy
  * here would have to be reconciled later with combobox, tree and select.

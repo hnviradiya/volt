@@ -18,7 +18,7 @@
  *     above a layer rather than of its element alone.
  */
 
-import { onCleanup } from '@voltjs/core';
+import { onCleanup } from '@volt/core';
 
 export interface DismissOptions {
   /** Elements that count as inside, beyond the layer itself — e.g. a trigger. */

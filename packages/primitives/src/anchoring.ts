@@ -37,7 +37,7 @@
  * `labels` option, because this puts no string in front of a user.
  */
 
-import { Signal, effect, onCleanup } from '@voltjs/core';
+import { Signal, effect, onCleanup } from '@volt/core';
 import { createId } from './id.js';
 
 // The proposal's own name for reading without subscribing; Volt adds no second

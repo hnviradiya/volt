@@ -9,9 +9,9 @@
  * event, which is what a browser would do.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
-import { compileTemplate } from '@voltjs/core/jit';
-import { Component, Signal, flushSync, mount } from '@voltjs/core';
-import { createPresence } from '@voltjs/primitives';
+import { compileTemplate } from '@volt/core/jit';
+import { Component, Signal, flushSync, mount } from '@volt/core';
+import { createPresence } from '@volt/primitives';
 
 let host: HTMLElement;
 
