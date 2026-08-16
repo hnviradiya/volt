@@ -1,0 +1,37 @@
+/**
+ * The brand palette, taken from the mark.
+ *
+ * `#6F42C1` is the mark's accent and shiki's own function colour, so the
+ * heading, the buttons and the highlighted command in every install snippet
+ * are one colour rather than three.
+ *
+ * The hero name is the one place the deep value is used on both grounds. It
+ * is display type at 60px and it is the mark's own colour, so it is held to
+ * the logo's standard rather than to running text's — deliberately, and it is
+ * the only element treated that way.
+ *
+ * Everything read rather than looked at keeps two values. `#6F42C1` measures
+ * 2.5:1 on the dark ground, which a heading this size can carry and a link
+ * cannot, so links and inline brand text lift to `#B392F0` — the same hue at
+ * 261, only brighter, and the pair shiki already ships. Button fills keep the
+ * deep value, since the text sitting on them is white.
+ */
+:root {
+  --vp-c-brand-1: #6f42c1;
+  --vp-c-brand-2: #5c36a4;
+  --vp-c-brand-3: #4e2d8c;
+  --vp-c-brand-soft: rgb(111 66 193 / 0.14);
+
+  --vp-home-hero-name-color: #6f42c1;
+}
+
+.dark {
+  --vp-c-brand-1: #b392f0;
+  --vp-c-brand-2: #9b6fe8;
+  /* Button fills carry white text, so they keep the deep value. */
+  --vp-c-brand-3: #6f42c1;
+  --vp-c-brand-soft: rgb(179 146 240 / 0.16);
+
+  /* The mark's colour, unchanged by the theme — see above. */
+  --vp-home-hero-name-color: #6f42c1;
+}
