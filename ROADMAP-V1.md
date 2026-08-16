@@ -625,6 +625,47 @@ built with it.
 - Fake timers that cooperate with the scheduler, since faking `queueMicrotask`
   stops effects running at all — a trap already hit while testing `createResource`
 
+## Messages are compiled, not loaded
+
+How other libraries do it, and why none of the four is what Volt should ship.
+
+| approach | who | what it costs |
+| --- | --- | --- |
+| One catalogue per locale, loaded at startup | react-intl, i18next with one namespace | every string in the application ships to every page |
+| Manual namespaces, loaded on demand | i18next, Vue I18n | you hand-chunk, and a namespace still ships all of itself — cal.com loads 3,000 messages per locale in any component that translates anything |
+| One build per locale | Angular | zero runtime cost, no runtime switching, and N deployments |
+| Compile each message to a tree-shakeable function | Paraglide | the bundler drops what is unused: 47–144 kB against i18next's 205–422 kB, and the size stops tracking the number of messages |
+
+The fourth is the right shape, and Volt can do better than it, because the
+template compiler reads the call sites. Paraglide tree-shakes messages because
+they are imports; Volt's compiler *sees* `t('close')` inside a template and
+knows which component asked for it.
+
+That buys three things a bundler alone cannot:
+
+- **A missing key is a build error**, with the template file and line, rather
+  than a fallback string discovered in production or in a language nobody on
+  the team reads.
+- **Messages follow the code split.** The compiler already decides which
+  components cannot appear on first paint; their messages belong in the same
+  chunk, so a locale is never loaded whole.
+- **An unused message is a warning**, because the compiler knows the full set
+  of call sites — which is how a catalogue stays honest as an application ages.
+
+### What this means for the primitive already built
+
+`createLocaleProvider` takes a runtime `MessageCatalog` object. That is right
+for the library's own strings — roughly thirty of them, needed whether or not
+there is a build step, and small enough that shipping them whole costs
+nothing. It is wrong as the way an application declares its own messages,
+which is the case that scales to thousands.
+
+So the runtime catalogue stays as the fallback and the JIT path, and the
+build-time form is added beside it. Deciding this now rather than later
+matters: the runtime shape is the one applications would otherwise standardise
+on, and moving them off it afterwards is a breaking change to every message in
+every one of them.
+
 ## Developer tools
 
 A browser extension plus the hooks in core it needs, all behind `__VOLT_DEV__`
