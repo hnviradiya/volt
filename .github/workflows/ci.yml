@@ -20,14 +20,18 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Before the typecheck, not after. Packages import each other by name,
+      # which resolves through `exports` to `dist/*.d.ts` — files that only
+      # exist once the package has been built. A working tree has them left
+      # over from a previous build; a fresh checkout does not.
+      - name: Build packages
+        run: pnpm build
+
       - name: Typecheck
         run: pnpm typecheck
 
       - name: Test
         run: pnpm test
-
-      - name: Build packages
-        run: pnpm build
 
       - name: Build example
         run: pnpm --filter @voltjs/example-counter run build
