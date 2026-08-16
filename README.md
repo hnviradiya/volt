@@ -133,7 +133,7 @@ polyfilled (Volt installs it).
 
 ```bash
 pnpm install
-pnpm test          # 96 tests across reactivity, compiler, runtime, and plugin
+pnpm test          # the full suite: reactivity, compiler, runtime, plugin, primitives
 pnpm typecheck
 pnpm build
 pnpm dev           # the example app
@@ -143,6 +143,13 @@ pnpm docs:dev      # the documentation site
 ## Documentation
 
 Run `pnpm docs:dev`, or see [`docs/`](docs/).
+
+## Sponsorship
+
+Volt is built in the open and is free to use under the MIT licence. If it saves
+you time, [sponsoring the work](https://github.com/sponsors/hnviradiya) pays
+for the parts nobody volunteers for — accessibility conformance, browser
+testing, and keeping the benchmark honest.
 
 ## License
 

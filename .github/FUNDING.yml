@@ -1,0 +1,16 @@
+# Shows a "Sponsor" button on the repository page, and on every release.
+# GitHub reads only this file — the README link below is for people who are
+# already reading rather than browsing.
+#
+# The account has to be enrolled at https://github.com/sponsors first; until
+# it is, the button appears but leads nowhere.
+github: [hnviradiya]
+
+# Uncomment any that apply. Several may be listed at once.
+# open_collective: volt
+# ko_fi: hnviradiya
+# liberapay: hnviradiya
+# buy_me_a_coffee: hnviradiya
+# polar: hnviradiya
+# thanks_dev: hnviradiya
+# custom: ['https://example.com/donate']
