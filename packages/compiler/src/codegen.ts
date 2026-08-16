@@ -57,6 +57,17 @@ export interface CodegenOptions {
   dev?: boolean;
   /** Module specifier for the runtime import in `module` mode. */
   runtimeModule?: string;
+  /**
+   * Drive a `:for` row's bindings from one effect rather than one each.
+   *
+   * An effect costs roughly 1.6 kB against 31 bytes for a signal, and a row
+   * typically has three, so this is most of what a row allocates. The trade is
+   * coarser invalidation: any dependency of any binding in the row re-runs all
+   * of them, each still comparing its own value before touching the DOM.
+   *
+   * Off by default while the two shapes are being measured against each other.
+   */
+  groupRowBindings?: boolean;
 }
 
 export interface CodegenResult {
@@ -170,6 +181,14 @@ export function generate(root: RootNode, options: CodegenOptions = {}): CodegenR
 
 class Generator {
   private readonly rt: string;
+  /** See `CodegenOptions.groupRowBindings`. */
+  private readonly groupRowBindings: boolean;
+  /**
+   * Set while generating a `:for` row, and cleared by the first block that
+   * takes it. Only that outermost block groups; anything nested is reached
+   * through an effect of its own and gains nothing.
+   */
+  private groupNextBlock = false;
   private readonly ctxName: string;
   private readonly dev: boolean;
   private readonly filename: string;
@@ -204,6 +223,7 @@ class Generator {
     this.dev = options.dev ?? false;
     this.filename = options.filename ?? 'template';
     this.runtimeModule = options.runtimeModule ?? '@voltjs/core/runtime';
+    this.groupRowBindings = options.groupRowBindings ?? false;
   }
 
   run(root: RootNode): CodegenResult {
@@ -308,6 +328,10 @@ class Generator {
 
   /** Generate an expression producing the DOM for a list of sibling nodes. */
   private genChildrenExpression(nodes: TemplateChildNode[], ctx: PrintContext): string {
+    // Taken here so the early single-child paths below, which recurse, cannot
+    // pass it down to a nested block.
+    const groupBindings = this.groupNextBlock;
+    this.groupNextBlock = false;
     const meaningful = nodes.filter((n) => n.type !== 'comment');
     if (meaningful.length === 0) return 'null';
 
@@ -366,7 +390,13 @@ class Generator {
     const statements: string[] = [];
     statements.push(`const ${rootVar} = ${tmplId}();`);
     statements.push(...navigation);
-    statements.push(...effectLines);
+    // One line cannot be shared with anything, and `group` would only add a
+    // call for it to unwrap again.
+    if (groupBindings && effectLines.length > 1) {
+      statements.push(`${this.rt}.group(() => {\n${indent(effectLines.join('\n'), 2)}\n});`);
+    } else {
+      statements.push(...effectLines);
+    }
 
     if (rootCount > 1) {
       // Capture top-level nodes before insertion moves them out of the fragment.
@@ -1155,10 +1185,14 @@ class Generator {
     const stripped = stripDirectives(node, ['for', 'key']);
     const indexParam = parsed.index ?? this.nextId('idx');
 
-    const genBody = (): string =>
-      stripped.isTemplate
+    const genBody = (): string => {
+      this.groupNextBlock = this.groupRowBindings;
+      const body = stripped.isTemplate
         ? this.genChildrenExpression(stripped.children, ctx)
         : this.genChildrenExpression([stripped], ctx);
+      this.groupNextBlock = false;
+      return body;
+    };
 
     let rowFn: string;
 

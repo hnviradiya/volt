@@ -23,6 +23,37 @@ import {
 // would leak a non-portable path into the emitted declarations.
 const untrack: <T>(cb: () => T) => T = Signal.subtle.untrack;
 
+/**
+ * Bindings being collected for a shared effect, or null when each makes its own.
+ *
+ * Only ever set for the synchronous span of a `group()` call, so nothing
+ * asynchronous can observe it and no stack is needed.
+ */
+let collecting: (() => void)[] | null = null;
+
+/**
+ * Create an effect that builds content of its own.
+ *
+ * Anything nested inside belongs to this effect, not to whatever group is
+ * being collected further out — a row's own bindings must not outlive the row.
+ * Clearing the collector for the span of the creation (which includes the
+ * first synchronous run) is enough, because later runs happen long after
+ * `group` has returned.
+ */
+function buildEffect(fn: () => void): void {
+  if (collecting === null) {
+    renderEffect(fn);
+    return;
+  }
+  const previous = collecting;
+  collecting = null;
+  try {
+    renderEffect(fn);
+  } finally {
+    collecting = previous;
+  }
+}
+
 export type Accessor<T> = () => T;
 export type MaybeAccessor<T> = T | Accessor<T>;
 /** Anything a compiled block may produce. */
@@ -87,7 +118,7 @@ export function insert(parent: Node, accessor: unknown, marker: Node | null = nu
   // The previously inserted content is held in a closure rather than threaded
   // through the effect's return value, which is reserved for cleanup.
   let current: Current = null;
-  renderEffect(() => {
+  buildEffect(() => {
     current = insertExpression(parent, (accessor as Accessor<unknown>)(), marker, current);
   });
 }
@@ -290,7 +321,7 @@ export function branch(branches: BranchEntry[]): Accessor<unknown> {
 
   // A render effect, not a computed: building a branch creates effects, and
   // re-running this disposes the previous branch's scope along with them.
-  renderEffect(() => {
+  buildEffect(() => {
     const index = active.get();
     result.set(index === -1 ? null : untrack(() => branches[index]![1]()));
   });
@@ -349,7 +380,7 @@ export function each(
 
   // A render effect rather than a computed, because reconciling writes the
   // per-row item and index signals — something a pure computed may not do.
-  renderEffect(() => {
+  buildEffect(() => {
     const raw = list();
     const items: unknown[] = Array.isArray(raw)
       ? raw
@@ -477,7 +508,7 @@ function materializeBlock(value: unknown): MountedBlock {
     holder.appendChild(anchor);
 
     let current: Current = null;
-    renderEffect(() => {
+    buildEffect(() => {
       const parent = anchor.parentNode ?? holder;
       current = insertExpression(parent, (value as Accessor<unknown>)(), anchor, current);
     });
@@ -638,6 +669,47 @@ export function guard(handler: EventListener, config: GuardConfig): EventListene
 // Attribute / property bindings
 // ---------------------------------------------------------------------------
 
+/**
+ * Run several bindings from one effect instead of one each.
+ *
+ * An effect is the dominant per-row cost — roughly 1.6 kB retained apiece,
+ * against 31 bytes for a signal and 105 for a scope — and a list row commonly
+ * has three. Sharing one effect between them trades that for coarser
+ * invalidation: any dependency of any binding in the group re-runs all of
+ * them.
+ *
+ * That is cheaper than it sounds, because each binding still compares its own
+ * value and writes to the DOM only when it changed; a re-run that finds
+ * nothing different costs an accessor call and a comparison. It is not free,
+ * though: a signal read by one binding now wakes the others, so a group is
+ * worth it where the bindings share their dependencies — the cells of a row —
+ * and not where they are independent.
+ *
+ * Nested `insert`, `each` and `branch` are unaffected: they build their own
+ * effects directly rather than through `bind`, which is what keeps a row's
+ * children from being swallowed into its parent's group.
+ */
+export function group(build: () => void): void {
+  const updates: (() => void)[] = [];
+  const previous = collecting;
+  collecting = updates;
+  try {
+    build();
+  } finally {
+    collecting = previous;
+  }
+
+  if (updates.length === 0) return;
+  // One binding gains nothing from the indirection.
+  if (updates.length === 1) {
+    renderEffect(updates[0]!);
+    return;
+  }
+  renderEffect(() => {
+    for (let i = 0; i < updates.length; i++) updates[i]!();
+  });
+}
+
 function bind<T>(accessor: MaybeAccessor<T>, apply: (value: T) => void): void {
   if (typeof accessor !== 'function') {
     apply(accessor as T);
@@ -647,14 +719,20 @@ function bind<T>(accessor: MaybeAccessor<T>, apply: (value: T) => void): void {
   // which would otherwise be indistinguishable from "unchanged".
   let previous: T | undefined;
   let first = true;
-  renderEffect(() => {
+  const update = (): void => {
     const value = (accessor as Accessor<T>)();
     if (first || !Object.is(value, previous)) {
       first = false;
       previous = value;
       apply(value);
     }
-  });
+  };
+
+  if (collecting) {
+    collecting.push(update);
+    return;
+  }
+  renderEffect(update);
 }
 
 export function bindAttr(el: Element, name: string, accessor: MaybeAccessor<unknown>): void {
@@ -704,7 +782,17 @@ export function portal(target: unknown, build: () => unknown): void {
   const marker = document.createComment('');
   container.appendChild(marker);
 
-  const current = insertExpression(container, build(), marker, null);
+  // Portalled content is built here rather than inside an effect, so it would
+  // otherwise land in an enclosing `group` — it belongs to itself.
+  const previous = collecting;
+  collecting = null;
+  let built: unknown;
+  try {
+    built = build();
+  } finally {
+    collecting = previous;
+  }
+  const current = insertExpression(container, built, marker, null);
 
   onCleanup(() => {
     removeNodes(current);

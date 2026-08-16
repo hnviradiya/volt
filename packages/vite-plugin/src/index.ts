@@ -40,6 +40,13 @@ export interface VoltPluginOptions {
   runtimeModule?: string;
   /** Log what the compiler folded away for each template. */
   debug?: boolean;
+  /**
+   * Drive a `:for` row's bindings from one effect rather than one each.
+   *
+   * Off while the two shapes are being measured against each other; see
+   * `CodegenOptions.groupRowBindings`.
+   */
+  groupRowBindings?: boolean;
 }
 
 const DEFAULT_INCLUDE = /\.m?ts$/;
@@ -52,6 +59,7 @@ export function volt(options: VoltPluginOptions = {}): Plugin[] {
   const exclude = options.exclude ?? DEFAULT_EXCLUDE;
   const runtimeModule = options.runtimeModule ?? '@voltjs/core/runtime';
   const precompile = options.precompileTemplates ?? true;
+  const groupRowBindings = options.groupRowBindings ?? false;
 
   const shouldProcess = (id: string): boolean => {
     const clean = id.split('?')[0] ?? id;
@@ -67,8 +75,13 @@ export function volt(options: VoltPluginOptions = {}): Plugin[] {
       if (!code.includes('@Component')) return null;
 
       try {
-        return await compileTemplates(code, id, runtimeModule, options.debug ?? false, (file) =>
-          this.addWatchFile(file),
+        return await compileTemplates(
+          code,
+          id,
+          runtimeModule,
+          options.debug ?? false,
+          groupRowBindings,
+          (file) => this.addWatchFile(file),
         );
       } catch (err) {
         if (err instanceof CompilerError) {
@@ -184,6 +197,7 @@ async function compileTemplates(
   id: string,
   runtimeModule: string,
   debug: boolean,
+  groupRowBindings: boolean,
   watch: (file: string) => void,
 ): Promise<{ code: string; map: null } | null> {
   const templates = findTemplateSites(code);
@@ -221,6 +235,7 @@ async function compileTemplates(
       filename: file,
       runtime: RUNTIME_NAMESPACE,
       runtimeModule,
+      groupRowBindings,
     });
 
     if (debug) {

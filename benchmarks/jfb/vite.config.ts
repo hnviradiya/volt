@@ -11,7 +11,9 @@ import { resolve } from 'node:path';
  */
 export default defineConfig({
   root: import.meta.dirname,
-  plugins: [volt()],
+  // `VOLT_GROUP_ROWS=1` builds the shape where a row's bindings share one
+  // effect, so the two can be measured against each other from one checkout.
+  plugins: [volt({ groupRowBindings: process.env.VOLT_GROUP_ROWS === '1' })],
   build: {
     target: 'esnext',
     minify: 'terser',
