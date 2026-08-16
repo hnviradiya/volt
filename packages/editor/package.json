@@ -24,8 +24,26 @@
   "dependencies": {
     "@voltdev/core": "workspace:*"
   },
-  "keywords": ["volt", "editor", "richtext"],
+  "keywords": [
+    "volt",
+    "editor",
+    "richtext"
+  ],
   "engines": {
     "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/volt-js/volt.git",
+    "directory": "packages/editor"
+  },
+  "homepage": "https://voltjs.dev",
+  "bugs": {
+    "url": "https://github.com/volt-js/volt/issues"
+  },
+  "author": "Hardik Viradiya",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

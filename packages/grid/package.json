@@ -24,8 +24,27 @@
   "dependencies": {
     "@voltdev/core": "workspace:*"
   },
-  "keywords": ["volt", "grid", "table", "datagrid"],
+  "keywords": [
+    "volt",
+    "grid",
+    "table",
+    "datagrid"
+  ],
   "engines": {
     "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/volt-js/volt.git",
+    "directory": "packages/grid"
+  },
+  "homepage": "https://voltjs.dev",
+  "bugs": {
+    "url": "https://github.com/volt-js/volt/issues"
+  },
+  "author": "Hardik Viradiya",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

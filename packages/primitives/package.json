@@ -24,8 +24,27 @@
   "dependencies": {
     "@voltdev/core": "workspace:*"
   },
-  "keywords": ["volt", "headless", "accessibility", "components"],
+  "keywords": [
+    "volt",
+    "headless",
+    "accessibility",
+    "components"
+  ],
   "engines": {
     "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/volt-js/volt.git",
+    "directory": "packages/primitives"
+  },
+  "homepage": "https://voltjs.dev",
+  "bugs": {
+    "url": "https://github.com/volt-js/volt/issues"
+  },
+  "author": "Hardik Viradiya",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

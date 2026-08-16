@@ -24,8 +24,26 @@
   "dependencies": {
     "@voltdev/core": "workspace:*"
   },
-  "keywords": ["volt", "components", "ui"],
+  "keywords": [
+    "volt",
+    "components",
+    "ui"
+  ],
   "engines": {
     "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/volt-js/volt.git",
+    "directory": "packages/ui"
+  },
+  "homepage": "https://voltjs.dev",
+  "bugs": {
+    "url": "https://github.com/volt-js/volt/issues"
+  },
+  "author": "Hardik Viradiya",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }
