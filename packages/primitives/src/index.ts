@@ -57,3 +57,23 @@ export * from './form-controls.js';
 export * from './toast.js';
 export * from './display.js';
 export * from './async.js';
+
+// ---------------------------------------------------------------------------
+// Foundations
+// ---------------------------------------------------------------------------
+
+export * from './virtualizer.js';
+export * from './anchoring.js';
+export * from './form-field.js';
+export * from './drag-drop.js';
+export * from './i18n.js';
+export * from './layout.js';
+export * from './navigation.js';
+export * from './feedback.js';
+export * from './display-extras.js';
+
+// Listbox, combobox, tree, inputs and slider/upload are in ../pending. They
+// typecheck, but the run that wrote them hit a limit before the review pass,
+// and listbox's own tests encode two incompatible models of Shift+Arrow. They
+// move here once that is settled and they are covered.
+
