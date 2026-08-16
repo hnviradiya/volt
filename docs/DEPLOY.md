@@ -29,7 +29,7 @@ DNS at the registrar:
 | `A` | `@` | `185.199.109.153` |
 | `A` | `@` | `185.199.110.153` |
 | `A` | `@` | `185.199.111.153` |
-| `CNAME` | `www` | `hnviradiya.github.io` |
+| `CNAME` | `www` | `volt-js.github.io` |
 
 Then tick **Enforce HTTPS** once the certificate is issued, which takes a few
 minutes after the DNS resolves. `.dev` is on the HSTS preload list, so the
