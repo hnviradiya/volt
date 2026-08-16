@@ -11,7 +11,7 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
-      '@volt/vite-plugin':
+      '@voltdev/vite-plugin':
         specifier: workspace:*
         version: link:packages/vite-plugin
       esbuild:
@@ -38,11 +38,11 @@ importers:
 
   benchmarks:
     dependencies:
-      '@volt/core':
+      '@voltdev/core':
         specifier: workspace:*
         version: link:../packages/core
     devDependencies:
-      '@volt/vite-plugin':
+      '@voltdev/vite-plugin':
         specifier: workspace:*
         version: link:../packages/vite-plugin
       vite:
@@ -57,11 +57,11 @@ importers:
 
   examples/counter:
     dependencies:
-      '@volt/core':
+      '@voltdev/core':
         specifier: workspace:*
         version: link:../../packages/core
     devDependencies:
-      '@volt/vite-plugin':
+      '@voltdev/vite-plugin':
         specifier: workspace:*
         version: link:../../packages/vite-plugin
       sass:
@@ -75,28 +75,28 @@ importers:
 
   packages/core:
     dependencies:
-      '@volt/compiler':
+      '@voltdev/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@volt/reactivity':
+      '@voltdev/reactivity':
         specifier: workspace:*
         version: link:../reactivity
 
   packages/editor:
     dependencies:
-      '@volt/core':
+      '@voltdev/core':
         specifier: workspace:*
         version: link:../core
 
   packages/grid:
     dependencies:
-      '@volt/core':
+      '@voltdev/core':
         specifier: workspace:*
         version: link:../core
 
   packages/primitives:
     dependencies:
-      '@volt/core':
+      '@voltdev/core':
         specifier: workspace:*
         version: link:../core
 
@@ -104,13 +104,13 @@ importers:
 
   packages/ui:
     dependencies:
-      '@volt/core':
+      '@voltdev/core':
         specifier: workspace:*
         version: link:../core
 
   packages/vite-plugin:
     dependencies:
-      '@volt/compiler':
+      '@voltdev/compiler':
         specifier: workspace:*
         version: link:../compiler
       esbuild:

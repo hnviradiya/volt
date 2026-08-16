@@ -81,7 +81,7 @@
  * chord. Once lifted, the whole drag keyboard map belongs to `createDragDrop`.
  */
 
-import { Signal, effect, onCleanup } from '@volt/core';
+import { Signal, effect, onCleanup } from '@voltdev/core';
 import { createCollection } from './collection.js';
 import { createRovingFocus } from './roving-focus.js';
 import { createId } from './id.js';

@@ -20,7 +20,7 @@
  * navigation menu quietly breaks middle-click, ⌘-click and Enter all at once.
  */
 
-import { Signal, effect, onCleanup } from '@volt/core';
+import { Signal, effect, onCleanup } from '@voltdev/core';
 import { createCollection } from './collection.js';
 import { createRovingFocus } from './roving-focus.js';
 import { createDismiss, type DismissReason } from './dismiss.js';

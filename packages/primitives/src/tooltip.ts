@@ -41,7 +41,7 @@
  * vanishing halfway.
  */
 
-import { Signal, effect, onCleanup } from '@volt/core';
+import { Signal, effect, onCleanup } from '@voltdev/core';
 import { createPresence, type PresenceState } from './presence.js';
 import { createDismiss } from './dismiss.js';
 import { createId } from './id.js';

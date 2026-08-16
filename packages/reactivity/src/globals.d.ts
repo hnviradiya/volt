@@ -1,7 +1,7 @@
 /**
  * Build-time flag separating developer diagnostics from shipped code.
  *
- * `@volt/vite-plugin` defines this in every Volt build — `true` while
+ * `@voltdev/vite-plugin` defines this in every Volt build — `true` while
  * developing and testing, `false` for a production bundle — so a minifier
  * removes each `if (__VOLT_DEV__)` block outright. That is what keeps Volt's
  * long, explanatory error messages out of production bundles without giving

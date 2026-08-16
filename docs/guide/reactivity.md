@@ -7,7 +7,7 @@ you use is the proposal's API — not a wrapper, not a lookalike.
 ## State
 
 ```ts
-import { Signal } from '@volt/core';
+import { Signal } from '@voltdev/core';
 
 const count = new Signal.State(0);
 
@@ -88,7 +88,7 @@ framework's rendering cycle. Volt provides it, built on
 `Signal.subtle.Watcher`.
 
 ```ts
-import { effect, createRoot } from '@volt/core';
+import { effect, createRoot } from '@voltdev/core';
 
 createRoot((dispose) => {
   effect(() => {
@@ -142,7 +142,7 @@ When you need the DOM up to date on the current turn — tests, measurement —
 flush explicitly:
 
 ```ts
-import { flushSync, tick } from '@volt/core';
+import { flushSync, tick } from '@voltdev/core';
 
 count.set(1);
 flushSync();        // synchronous
@@ -162,7 +162,7 @@ Effects belong to the scope that created them. Disposing the scope disposes
 the effects, runs their cleanups, and unsubscribes everything.
 
 ```ts
-import { createRoot, onCleanup } from '@volt/core';
+import { createRoot, onCleanup } from '@voltdev/core';
 
 const dispose = createRoot((dispose) => {
   effect(() => { /* ... */ });
@@ -182,7 +182,7 @@ Because updates already coalesce on a microtask, `batch` matters only
 alongside `flushSync`, or when a partially-applied state would be observable:
 
 ```ts
-import { batch } from '@volt/core';
+import { batch } from '@voltdev/core';
 
 batch(() => {
   firstName.set('Ada');

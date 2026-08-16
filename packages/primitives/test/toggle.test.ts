@@ -8,8 +8,8 @@
  * object handing out a new handler on every update.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileTemplate } from '@volt/core/jit';
-import { Component, Signal, flushSync, mount } from '@volt/core';
+import { compileTemplate } from '@voltdev/core/jit';
+import { Component, Signal, flushSync, mount } from '@voltdev/core';
 import {
   createToggle,
   createToggleGroup,

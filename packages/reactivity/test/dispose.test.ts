@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Signal, createRoot, effect, flushSync } from '@volt/reactivity';
+import { Signal, createRoot, effect, flushSync } from '@voltdev/reactivity';
 
 describe('disposal detaches from the graph', () => {
   it('a disposed effect leaves no sink behind', () => {

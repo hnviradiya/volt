@@ -12,8 +12,8 @@
  * explicit rather than incidental.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileTemplate } from '@volt/core/jit';
-import { Component, Signal, flushSync, mount } from '@volt/core';
+import { compileTemplate } from '@voltdev/core/jit';
+import { Component, Signal, flushSync, mount } from '@voltdev/core';
 import {
   DRAG_CONTAINER_ATTRIBUTE,
   DRAG_HANDLE_ATTRIBUTE,

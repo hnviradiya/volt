@@ -3,8 +3,8 @@
  * driven through the public component API.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileTemplate } from '@volt/core/jit';
-import { Component, Prop, Signal, effect, flushSync, mount, onCleanup } from '@volt/core';
+import { compileTemplate } from '@voltdev/core/jit';
+import { Component, Prop, Signal, effect, flushSync, mount, onCleanup } from '@voltdev/core';
 
 let host: HTMLElement;
 

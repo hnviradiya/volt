@@ -8,8 +8,8 @@
  * teardown survives being triggered from inside a handler.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileTemplate } from '@volt/core/jit';
-import { Component, Prop, Signal, flushSync, mount, onCleanup } from '@volt/core';
+import { compileTemplate } from '@voltdev/core/jit';
+import { Component, Prop, Signal, flushSync, mount, onCleanup } from '@voltdev/core';
 
 let host: HTMLElement;
 

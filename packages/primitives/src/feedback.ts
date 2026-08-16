@@ -32,7 +32,7 @@
  * its state and returns prop objects to spread onto the consumer's markup.
  */
 
-import { Signal, effect, onCleanup } from '@volt/core';
+import { Signal, effect, onCleanup } from '@voltdev/core';
 import { createPresence, type PresenceState } from './presence.js';
 import { createCollection, ITEM_ATTRIBUTE } from './collection.js';
 import { createId } from './id.js';

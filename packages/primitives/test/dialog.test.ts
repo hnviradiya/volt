@@ -6,9 +6,9 @@
  * inert rather than merely covered.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileTemplate } from '@volt/core/jit';
-import { Component, Signal, flushSync, mount } from '@volt/core';
-import { createDialog } from '@volt/primitives';
+import { compileTemplate } from '@voltdev/core/jit';
+import { Component, Signal, flushSync, mount } from '@voltdev/core';
+import { createDialog } from '@voltdev/primitives';
 
 let host: HTMLElement;
 /**

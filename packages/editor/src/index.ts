@@ -1,5 +1,5 @@
 /**
- * @volt/editor
+ * @voltdev/editor
  *
  * A rich text editor, engine included.
  *

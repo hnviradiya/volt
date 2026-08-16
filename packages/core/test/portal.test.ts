@@ -9,7 +9,7 @@
  * are what a portal built on a virtual DOM has to work to preserve.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
-import { compileTemplate } from '@volt/core/jit';
+import { compileTemplate } from '@voltdev/core/jit';
 import {
   Component,
   Signal,
@@ -18,7 +18,7 @@ import {
   mount,
   provideContext,
   useContext,
-} from '@volt/core';
+} from '@voltdev/core';
 
 let host: HTMLElement;
 

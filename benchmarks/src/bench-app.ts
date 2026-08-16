@@ -6,7 +6,7 @@
  * cleverer template.
  */
 
-import { Component, Signal } from '@volt/core';
+import { Component, Signal } from '@voltdev/core';
 
 export interface Row {
   id: number;

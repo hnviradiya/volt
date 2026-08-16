@@ -44,7 +44,7 @@
  * renders, and nothing here has an opinion about styling.
  */
 
-import { Signal, effect, onCleanup } from '@volt/core';
+import { Signal, effect, onCleanup } from '@voltdev/core';
 import { createCollection, ITEM_ATTRIBUTE } from './collection.js';
 import { createRovingFocus } from './roving-focus.js';
 

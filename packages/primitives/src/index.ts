@@ -1,5 +1,5 @@
 /**
- * @volt/primitives
+ * @voltdev/primitives
  *
  * Component behaviour and accessibility, with no styling of any kind.
  *

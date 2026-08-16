@@ -27,7 +27,7 @@ features:
 ## In one file
 
 ```ts
-import { Component, Signal } from '@volt/core';
+import { Component, Signal } from '@voltdev/core';
 
 @Component({
   selector: 'v-counter',

@@ -43,7 +43,7 @@
  * id, which stays with the element the label points at.
  */
 
-import { Signal, effect, onCleanup } from '@volt/core';
+import { Signal, effect, onCleanup } from '@voltdev/core';
 import {
   createFormField,
   type FormField,

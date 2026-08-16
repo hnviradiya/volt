@@ -5,7 +5,7 @@ re-run to produce a view.
 
 ```ts
 // greeting.ts
-import { Component, Signal } from '@volt/core';
+import { Component, Signal } from '@voltdev/core';
 
 @Component({
   selector: 'v-greeting',
@@ -45,7 +45,7 @@ Where there is no build step — a test, a playground — supply `render`
 directly:
 
 ```ts
-import { compileTemplate } from '@volt/core/jit';
+import { compileTemplate } from '@voltdev/core/jit';
 
 @Component({
   selector: 'v-greeting',
@@ -255,7 +255,7 @@ does — with a module:
 
 ```ts
 // store.ts
-import { Signal } from '@volt/core';
+import { Signal } from '@voltdev/core';
 
 export const user = new Signal.State<User | null>(null);
 export const isSignedIn = new Signal.Computed(() => user.get() !== null);
@@ -273,7 +273,7 @@ export class Header {
 When state should be scoped to a subtree rather than global, use context:
 
 ```ts
-import { createContext, provideContext, useContext } from '@volt/core';
+import { createContext, provideContext, useContext } from '@voltdev/core';
 
 const Theme = createContext<'light' | 'dark'>('light');
 
@@ -303,7 +303,7 @@ expect(counter.count.get()).toBe(1);
 For DOM behaviour, mount and flush:
 
 ```ts
-import { flushSync, mount } from '@volt/core';
+import { flushSync, mount } from '@voltdev/core';
 
 const app = mount(Counter, host);
 host.querySelector('button')!.click();

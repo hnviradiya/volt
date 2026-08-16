@@ -1,5 +1,5 @@
 {
-  "name": "@volt/core",
+  "name": "@voltdev/core",
   "version": "0.1.0",
   "description": "Volt core \u2014 class components, lifecycle, and the fine-grained DOM runtime.",
   "type": "module",
@@ -30,8 +30,8 @@
     "build": "vite build && tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@volt/reactivity": "workspace:*",
-    "@volt/compiler": "workspace:*"
+    "@voltdev/reactivity": "workspace:*",
+    "@voltdev/compiler": "workspace:*"
   },
   "keywords": [
     "ui",

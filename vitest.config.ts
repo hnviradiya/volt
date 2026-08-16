@@ -12,7 +12,7 @@ const root = import.meta.dirname;
  * is the transform that actually lowers them.
  *
  * This is deliberately inlined rather than imported from
- * `@volt/vite-plugin`: config files load before the plugin's own source can
+ * `@voltdev/vite-plugin`: config files load before the plugin's own source can
  * be resolved. The published plugin does exactly this, and is covered by
  * `packages/vite-plugin/test`.
  */
@@ -45,18 +45,18 @@ function decorators(): Plugin {
 export default defineConfig({
   plugins: [decorators()],
   // Tests assert on the developer diagnostics, so they run with them on. In a
-  // production build @volt/vite-plugin defines this as false and the
+  // production build @voltdev/vite-plugin defines this as false and the
   // minifier removes every guarded block.
   define: { __VOLT_DEV__: 'true' },
   resolve: {
     alias: {
-      '@volt/reactivity': resolve(root, 'packages/reactivity/src/index.ts'),
-      '@volt/compiler': resolve(root, 'packages/compiler/src/index.ts'),
-      '@volt/primitives': resolve(root, 'packages/primitives/src/index.ts'),
-      // Longest first — '@volt/core' would otherwise shadow its subpaths.
-      '@volt/core/runtime': resolve(root, 'packages/core/src/runtime.ts'),
-      '@volt/core/jit': resolve(root, 'packages/core/src/jit.ts'),
-      '@volt/core': resolve(root, 'packages/core/src/index.ts'),
+      '@voltdev/reactivity': resolve(root, 'packages/reactivity/src/index.ts'),
+      '@voltdev/compiler': resolve(root, 'packages/compiler/src/index.ts'),
+      '@voltdev/primitives': resolve(root, 'packages/primitives/src/index.ts'),
+      // Longest first — '@voltdev/core' would otherwise shadow its subpaths.
+      '@voltdev/core/runtime': resolve(root, 'packages/core/src/runtime.ts'),
+      '@voltdev/core/jit': resolve(root, 'packages/core/src/jit.ts'),
+      '@voltdev/core': resolve(root, 'packages/core/src/index.ts'),
     },
   },
   test: {

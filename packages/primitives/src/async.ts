@@ -63,7 +63,7 @@
  *     purpose: it means "the answer is known now", so it abandons the request.
  */
 
-import { Signal, batch, effect, onCleanup } from '@volt/core';
+import { Signal, batch, effect, onCleanup } from '@voltdev/core';
 
 // The proposal's own name for reading without subscribing; Volt adds no second
 // spelling for it.

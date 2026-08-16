@@ -29,7 +29,7 @@ Where Volt's own work does dominate, the numbers are meaningful:
 | swap rows | two rows move |
 | remove row | one row leaves |
 
-## `pnpm --filter @volt/benchmarks run dev` — real browser
+## `pnpm --filter @voltdev/benchmarks run dev` — real browser
 
 The page for real numbers, with buttons for each operation and coarse
 timings. Use DevTools' Performance panel for a breakdown.

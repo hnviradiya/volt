@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
-import { volt } from '@volt/vite-plugin';
+import { volt } from '@voltdev/vite-plugin';
 
 export default defineConfig({
   // `volt()` does two things Vite cannot do on its own: lower TC39 standard

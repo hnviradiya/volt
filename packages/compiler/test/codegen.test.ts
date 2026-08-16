@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compile } from '@volt/compiler';
+import { compile } from '@voltdev/compiler';
 
 /** Compile and return just the generated body, for readable snapshots. */
 function gen(template: string): string {

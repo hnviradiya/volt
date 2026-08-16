@@ -1,12 +1,12 @@
 /**
  * In-browser template compilation.
  *
- * Components are authored with `templateUrl`, which `@volt/vite-plugin`
+ * Components are authored with `templateUrl`, which `@voltdev/vite-plugin`
  * resolves and compiles at build time. This entry is the escape hatch for the
  * cases where there is no build step — tests, playgrounds, REPLs — and it
  * makes the cost explicit: importing it pulls the compiler in.
  *
- *   import { compileTemplate } from '@volt/core/jit';
+ *   import { compileTemplate } from '@voltdev/core/jit';
  *
  *   @Component({
  *     selector: 'v-greeting',
@@ -17,7 +17,7 @@
  *   }
  */
 
-import { compile } from '@volt/compiler';
+import { compile } from '@voltdev/compiler';
 import type { RenderFn } from './component.js';
 import * as runtime from './runtime.js';
 
@@ -34,4 +34,4 @@ export function compileTemplate(source: string, filename = 'template'): RenderFn
   return factory(runtime);
 }
 
-export { compile } from '@volt/compiler';
+export { compile } from '@voltdev/compiler';

@@ -1,10 +1,10 @@
 /**
- * @volt/compiler — Volt template source -> DOM-building JavaScript.
+ * @voltdev/compiler — Volt template source -> DOM-building JavaScript.
  *
  * The compiler is a pure `string -> string` transform with no DOM or Node
  * dependencies, which is what lets the exact same code path run in two places:
  *
- *   - at build time, through `@volt/vite-plugin`, emitting an ES module
+ *   - at build time, through `@voltdev/vite-plugin`, emitting an ES module
  *   - at runtime, through `new Function`, when no build step is present
  *
  * Both modes produce identical output, so behaviour never diverges between

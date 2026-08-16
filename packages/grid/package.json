@@ -1,5 +1,5 @@
 {
-  "name": "@volt/grid",
+  "name": "@voltdev/grid",
   "version": "0.1.0",
   "description": "Virtualized data grid for Volt.",
   "type": "module",
@@ -22,7 +22,7 @@
     "build": "vite build && tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@volt/core": "workspace:*"
+    "@voltdev/core": "workspace:*"
   },
   "keywords": ["volt", "grid", "table", "datagrid"],
   "engines": {

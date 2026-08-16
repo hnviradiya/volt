@@ -6,8 +6,8 @@
  * RTL, repeated-character typeahead — are paid for many times over.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createRoot, flushSync } from '@volt/core';
-import { createCollection, createRovingFocus } from '@volt/primitives';
+import { createRoot, flushSync } from '@voltdev/core';
+import { createCollection, createRovingFocus } from '@voltdev/primitives';
 
 let disposers: (() => void)[] = [];
 

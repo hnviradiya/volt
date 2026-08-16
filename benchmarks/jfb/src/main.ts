@@ -11,7 +11,7 @@
  *   - the row id is captured as a plain value, exactly as Solid does
  */
 
-import { Component, Signal, batch, mount } from '@volt/core';
+import { Component, Signal, batch, mount } from '@voltdev/core';
 
 const adjectives = ['pretty', 'large', 'big', 'small', 'tall', 'short', 'long', 'handsome', 'plain', 'quaint', 'clean', 'elegant', 'easy', 'angry', 'crazy', 'helpful', 'mushy', 'odd', 'unsightly', 'adorable', 'important', 'inexpensive', 'cheap', 'expensive', 'fancy']; // prettier-ignore
 const colours = ['red', 'yellow', 'blue', 'green', 'pink', 'brown', 'purple', 'brown', 'white', 'black', 'orange']; // prettier-ignore

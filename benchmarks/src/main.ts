@@ -5,10 +5,10 @@
  * work dominates. Create and clear are dominated there by happy-dom's
  * JavaScript DOM, so real numbers for those need a real browser — this page.
  *
- *   pnpm --filter @volt/benchmarks run dev
+ *   pnpm --filter @voltdev/benchmarks run dev
  */
 
-import { Component, Signal, flushSync, mount } from '@volt/core';
+import { Component, Signal, flushSync, mount } from '@voltdev/core';
 import { BenchApp } from './bench-app.js';
 
 interface Timing {

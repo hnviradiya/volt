@@ -7,8 +7,8 @@
  * it a DOM sibling.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createRoot, flushSync } from '@volt/core';
-import { createDismiss, dismissStackSize } from '@volt/primitives';
+import { createRoot, flushSync } from '@voltdev/core';
+import { createDismiss, dismissStackSize } from '@voltdev/primitives';
 
 let disposers: (() => void)[] = [];
 

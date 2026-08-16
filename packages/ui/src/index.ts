@@ -1,7 +1,7 @@
 /**
- * @volt/ui
+ * @voltdev/ui
  *
- * Styled components built on @volt/primitives.
+ * Styled components built on @voltdev/primitives.
  *
  * This layer is meant to be replaceable: it must never be the only way to
  * reach a behaviour, or theming becomes something to fight rather than use.

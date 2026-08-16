@@ -1,4 +1,4 @@
-import { Component, Prop, Signal, effect } from '@volt/core';
+import { Component, Prop, Signal, effect } from '@voltdev/core';
 
 /**
  * A counter with a reactive prop and a callback prop.

@@ -42,7 +42,7 @@
  * keyboard cannot.
  */
 
-import { Signal, effect, onCleanup } from '@volt/core';
+import { Signal, effect, onCleanup } from '@voltdev/core';
 import { createPresence, type PresenceState } from './presence.js';
 import { createDismiss, type DismissReason } from './dismiss.js';
 import { createFocusScope, focusableWithin } from './focus-scope.js';

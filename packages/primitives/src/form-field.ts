@@ -55,7 +55,7 @@
  * two sources of truth, and they diverge immediately.
  */
 
-import { Signal, effect, onCleanup } from '@volt/core';
+import { Signal, effect, onCleanup } from '@voltdev/core';
 import { createId } from './id.js';
 
 const { untrack } = Signal.subtle;

@@ -26,7 +26,7 @@
  * `visuallyHidden` lives in `display.ts`; it is not repeated here.
  */
 
-import { Signal, effect, onCleanup } from '@volt/core';
+import { Signal, effect, onCleanup } from '@voltdev/core';
 import { createId } from './id.js';
 
 // The proposal's own name for reading without subscribing; Volt adds no second

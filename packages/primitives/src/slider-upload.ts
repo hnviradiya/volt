@@ -19,7 +19,7 @@
  * pixels.
  */
 
-import { Signal, effect, onCleanup } from '@volt/core';
+import { Signal, effect, onCleanup } from '@voltdev/core';
 import { createFormField, type FormField, type ValidationOutcome } from './form-field.js';
 import { createProgress, type Progress } from './display.js';
 import { createLiveRegionTiming, type LiveRegionTiming } from './feedback.js';

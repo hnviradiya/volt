@@ -1,5 +1,5 @@
 /**
- * @volt/vite-plugin
+ * @voltdev/vite-plugin
  *
  * Two build-time jobs, both of which remove work from the browser:
  *
@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { transform as esbuildTransform } from 'esbuild';
 import MagicString from 'magic-string';
 import { compileStringAsync } from 'sass';
-import { compile, CompilerError } from '@volt/compiler';
+import { compile, CompilerError } from '@voltdev/compiler';
 import type { Plugin } from 'vite';
 import { DecoratorError, planLowering } from './decorators.js';
 import { isIdentChar, matchDelimiter, skipQuoted, skipTemplateLiteral } from './scan.js';
@@ -33,7 +33,7 @@ export interface VoltPluginOptions {
   exclude?: RegExp;
   /**
    * Compile `template` strings to `render` functions at build time.
-   * Turning this off requires importing `@volt/core/jit` at runtime.
+   * Turning this off requires importing `@voltdev/core/jit` at runtime.
    */
   precompileTemplates?: boolean;
   /** Module the generated code imports its runtime helpers from. */
@@ -57,7 +57,7 @@ const DEFINE_LOCAL = '__volt_define';
 export function volt(options: VoltPluginOptions = {}): Plugin[] {
   const include = options.include ?? DEFAULT_INCLUDE;
   const exclude = options.exclude ?? DEFAULT_EXCLUDE;
-  const runtimeModule = options.runtimeModule ?? '@volt/core/runtime';
+  const runtimeModule = options.runtimeModule ?? '@voltdev/core/runtime';
   const precompile = options.precompileTemplates ?? true;
   const groupRowBindings = options.groupRowBindings ?? false;
 

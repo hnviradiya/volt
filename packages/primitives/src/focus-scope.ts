@@ -14,7 +14,7 @@
  * keyboard, mouse, programmatic, and the browser's own address-bar cycle.
  */
 
-import { onCleanup } from '@volt/core';
+import { onCleanup } from '@voltdev/core';
 
 /**
  * Elements that can hold focus. `:not([hidden])` and the disabled checks

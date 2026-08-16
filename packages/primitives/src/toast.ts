@@ -41,7 +41,7 @@
  * Swipe-to-dismiss belongs with gesture support and is not here.
  */
 
-import { Signal, createRoot, effect, onCleanup } from '@volt/core';
+import { Signal, createRoot, effect, onCleanup } from '@voltdev/core';
 import { createPresence, type PresenceState } from './presence.js';
 import { createId } from './id.js';
 

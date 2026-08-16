@@ -7,8 +7,8 @@
  * the author's, every time.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
-import { compileTemplate } from '@volt/core/jit';
-import { Component, Signal, flushSync, mount } from '@volt/core';
+import { compileTemplate } from '@voltdev/core/jit';
+import { Component, Signal, flushSync, mount } from '@voltdev/core';
 
 let host: HTMLElement;
 

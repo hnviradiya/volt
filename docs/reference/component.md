@@ -24,7 +24,7 @@ interface ComponentConfig {
 | `imports` | Components this template may reference |
 
 `templateUrl`, `styleUrl` and `styleUrls` are resolved **at build time** by
-`@volt/vite-plugin`, which also registers each file with the watcher so
+`@voltdev/vite-plugin`, which also registers each file with the watcher so
 edits hot-reload. Without the plugin they cannot be resolved — the browser has
 no filesystem — and Volt throws with a message saying so.
 
@@ -121,11 +121,11 @@ app.unmount();  // dispose every effect, then clear the host
 
 ## `compileTemplate(source, filename?)`
 
-From `@volt/core/jit`. Compiles template source into a render function at
+From `@voltdev/core/jit`. Compiles template source into a render function at
 runtime, for tests and playgrounds:
 
 ```ts
-import { compileTemplate } from '@volt/core/jit';
+import { compileTemplate } from '@voltdev/core/jit';
 
 @Component({
   selector: 'v-greeting',

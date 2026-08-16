@@ -34,7 +34,7 @@ jobs:
         run: pnpm test
 
       - name: Build example
-        run: pnpm --filter @volt/example-counter run build
+        run: pnpm --filter @voltdev/example-counter run build
 
       - name: Build docs
         run: pnpm docs:build

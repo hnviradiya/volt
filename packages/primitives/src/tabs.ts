@@ -31,7 +31,7 @@
  * where the attribute means nothing at all.
  */
 
-import { Signal, effect } from '@volt/core';
+import { Signal, effect } from '@voltdev/core';
 import { createCollection, ITEM_ATTRIBUTE } from './collection.js';
 import { createRovingFocus } from './roving-focus.js';
 import { createId } from './id.js';

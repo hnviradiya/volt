@@ -86,7 +86,7 @@
  * still about elements: moving DOM focus onto the option that arithmetic chose.
  */
 
-import { Signal, effect, onCleanup } from '@volt/core';
+import { Signal, effect, onCleanup } from '@voltdev/core';
 import { createCollection } from './collection.js';
 import { createRovingFocus } from './roving-focus.js';
 import {

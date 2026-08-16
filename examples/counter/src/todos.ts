@@ -1,4 +1,4 @@
-import { Component, Signal } from '@volt/core';
+import { Component, Signal } from '@voltdev/core';
 
 interface Todo {
   id: number;

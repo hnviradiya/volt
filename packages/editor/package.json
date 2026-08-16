@@ -1,5 +1,5 @@
 {
-  "name": "@volt/editor",
+  "name": "@voltdev/editor",
   "version": "0.1.0",
   "description": "Rich text editor for Volt.",
   "type": "module",
@@ -22,7 +22,7 @@
     "build": "vite build && tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@volt/core": "workspace:*"
+    "@voltdev/core": "workspace:*"
   },
   "keywords": ["volt", "editor", "richtext"],
   "engines": {

@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
-import { volt } from '@volt/vite-plugin';
+import { volt } from '@voltdev/vite-plugin';
 
 export default defineConfig({
   plugins: [volt()],

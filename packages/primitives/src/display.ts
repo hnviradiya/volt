@@ -14,7 +14,7 @@
  * of inaccessible, and both of those repeat something already said.
  */
 
-import { Signal, effect, onCleanup } from '@volt/core';
+import { Signal, effect, onCleanup } from '@voltdev/core';
 
 // The proposal's own name for reading without subscribing; Volt adds no second
 // spelling for it.

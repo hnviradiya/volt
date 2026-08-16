@@ -222,7 +222,7 @@ class Generator {
     this.ctxName = options.ctx ?? '_ctx';
     this.dev = options.dev ?? false;
     this.filename = options.filename ?? 'template';
-    this.runtimeModule = options.runtimeModule ?? '@volt/core/runtime';
+    this.runtimeModule = options.runtimeModule ?? '@voltdev/core/runtime';
     this.groupRowBindings = options.groupRowBindings ?? false;
   }
 

@@ -7,11 +7,11 @@
  * this feature exists.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileTemplate } from '@volt/core/jit';
-import { Component, Prop, Signal, flushSync, mount } from '@volt/core';
+import { compileTemplate } from '@voltdev/core/jit';
+import { Component, Prop, Signal, flushSync, mount } from '@voltdev/core';
 // Not part of the public API: the build decides what to split, and emits
 // these itself. Reached here through the entry compiled output uses.
-import { lazy, preload } from '@volt/core/runtime';
+import { lazy, preload } from '@voltdev/core/runtime';
 
 let host: HTMLElement;
 

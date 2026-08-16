@@ -53,7 +53,7 @@ import {
   onCleanup,
   provideContext,
   useContext,
-} from '@volt/core';
+} from '@voltdev/core';
 
 // ---------------------------------------------------------------------------
 // Messages

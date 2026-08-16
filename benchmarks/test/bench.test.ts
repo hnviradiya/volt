@@ -11,8 +11,8 @@
  */
 
 import { beforeAll, describe, expect, it } from 'vitest';
-import '@volt/core/jit';
-import { flushSync, mount, type MountHandle } from '@volt/core';
+import '@voltdev/core/jit';
+import { flushSync, mount, type MountHandle } from '@voltdev/core';
 import { BenchApp, resetIds, resetSeed } from '../src/bench-app.js';
 
 interface Sample {

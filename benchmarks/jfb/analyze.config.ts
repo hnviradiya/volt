@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
-import { volt } from '@volt/vite-plugin';
+import { volt } from '@voltdev/vite-plugin';
 import { resolve } from 'node:path';
 
 /** Same build as the benchmark entry, unminified, for size analysis. */
