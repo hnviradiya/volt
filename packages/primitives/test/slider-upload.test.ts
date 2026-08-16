@@ -14,8 +14,8 @@
  * it is defined.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileTemplate } from '@voltjs/core/jit';
-import { Component, Signal, flushSync, mount } from '@voltjs/core';
+import { compileTemplate } from '@volt/core/jit';
+import { Component, Signal, flushSync, mount } from '@volt/core';
 import {
   createFileUpload,
   createSlider,
@@ -1106,6 +1106,32 @@ describe('slider: dirtiness', () => {
 
     expect(slider.value()).toBe(20);
     expect(slider.field.isDirty()).toBe(false);
+  });
+
+  it('counts every thumb of a range, not only the one the field validates', () => {
+    const { slider, thumb, root, mirrors } = setup({ defaultValue: [20, 80], name: 'price' });
+    // Every mirror carries a default of its own, but the field reads the first
+    // one alone — so a range whose upper thumb moved is where dirtiness taken
+    // from a single control claims there is nothing to save.
+    expect(mirrors().map((mirror) => mirror.defaultValue)).toEqual(['20', '80']);
+
+    press(thumb(1), 'ArrowRight');
+    expect(slider.values()).toEqual([20, 81]);
+    expect(slider.field.isDirty()).toBe(true);
+    expect(root.getAttribute('data-dirty')).toBe('');
+
+    // The first thumb back where it started, with the second still moved: the
+    // control the field validates now reads its default again, and the slider
+    // still holds a value a reset would change.
+    press(thumb(0), 'ArrowRight');
+    press(thumb(0), 'ArrowLeft');
+    expect(slider.values()).toEqual([20, 81]);
+    expect(slider.field.isDirty()).toBe(true);
+
+    press(thumb(1), 'ArrowLeft');
+    expect(slider.values()).toEqual([20, 80]);
+    expect(slider.field.isDirty()).toBe(false);
+    expect(root.hasAttribute('data-dirty')).toBe(false);
   });
 });
 

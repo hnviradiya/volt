@@ -19,7 +19,7 @@
  * pixels.
  */
 
-import { Signal, effect, onCleanup } from '@voltjs/core';
+import { Signal, effect, onCleanup } from '@volt/core';
 import { createFormField, type FormField, type ValidationOutcome } from './form-field.js';
 import { createProgress, type Progress } from './display.js';
 import { createLiveRegionTiming, type LiveRegionTiming } from './feedback.js';
@@ -562,7 +562,7 @@ export function createSlider(options: SliderOptions): Slider {
     return root?.querySelector(`[${SLIDER_INPUT_ATTRIBUTE}="0"]`) ?? root ?? null;
   };
 
-  const field: FormField = createFormField({
+  const composed: FormField = createFormField({
     control,
     label: options.label,
     description: options.description,
@@ -571,6 +571,26 @@ export function createSlider(options: SliderOptions): Slider {
     disabled: options.disabled,
     validate: validateValues ? () => validateValues(current()) : undefined,
   });
+
+  /**
+   * Dirtiness for the whole value, which is more than the field can see.
+   *
+   * A field measures it against the one control it validates, and that control
+   * is the first thumb's mirror — so a range whose upper thumb moved reported
+   * itself clean while it submitted something else, and only the first thumb
+   * could ever make an unsaved-changes guard speak up. What a reset restores is
+   * the array, so the array is what the comparison is over, and the field is
+   * handed that answer in place of its own everywhere it publishes one.
+   */
+  const pristine = initial.join(',');
+  const dirty = new Signal.State(false);
+
+  const field: FormField = {
+    ...composed,
+    isDirty: () => dirty.get(),
+    fieldProps: () => ({ ...composed.fieldProps(), 'data-dirty': dirty.get() || undefined }),
+    controlProps: () => ({ ...composed.controlProps(), 'data-dirty': dirty.get() || undefined }),
+  };
 
   // The field clears its own record on reset; the value is ours to put back.
   // `reset` is dispatched partway through the platform's own algorithm, so the
@@ -585,24 +605,24 @@ export function createSlider(options: SliderOptions): Slider {
   });
 
   /**
-   * Tell the field the value moved, once the DOM it reads has caught up.
+   * The settled value, watched: dirtiness, and the record the field keeps.
    *
-   * The field measures dirtiness by reading the control's own value, and that
-   * control is a mirror the consumer's `:spread` fills. Telling it from the
-   * write itself therefore reported the value the gesture had just replaced —
-   * one edit behind for ever, so the first move looked clean and the return to
-   * the default looked dirty. A user effect runs only after the render effects
-   * have settled, which is exactly when the mirror is true again; and because
-   * it watches the value rather than the calls that change it, a controlled
-   * signal set from outside is an edit too.
+   * The field revalidates from the control's own value, and that control is a
+   * mirror the consumer's `:spread` fills. Telling it from the write itself
+   * therefore reported the value the gesture had just replaced — one edit
+   * behind for ever. A user effect runs only after the render effects have
+   * settled, which is exactly when the mirror is true again; and because this
+   * watches the value rather than the calls that change it, a controlled signal
+   * set from outside is an edit too.
    */
   let edited: string | null = null;
   effect(() => {
     const values = current().join(',');
+    dirty.set(values !== pristine);
     untrack(() => {
-      // The first pass is the mount, which is not an edit: the field reads its
-      // own starting point from the control at the same moment.
-      if (edited !== null && edited !== values) field.markEdited();
+      // The first pass is the mount, which is not an edit: nothing has been
+      // typed, and a validator that runs on input has nothing to run about.
+      if (edited !== null && edited !== values) composed.markEdited();
     });
     edited = values;
   });

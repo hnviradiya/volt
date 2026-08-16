@@ -14,8 +14,8 @@
  * breaks once a level is windowed or filtered and the DOM holds a slice of it.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileTemplate } from '@voltjs/core/jit';
-import { Component, Signal, flushSync, mount } from '@voltjs/core';
+import { compileTemplate } from '@volt/core/jit';
+import { Component, Signal, flushSync, mount } from '@volt/core';
 import {
   TREE_ITEM_ATTRIBUTE,
   createTree,
@@ -1282,6 +1282,32 @@ describe('the tri-state checkbox', () => {
     expect(chosen(tree)).toEqual([]);
   });
 
+  it('gives a folder its own box when nothing under it takes the cascade', () => {
+    nodes.set([
+      { id: 'src', label: 'Src', children: [{ id: 'util', label: 'Util', disabled: true }] },
+    ]);
+    treeOptions = { selectionMode: 'checkbox', defaultExpanded: ['src'] };
+    const { tree, root } = setup();
+    tree.focusNode('src');
+    flushSync();
+
+    // Every descendant refuses the cascade, so a state aggregated from them
+    // can only ever be `false` — and the folder is then checked in the
+    // selection, unchecked on screen, and inert however often it is pressed.
+    press(root, ' ');
+    expect(chosen(tree)).toEqual(['src']);
+    expect(tree.checkedState('src')).toBe(true);
+    expect(tree.isSelected('src')).toBe(true);
+    expect(rowEl('src').getAttribute('aria-checked')).toBe('true');
+    expect(rowEl('src').querySelector('.box')!.getAttribute('data-state')).toBe('checked');
+    // The node that refuses it is still not one a press may set.
+    expect(tree.checkedState('util')).toBe(false);
+
+    click(rowEl('src').querySelector<HTMLElement>('.box')!);
+    expect(chosen(tree)).toEqual([]);
+    expect(rowEl('src').getAttribute('aria-checked')).toBe('false');
+  });
+
   it('leaves every node its own fact in the strict model', () => {
     treeOptions = { ...treeOptions, cascade: false };
     const { tree } = setup();
@@ -1590,6 +1616,24 @@ describe('filtering', () => {
     flushSync();
 
     expect(visible()).toEqual(['src']);
+    expect(tree.activeId()).toBe('src');
+    expect(document.activeElement).toBe(rowEl('src'));
+    expect(tabStops()).toEqual(['src']);
+  });
+
+  it('carries them out of it when the search box owns the query too', () => {
+    const filter = new Signal.State('');
+    treeOptions = { defaultExpanded: ['docs', 'guide'], filter };
+    const { tree } = setup();
+    tree.focusNode('install');
+    flushSync();
+
+    // The signal is how a search box drives the tree, and writing it calls no
+    // method of the tree at all — the same route the router takes through
+    // `expanded`, and the one a fix hung off `setFilter` would miss.
+    filter.set('src');
+    flushSync();
+
     expect(tree.activeId()).toBe('src');
     expect(document.activeElement).toBe(rowEl('src'));
     expect(tabStops()).toEqual(['src']);

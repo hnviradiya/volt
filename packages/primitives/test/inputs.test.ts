@@ -17,8 +17,8 @@
  * writing direction.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { compileTemplate } from '@voltjs/core/jit';
-import { Component, Signal, flushSync, mount } from '@voltjs/core';
+import { compileTemplate } from '@volt/core/jit';
+import { Component, Signal, flushSync, mount } from '@volt/core';
 import { createLocaleProvider } from '../src/i18n.ts';
 import {
   PIN_BOX_ATTRIBUTE,
@@ -1849,6 +1849,72 @@ describe('tags input', () => {
     flushSync();
 
     expect(document.activeElement).toBe(input());
+  });
+
+  it('leaves focus somewhere useful when a tag goes from the signal it was handed', () => {
+    const value = new Signal.State<readonly string[]>(['ada', 'grace']);
+    tagsOptions = { value };
+    const { chip } = tagsInput();
+
+    chip(0).focus();
+    // The value is the consumer's to write, and a tag removed that way
+    // destroys the focused element exactly as its own remove control would.
+    // Nothing here called `removeAt`, so nothing but the row itself can have
+    // noticed.
+    value.set(['grace']);
+    flushSync();
+
+    expect(document.activeElement).toBe(chip(0));
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('falls back to the text box when the signal it was handed is emptied', () => {
+    const value = new Signal.State<readonly string[]>(['ada', 'grace']);
+    tagsOptions = { value };
+    const { chip, input } = tagsInput();
+
+    chip(1).focus();
+    value.set([]);
+    flushSync();
+
+    expect(document.activeElement).toBe(input());
+  });
+
+  it('leaves focus where the user moved it when a tag goes later', () => {
+    const value = new Signal.State<readonly string[]>(['ada', 'grace']);
+    tagsOptions = { value };
+    const { chip, input } = tagsInput();
+
+    chip(0).focus();
+    input().focus();
+    // Having once held focus is not a claim on it. A tag the user has already
+    // left is not somewhere focus has to be put back to, and doing it would
+    // pull the caret out of the box they are typing in.
+    value.set(['grace']);
+    flushSync();
+
+    expect(document.activeElement).toBe(input());
+  });
+
+  it('follows the tag holding focus when the row moves under it', () => {
+    const value = new Signal.State<readonly string[]>(['ada', 'grace', 'edsger']);
+    tagsOptions = { value };
+    const { chip } = tagsInput();
+
+    const held = chip(0);
+    held.focus();
+    // A tag that moves along the row is not a tag that goes: it is still on
+    // the page, and still has the focus it had.
+    value.set(['zoe', 'ada', 'grace', 'edsger']);
+    flushSync();
+    expect(document.activeElement).toBe(held);
+
+    value.set(['zoe', 'grace', 'edsger']);
+    flushSync();
+    // Where 'ada' ended up, not where it started: the tag that took its place
+    // is the one the eye is on, and the one before it is a step backwards.
+    expect(document.activeElement).toBe(chip(1));
+    expect(document.activeElement?.textContent).toContain('grace');
   });
 
   it('adds a half-typed tag when the field is left', () => {

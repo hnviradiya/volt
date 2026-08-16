@@ -43,7 +43,7 @@
  * id, which stays with the element the label points at.
  */
 
-import { Signal, effect, onCleanup } from '@voltjs/core';
+import { Signal, effect, onCleanup } from '@volt/core';
 import {
   createFormField,
   type FormField,
@@ -55,7 +55,13 @@ import {
 import { createCollection, ITEM_ATTRIBUTE } from './collection.js';
 import { createRovingFocus } from './roving-focus.js';
 import { createRadioGroup, VISUALLY_HIDDEN_INPUT_STYLE } from './form-controls.js';
-import { getNumberFormat, useLocale, type Locale, type MessageKey } from './i18n.js';
+import {
+  getNumberFormat,
+  resolveDirection,
+  useLocale,
+  type Locale,
+  type MessageKey,
+} from './i18n.js';
 import { createId } from './id.js';
 
 const { untrack } = Signal.subtle;
@@ -1790,17 +1796,6 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
     const tag = current[index];
     if (tag === undefined) return;
 
-    // Focus is rescued before the tag goes, and here rather than at each call
-    // site: the remove control lives inside the tag it removes, so pressing it
-    // destroys the focused element, and `removeAt` is the only removal a
-    // consumer can wire that control to. A detached node also has no siblings
-    // left to measure from, so the destination has to be worked out first.
-    //
-    // Only when this tag is where focus actually is. A `removeAt` from a
-    // toolbar somewhere else on the page destroys nothing, and pulling focus
-    // into the field on its own would be a worse bug than the one being fixed.
-    if (focusedTag() === index) focusAfterRemoval(index);
-
     write(current.filter((_, i) => i !== index));
     duplicate.set(null);
     status.set(options.labels?.removed?.(tag) ?? `${tag} removed`);
@@ -1826,32 +1821,95 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
   };
 
   /**
-   * The tag holding focus, its remove control included, or -1.
+   * The tag holding focus, and where in the row it sits.
    *
-   * Asked of the list rather than of one index, because the question every
-   * removal has to answer is the same one — is the element about to be
-   * destroyed the one focus is in — and it is asked by `clear` as well, which
-   * destroys all of them at once.
+   * Remembered while the tag is still there, because the moment it matters it
+   * is gone: destroying the focused element leaves the browser pointing at
+   * `<body>`, which says neither which tag it was nor where. A removal is not
+   * only `removeAt` and `clear` — the value is a signal a consumer can own, so
+   * a `:for` over it takes the row apart for a write from anywhere — and a
+   * guard at those two call sites answers for the two of them alone.
    */
-  const focusedTag = (): number =>
-    tagCollection.all().findIndex((tag) => {
-      const active = tag.ownerDocument.activeElement;
-      return active !== null && tag.contains(active);
-    });
+  let focusedTag: HTMLElement | null = null;
+  let focusedIndex = -1;
 
-  /** Where focus goes when the tag holding it is removed. */
-  const focusAfterRemoval = (index: number): void => {
-    const tags = tagCollection.all();
-    // The one after, because the row closes up leftwards and that is where the
-    // eye already is; the text input when this was the last.
-    const next = tags[index + 1] ?? tags[index - 1] ?? null;
-    if (next) {
-      activeTag.set(Math.min(index, tags.length - 2));
+  effect(() => {
+    const list = options.list?.();
+    if (!list) return;
+
+    const onFocusIn = (event: Event): void => {
+      const tags = tagCollection.all();
+      // The remove control lives inside the tag it removes, so focus on it is
+      // focus in the tag as far as losing that tag goes.
+      const target = event.target;
+      const index =
+        target instanceof Element ? tags.findIndex((tag) => tag.contains(target)) : -1;
+      focusedTag = tags[index] ?? null;
+      focusedIndex = index;
+    };
+
+    // Released as soon as the user leaves the row, or a removal long afterwards
+    // would pull focus back into a field nobody is in. A tag that lost focus by
+    // being taken off the page is the one case that keeps its record — that is
+    // focus being dropped rather than leaving, and it is the loss this exists
+    // to undo. Engines differ on whether they announce it at all.
+    const onFocusOut = (event: Event): void => {
+      const target = event.target;
+      if (target instanceof Element && !target.isConnected) return;
+      focusedTag = null;
+      focusedIndex = -1;
+    };
+
+    list.addEventListener('focusin', onFocusIn);
+    list.addEventListener('focusout', onFocusOut);
+    onCleanup(() => {
+      list.removeEventListener('focusin', onFocusIn);
+      list.removeEventListener('focusout', onFocusOut);
+      focusedTag = null;
+      focusedIndex = -1;
+    });
+  });
+
+  /**
+   * Put focus back on the row when the tag holding it has gone.
+   *
+   * The row is rendered from the value, so every removal arrives here as a
+   * change to it whatever caused one. An effect runs after the render effects
+   * that rebuild the row and before anything paints, so the tag that took the
+   * removed one's place is already on the page to receive focus, and a tag that
+   * only moved along the row is still on it and keeps the focus it had.
+   */
+  effect(() => {
+    state.get();
+    untrack(() => {
+      const held = focusedTag;
+      if (!held) return;
+
+      if (held.isConnected) {
+        // The row can close up around the tag holding focus without destroying
+        // it, and the record has to follow or a later removal would rescue to
+        // the wrong end of the row.
+        focusedIndex = tagCollection.all().indexOf(held);
+        if (focusedIndex === -1) focusedTag = null;
+        return;
+      }
+
+      const tags = tagCollection.all();
+      // The row closes up leftwards, so the tag that took its place is where
+      // the eye already is; the text input when this was the last one.
+      const at = Math.min(focusedIndex, tags.length - 1);
+      const next = tags[at] ?? null;
+      focusedTag = null;
+      focusedIndex = -1;
+
+      if (!next) {
+        focusInput();
+        return;
+      }
+      activeTag.set(at);
       next.focus();
-      return;
-    }
-    focusInput();
-  };
+    });
+  });
 
   const field = createFormField({
     ...fieldOptionsFor(
@@ -1900,10 +1958,6 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
     removeAt,
     removeLast: () => removeAt(untrack(() => state.get()).length - 1),
     clear: () => {
-      // The same rescue `removeAt` does: a "clear all" pressed from inside the
-      // row destroys the tag focus is in, and with every tag going there is no
-      // sibling left to land on.
-      if (focusedTag() !== -1) focusInput();
       write([]);
       duplicate.set(null);
       // The tab stop belongs to the first tag again, or the row would come
@@ -2089,30 +2143,25 @@ function escapeForClass(chars: string): string {
 
 /** The arrow that moves along the row, where the press happened. */
 function forwardKey(event: KeyboardEvent): 'ArrowLeft' | 'ArrowRight' {
-  return isRtl(event.currentTarget ?? event.target) ? 'ArrowLeft' : 'ArrowRight';
+  return isRtl(event) ? 'ArrowLeft' : 'ArrowRight';
 }
 
 /** The arrow that moves back along it. */
 function backKey(event: KeyboardEvent): 'ArrowLeft' | 'ArrowRight' {
-  return isRtl(event.currentTarget ?? event.target) ? 'ArrowRight' : 'ArrowLeft';
+  return isRtl(event) ? 'ArrowRight' : 'ArrowLeft';
 }
 
 /**
- * Writing direction at `target`.
+ * Writing direction where the press happened.
  *
- * The nearest `dir` attribute wins over computed style: an application that
- * marks up direction with `dir` is stating intent, and the attribute can also
- * be read before styles resolve. The same rule roving focus applies, so a
- * field that mixes the two agrees with itself.
+ * Asked of `resolveDirection`, which is the rule roving focus applies too — a
+ * row that mixes `dir` with a stylesheet has to agree with the group it hands
+ * its unconsumed arrows to, and two copies of one rule only agree until one of
+ * them is edited.
  */
-function isRtl(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-
-  const declared = target.closest('[dir]');
-  if (declared) return declared.getAttribute('dir')?.toLowerCase() === 'rtl';
-
-  const view = target.ownerDocument?.defaultView;
-  return view?.getComputedStyle?.(target).direction === 'rtl';
+function isRtl(event: KeyboardEvent): boolean {
+  const target = event.currentTarget ?? event.target;
+  return resolveDirection(target instanceof Element ? target : null) === 'rtl';
 }
 
 // ---------------------------------------------------------------------------

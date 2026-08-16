@@ -81,7 +81,7 @@
  * chord. Once lifted, the whole drag keyboard map belongs to `createDragDrop`.
  */
 
-import { Signal, effect, onCleanup } from '@voltjs/core';
+import { Signal, effect, onCleanup } from '@volt/core';
 import { createCollection } from './collection.js';
 import { createRovingFocus } from './roving-focus.js';
 import { createId } from './id.js';
@@ -874,31 +874,46 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
     if (mode !== 'checkbox' || !cascade) return states;
     const set = selectedState.get();
 
-    const visit = (node: TreeNode<T>): CheckedState => {
+    /** Its state, and whether the cascade can write anywhere inside it. */
+    interface Aggregate {
+      readonly state: CheckedState;
+      readonly writable: boolean;
+    }
+
+    const visit = (node: TreeNode<T>): Aggregate => {
+      const own = node.disabled !== true;
       const list = childrenOf(node);
       if (!list || list.length === 0) {
-        const own = set.has(node.id);
-        states.set(node.id, own);
-        return own;
+        const checked = set.has(node.id);
+        states.set(node.id, checked);
+        return { state: checked, writable: own };
       }
 
       let all = true;
       let none = true;
+      let writable = false;
       for (const child of list) {
-        const state = visit(child);
-        if (state === 'indeterminate') {
+        const below = visit(child);
+        writable ||= below.writable;
+        if (below.state === 'indeterminate') {
           all = false;
           none = false;
-        } else if (state) {
+        } else if (below.state) {
           none = false;
         } else {
           all = false;
         }
       }
 
-      const state: CheckedState = all ? true : none ? false : 'indeterminate';
+      // A folder holding nothing the cascade may write is a leaf as far as
+      // checking goes, and its own box is the only state it has. Aggregating
+      // descendants that refuse every press instead leaves it answering each
+      // one with no change at all — checked in the selection, unchecked on
+      // screen, and inert however often it is pressed.
+      const aggregate: CheckedState = all ? true : none ? false : 'indeterminate';
+      const state = writable ? aggregate : set.has(node.id);
       states.set(node.id, state);
-      return state;
+      return { state, writable: writable || own };
     };
 
     for (const node of options.nodes()) visit(node);
