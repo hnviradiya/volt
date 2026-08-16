@@ -211,3 +211,39 @@ describe('a mistyped directive is an error, not a property', () => {
     expect(() => gen(`<v-thing :iffy="x"></v-thing>`)).not.toThrow();
   });
 });
+
+describe('message keys a template asks for', () => {
+  const keys = (template: string) => compile(template).messageKeys;
+
+  it('collects a literal key from an interpolation', () => {
+    expect(keys(`<p>{ t('close') }</p>`)).toEqual(['close']);
+  });
+
+  it('collects one reached through an object', () => {
+    expect(keys(`<p>{ locale.t('save') }</p>`)).toEqual(['save']);
+  });
+
+  it('collects from attributes and directives too', () => {
+    expect(keys(`<b :title="t('remove')" :if="t('x')">{ t('y') }</b>`).sort()).toEqual([
+      'remove', 'x', 'y',
+    ]);
+  });
+
+  it('collects a key passed with parameters', () => {
+    expect(keys(`<p>{ t('pageOf', { n: 1, m: 9 }) }</p>`)).toEqual(['pageOf']);
+  });
+
+  it('reports each key once', () => {
+    expect(keys(`<p>{ t('a') }{ t('a') }{ t('a') }</p>`)).toEqual(['a']);
+  });
+
+  it('leaves a computed key alone rather than guessing', () => {
+    // Legitimate and unknowable here. The cost is that such a message cannot be
+    // tree-shaken, which is the right trade for the rare case.
+    expect(keys(`<p>{ t(whichever) }</p>`)).toEqual([]);
+  });
+
+  it('is empty for a template that says nothing', () => {
+    expect(keys(`<p>plain</p>`)).toEqual([]);
+  });
+});

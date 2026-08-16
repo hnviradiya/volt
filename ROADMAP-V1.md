@@ -652,6 +652,37 @@ That buys three things a bundler alone cannot:
 - **An unused message is a warning**, because the compiler knows the full set
   of call sites — which is how a catalogue stays honest as an application ages.
 
+### Type safety
+
+Paraglide's other half is that a message is a typed function, so a mistyped key
+or a missing parameter is a compile error rather than a fallback string. Volt
+should generate the same from the catalogue:
+
+```ts
+// generated from messages/en.json, never edited
+export interface Messages {
+  close: () => string;
+  pageOf: (params: { n: number; m: number }) => string;
+  itemsSelected: (params: { count: number }) => string;
+}
+```
+
+Parameters come from the message itself — `'page {n} of {m}'` has two, and the
+generator reads them out rather than asking anyone to declare them twice. `t`
+is then typed against `keyof Messages`, so `t('clsoe')` does not compile and
+`t('pageOf', { n: 1 })` does not either.
+
+In TypeScript that is Paraglide's guarantee. In a template it is more, because
+the template compiler already collects the literal keys — `compile()` returns
+them as `messageKeys` — so the same check runs on markup, where a bundler
+cannot see anything at all. A key missing from the catalogue is a build error
+naming the template file and line.
+
+Two things follow that neither a bundler nor a runtime library can do: an
+unused message is reportable, because the full set of call sites is known; and
+messages can be attributed to the chunk that asks for them, so they follow the
+code split the compiler already decides.
+
 ### What this means for the primitive already built
 
 `createLocaleProvider` takes a runtime `MessageCatalog` object. That is right

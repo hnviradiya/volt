@@ -559,7 +559,6 @@ class Parser {
         this.error(
           `Unknown directive \`:${base}\` — did you mean \`:${meant}\`?\n` +
             `  If \`${base}\` really is a property, write \`:prop-${base}\` to say so.`,
-          loc,
         );
       }
     }

@@ -39,6 +39,7 @@ import { CompilerError } from './parser.js';
 import { parseExpression, parseForExpression } from './expression/parser.js';
 import {
   collectDependencies,
+  collectMessageKeys,
   createPrintContext,
   evaluateStatic,
   isStaticExpression,
@@ -89,6 +90,14 @@ export interface CodegenResult {
    * path — whereas being wrong about a dialog costs nothing.
    */
   deferrable: string[];
+  /**
+   * Literal message keys this template asks for, via `t('key')`.
+   *
+   * The build checks these against the catalogue, so a missing key is an error
+   * with a file and a line rather than a fallback string found in production,
+   * and puts each message in the chunk that uses it.
+   */
+  messageKeys: string[];
 }
 
 export interface CompileStats {
@@ -175,6 +184,8 @@ class Generator {
   private conditionalDepth = 0;
   /** Every component tag seen, mapped to whether it was ever unconditional. */
   private componentTags = new Map<string, boolean>();
+  /** Literal message keys this template asks for. */
+  private messageKeys = new Set<string>();
 
   private stats: CompileStats = {
     templates: 0,
@@ -227,6 +238,7 @@ class Generator {
       renderExpression: expression,
       templates: this.templates,
       stats: this.stats,
+      messageKeys: [...this.messageKeys].sort(),
       deferrable: [...this.componentTags]
         .filter(([, unconditional]) => !unconditional)
         .map(([tag]) => tag),
@@ -236,6 +248,19 @@ class Generator {
   // -------------------------------------------------------------------------
   // Naming and hoisting
   // -------------------------------------------------------------------------
+
+  /**
+   * Parse a template expression, noting any message keys it asks for.
+   *
+   * Wrapping the parser is what makes the collection exhaustive: there are ten
+   * places an expression is parsed, and a key missed by one of them would be a
+   * message the build believes nothing uses.
+   */
+  private parse(exp: string): ExprNode {
+    const parsed = parseExpression(exp);
+    collectMessageKeys(parsed, this.messageKeys);
+    return parsed;
+  }
 
   private nextId(prefix: string): string {
     return `_${prefix}${this.uid++}`;
@@ -495,7 +520,7 @@ class Generator {
 
       case 'interpolation': {
         const accessor = this.genInterpolationAccessor(node.exp, ctx, node);
-        const parsed = parseExpression(node.exp);
+        const parsed = this.parse(node.exp);
         // A constant interpolation is just text — bake it into the markup.
         if (isStaticExpression(parsed)) {
           const value = evaluateStatic(parsed);
@@ -559,7 +584,7 @@ class Generator {
       if (dir.kind === 'key' || dir.kind === 'slot') continue;
 
       if ((dir.kind === 'prop' || dir.kind === 'attr' || dir.kind === 'class') && dir.exp) {
-        const parsed = parseExpression(dir.exp);
+        const parsed = this.parse(dir.exp);
         if (isStaticExpression(parsed)) {
           const value = evaluateStatic(parsed);
           const name = dir.kind === 'class' ? 'class' : dir.name;
@@ -588,7 +613,7 @@ class Generator {
       }
 
       if (dir.kind === 'style' && dir.exp) {
-        const parsed = parseExpression(dir.exp);
+        const parsed = this.parse(dir.exp);
         if (isStaticExpression(parsed)) {
           const style = normalizeStyleValue(evaluateStatic(parsed));
           if (style) {
@@ -714,7 +739,7 @@ class Generator {
         if (child.content) parts.push(JSON.stringify(child.content));
         continue;
       }
-      const parsed = parseExpression(child.exp);
+      const parsed = this.parse(child.exp);
       if (isStaticExpression(parsed)) {
         this.stats.foldedBindings++;
         parts.push(JSON.stringify(toDisplayString(evaluateStatic(parsed))));
@@ -884,7 +909,7 @@ class Generator {
     const exp = dir.exp;
     if (!exp) this.error(`\`${dir.rawName}\` requires a handler expression`, dir);
 
-    const parsed = parseExpression(exp);
+    const parsed = this.parse(exp);
     // A bare reference or arrow is already a function; anything else is an
     // inline statement and gets wrapped so `$event` is available.
     const isFunctionValue =
@@ -935,7 +960,7 @@ class Generator {
   }
 
   private genModelSetter(exp: string, ctx: PrintContext, dir: DirectiveNode): string {
-    const parsed = parseExpression(exp);
+    const parsed = this.parse(exp);
     if (parsed.type !== 'Identifier' && parsed.type !== 'Member') {
       this.error('`:model` needs a signal or assignable property, e.g. `:model="name"`', dir);
     }
@@ -954,7 +979,7 @@ class Generator {
   ): string {
     let parsed: ExprNode;
     try {
-      parsed = parseExpression(exp);
+      parsed = this.parse(exp);
     } catch (err) {
       this.error((err as Error).message, node);
     }
@@ -981,7 +1006,7 @@ class Generator {
   private genClassToggles(exp: string, ctx: PrintContext): [string, string][] | null {
     let parsed;
     try {
-      parsed = parseExpression(exp);
+      parsed = this.parse(exp);
     } catch {
       return null;
     }
@@ -1014,7 +1039,7 @@ class Generator {
   }
 
   private genAccessor(exp: string, ctx: PrintContext): string {
-    const parsed = parseExpression(exp);
+    const parsed = this.parse(exp);
     if (isStaticExpression(parsed)) {
       return JSON.stringify(evaluateStatic(parsed));
     }
@@ -1060,7 +1085,7 @@ class Generator {
       const body = this.thunk(this.genBranchBody(node, ctx));
       if (findDirective(node, 'else')) return `[null, ${body}]`;
       const dir = findDirective(node, 'if') ?? findDirective(node, 'else-if')!;
-      const condition = this.thunk(printExpression(parseExpression(dir.exp!), ctx, 1));
+      const condition = this.thunk(printExpression(this.parse(dir.exp!), ctx, 1));
       return `[${condition}, ${body}]`;
     });
     return `${this.rt}.branch([${entries.join(', ')}])`;
@@ -1159,7 +1184,7 @@ class Generator {
 
     const keyFn = withScope(ctx, keyNames, () => {
       const itemParam = printPattern(parsed.item, ctx);
-      const expression = printExpression(parseExpression(keyDir.exp!), ctx, 1);
+      const expression = printExpression(this.parse(keyDir.exp!), ctx, 1);
 
       // `$index` is always the second parameter, so `:key="$index"` works
       // whether or not the loop declared an index name of its own.
@@ -1261,7 +1286,7 @@ class Generator {
     }
     for (const dir of directives) {
       if (dir.kind !== 'prop' || !dir.exp) continue;
-      const parsed = parseExpression(dir.exp);
+      const parsed = this.parse(dir.exp);
       // Getters keep slot props lazy and reactive without wrapping functions.
       entries.push(
         `get ${JSON.stringify(dir.name)}() { return ${printExpression(parsed, ctx, 1)}; }`,
@@ -1313,7 +1338,7 @@ class Generator {
         case 'style':
         case 'attr': {
           if (!dir.exp) break;
-          const parsed = parseExpression(dir.exp);
+          const parsed = this.parse(dir.exp);
           const name = dir.kind === 'class' ? 'class' : dir.kind === 'style' ? 'style' : dir.name;
 
           // A callback prop given a bare method reference would arrive
@@ -1349,7 +1374,7 @@ class Generator {
           break;
         }
         case 'spread': {
-          props.push(`...${printExpression(parseExpression(dir.exp!), ctx, 1)}`);
+          props.push(`...${printExpression(this.parse(dir.exp!), ctx, 1)}`);
           break;
         }
         case 'ref': {

@@ -515,3 +515,52 @@ export function collectDependencies(
   visit(node);
   return out;
 }
+
+/**
+ * Message keys a template asks for, as literal strings.
+ *
+ * Collected so the build can check every key against the catalogue, attribute
+ * messages to the chunk that uses them, and report the ones nothing asks for.
+ * A bundler cannot do any of that: it sees a catalogue object, not the call
+ * sites, which is why a namespace ships whole even when one string is used.
+ *
+ * Only a literal is collected. `t(key)` with a computed key is legitimate and
+ * unknowable here, so it is left alone rather than guessed at — the cost being
+ * that such a message cannot be tree-shaken, which is the right trade for the
+ * rare case.
+ */
+export function collectMessageKeys(node: ExprNode, out: Set<string> = new Set()): Set<string> {
+  const isTranslateCallee = (callee: ExprNode): boolean =>
+    (callee.type === 'Identifier' && callee.name === 't') ||
+    (callee.type === 'Member' &&
+      !callee.computed &&
+      callee.property.type === 'Identifier' &&
+      callee.property.name === 't');
+
+  const visit = (n: ExprNode | PatternNode | null | undefined): void => {
+    if (!n || typeof n !== 'object') return;
+
+    if (n.type === 'Call') {
+      if (isTranslateCallee(n.callee)) {
+        const first = n.args[0];
+        if (first?.type === 'Literal' && typeof first.value === 'string') out.add(first.value);
+      }
+      visit(n.callee);
+      for (const arg of n.args) visit(arg);
+      return;
+    }
+
+    // Everything else is walked generically: the shapes vary, and a key can
+    // appear anywhere an expression can.
+    for (const value of Object.values(n as unknown as Record<string, unknown>)) {
+      if (Array.isArray(value)) {
+        for (const item of value) visit(item as ExprNode);
+      } else if (value && typeof value === 'object' && 'type' in value) {
+        visit(value as ExprNode);
+      }
+    }
+  };
+
+  visit(node);
+  return out;
+}
