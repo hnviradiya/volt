@@ -425,6 +425,24 @@ describe('direction', () => {
     expect(app.root().getAttribute('lang')).toBe('ar-EG');
   });
 
+  it('reads the language on an engine that has only the older text info', () => {
+    // Node 22 exposes `textInfo` and no `getTextInfo`; Node 24 has both, so a
+    // machine running the newer one never exercises this path and the older
+    // one silently renders Arabic left to right. `fa-IR` because the answer is
+    // cached per tag and the tags above are already resolved.
+    const proto = Intl.Locale.prototype as unknown as Record<string, unknown>;
+    const method = proto.getTextInfo;
+    delete proto.getTextInfo;
+    try {
+      expect(typeof new Intl.Locale('fa-IR').getTextInfo).toBe('undefined');
+      const app = mountApp('', { defaultLocale: 'fa-IR' });
+      expect(app.locale.direction()).toBe('rtl');
+      expect(app.root().getAttribute('dir')).toBe('rtl');
+    } finally {
+      proto.getTextInfo = method;
+    }
+  });
+
   it('lets the explicit option win over both', () => {
     host.setAttribute('dir', 'rtl');
     const app = mountApp('', { defaultLocale: 'ar-EG', defaultDirection: 'ltr' });

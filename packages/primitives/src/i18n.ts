@@ -511,6 +511,21 @@ export function resolveDirection(el: Element | null | undefined): Direction {
   return (el ? declaredDirection(el) : null) ?? 'ltr';
 }
 
+/**
+ * A locale's text info, under either spelling.
+ *
+ * `getTextInfo()` is what the proposal settled on and `textInfo` is what
+ * shipped first, and engines in service right now are split between them —
+ * Node 22 has only the property, Node 24 has both. Reaching for one and
+ * catching the failure means Arabic and Hebrew silently come back `ltr`, which
+ * is a worse outcome than asking for both.
+ */
+function textInfoOf(locale: Intl.Locale): { direction?: string } | undefined {
+  const method = (locale as { getTextInfo?: () => { direction?: string } }).getTextInfo;
+  if (typeof method === 'function') return method.call(locale);
+  return (locale as { textInfo?: { direction?: string } }).textInfo;
+}
+
 const scriptDirections = new Map<string, Direction | null>();
 
 /**
@@ -526,7 +541,11 @@ function scriptDirection(locale: string): Direction | null {
 
   let direction: Direction | null = null;
   try {
-    direction = new Intl.Locale(locale).getTextInfo().direction === 'rtl' ? 'rtl' : 'ltr';
+    const info = textInfoOf(new Intl.Locale(locale));
+    // No text info at all is not the same as left-to-right. Saying `ltr` here
+    // would stop the DOM and the document being consulted, which is where the
+    // answer would otherwise still come from.
+    direction = info ? (info.direction === 'rtl' ? 'rtl' : 'ltr') : null;
   } catch {
     // A malformed tag. The locale is unusable, but direction is not the place
     // to raise that — the first format call will.
