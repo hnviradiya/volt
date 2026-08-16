@@ -697,6 +697,65 @@ matters: the runtime shape is the one applications would otherwise standardise
 on, and moving them off it afterwards is a breaking change to every message in
 every one of them.
 
+## Editor support
+
+Today a template is a plain `.html` file, so an editor gives it HTML
+highlighting and nothing else: no completion for the component's own fields,
+no go-to-definition from `increment()` to the method, no squiggle under
+`count.gte()`. That is the largest gap between what Volt is and what it feels
+like to use.
+
+Three separate things, often confused:
+
+| | what it gives | where it runs |
+| --- | --- | --- |
+| Type-check block | errors in CI and on the command line | `volt check`, beside `tsc` |
+| **Language server** | **completion, hover, go-to-definition, rename, live errors** | the editor |
+| Syntax highlighting | colour | already works, because it is HTML |
+
+The middle one is what "IntelliSense" means, and it is a separate build.
+
+### It should be Volar, not a hand-written server
+
+Volar exists precisely for this: it is the framework-agnostic half of the
+tooling Vue and Astro use. You tell it how a region of a file maps onto
+TypeScript, and it returns completion, hover, definition, rename and
+diagnostics with the positions mapped back for you. Writing a Language Server
+Protocol implementation instead means reimplementing all of that against a
+type system that already answers those questions.
+
+It also shares its input with the type-check block: both need the same
+"template expression, with `_ctx` typed as the component" mapping. One
+analysis, two consumers — the CLI for CI, the language server for the editor.
+
+### The part that is harder here than in Vue
+
+A Vue single-file component carries its template and its class in one file, so
+the server always knows which is which. Volt deliberately separated them, and
+that decision has to be paid for here: given `counter.html`, the server has to
+find the class whose `templateUrl` points at it. That means indexing the
+project for `templateUrl` and `styleUrl` and keeping the reverse map current as
+files move — work the Vite plugin already does in one direction and would have
+to do in both.
+
+There is a second cost. Because a template really is `.html`, an extension
+cannot simply claim every `.html` file in a project; most of them are not
+templates. It has to activate only for files something points at, which is the
+same index again. Renaming them to `.volt.html` would make this trivial and
+would give up the plain-HTML tooling that was the reason for choosing `.html`
+in the first place — so the index is the right cost to pay.
+
+### What it should know
+
+- Completion for the component's own fields and methods, typed
+- `$event` typed by the event name on `:on-*` bindings
+- The `:for` item's type, inferred from the collection, inside the row
+- A child component's props, with their types, on its tag
+- Go-to-definition from a template expression to the class member
+- Rename that crosses the boundary in both directions
+- Message keys from the catalogue on `t('...')`, which the compiler already
+  collects
+
 ## Developer tools
 
 A browser extension plus the hooks in core it needs, all behind `__VOLT_DEV__`
