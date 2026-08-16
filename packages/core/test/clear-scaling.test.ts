@@ -70,10 +70,27 @@ function timeClear(n: number): number {
   return elapsed;
 }
 
-/** Best of several runs, to blunt a stray GC pause. */
-function bestClear(n: number, runs = 3): number {
+/**
+ * How much slower `large` is than `small`, at its most favourable.
+ *
+ * The two sizes are measured back to back and the ratio taken per pair, rather
+ * than each size being timed to its own best and the bests divided. On a
+ * machine with something else running — a shared CI runner, a VM on a
+ * developer's box — the load does not politely pause between the two halves of
+ * the measurement, and the longer run absorbs more of it, which inflates the
+ * ratio without anything having regressed. Pairing means a spike lands on both
+ * sides at once, and the best pair is the one that got the quietest window.
+ *
+ * The signal being watched for is 16x against a threshold of 8x, so being
+ * generous about noise costs nothing that matters.
+ */
+function growth(measure: (n: number) => number, small: number, large: number, pairs = 5): number {
   let best = Infinity;
-  for (let i = 0; i < runs; i++) best = Math.min(best, timeClear(n));
+  for (let i = 0; i < pairs; i++) {
+    const a = measure(small);
+    const b = measure(large);
+    best = Math.min(best, b / Math.max(a, 0.001));
+  }
   return best;
 }
 
@@ -81,14 +98,10 @@ describe('list teardown', () => {
   it('clears a list in time linear in its length', () => {
     timeClear(200); // warm the JIT
 
-    const small = bestClear(1000);
-    const large = bestClear(4000);
-
     // Four times the rows should cost about four times as much. Quadratic
-    // teardown would cost sixteen, so anything past 8x is unambiguous, and
-    // that leaves plenty of room for ordinary measurement noise.
-    const growth = large / Math.max(small, 0.001);
-    expect(growth, `1000 rows: ${small.toFixed(1)}ms, 4000 rows: ${large.toFixed(1)}ms`).toBeLessThan(8);
+    // teardown would cost sixteen, so anything past 8x is unambiguous.
+    const ratio = growth(timeClear, 1000, 4000);
+    expect(ratio, `4000 rows cost ${ratio.toFixed(1)}x 1000 rows`).toBeLessThan(8);
   }, 120_000);
 
   it('disposes many sibling scopes without searching for each one', () => {
@@ -109,11 +122,9 @@ describe('list teardown', () => {
     };
 
     measure(500); // warm
-    const small = Math.min(measure(1000), measure(1000));
-    const large = Math.min(measure(4000), measure(4000));
 
-    const growth = large / Math.max(small, 0.001);
-    expect(growth, `1000: ${small.toFixed(1)}ms, 4000: ${large.toFixed(1)}ms`).toBeLessThan(8);
+    const ratio = growth(measure, 1000, 4000);
+    expect(ratio, `4000 scopes cost ${ratio.toFixed(1)}x 1000 scopes`).toBeLessThan(8);
   }, 120_000);
 });
 
