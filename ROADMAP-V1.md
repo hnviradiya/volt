@@ -283,6 +283,54 @@ no-legacy stance — real timezone and calendar support, no `Date` foot-guns, no
 - Keyboard resize with arrow keys, `separator` role per APG
 - Persisted layout, percentage and pixel constraints
 
+## Rendering modes
+
+All six are V1, and they are variations on two pieces of machinery rather than
+six implementations: render a tree to markup, and attach bindings to markup
+that already exists.
+
+| mode | what it is | what it needs beyond the two |
+| --- | --- | --- |
+| **CSR** | render in the browser | nothing — this is what Volt does today |
+| **SSR** | render per request | a request-scoped render and state serialization |
+| **SSG** | render at build time to files | a route enumerator and a writer; optional revalidation |
+| **Streaming** | flush the shell, fill the rest as data lands | async boundaries and out-of-order slot filling |
+| **Edge** | run the request anywhere | no `node:` builtins on the render path |
+| **Hybrid** | choose per route, and ship JS only where it is needed | a per-route mode, and partial hydration |
+
+**CSR stays first-class.** An internal dashboard behind a login gains nothing
+from server rendering and pays for it in complexity — server rendering must be
+something an application opts into, never the price of using the framework.
+
+**SSG is SSR pointed at the filesystem.** The same `renderToString`, plus a
+build step that enumerates routes and writes files, and the same hydration
+path on the client: a prerendered page is indistinguishable from a
+server-rendered one once it reaches the browser. Incremental revalidation is a
+cache policy on top, not a different renderer.
+
+**Edge is a constraint, not a feature.** It falls out of the handler being a
+`(Request) => Response` function, provided nothing on the render path reaches
+for a `node:` builtin — no `fs`, no `path`, no `Buffer`. That has to be
+enforced by a build check rather than remembered, because the failure only
+appears at deploy time on a runtime nobody ran the tests on.
+
+**Hybrid is where the architecture earns something.** Partial hydration is
+usually retrofitted with an island abstraction the author has to mark up. Volt
+does not need one: the compiler already separates static from dynamic per
+node, baking static subtrees into the template string with no effect attached.
+A page that is mostly prose already ships almost no runtime work for it, and
+the island boundary is a fact the compiler knows rather than an annotation.
+
+What is missing for real partial hydration is not marking the boundary but
+declining to ship the JavaScript behind it — which is the same analysis as
+`deferrable` in the compiler, applied to a different question: not "can this
+appear later" but "can this ever change".
+
+Resumability, in the Qwik sense of serializing the reactive graph so the
+client never replays setup, is deliberately not planned. It buys the least on
+a framework whose hydration is already an attach rather than a re-render, and
+it costs a serialization format for every closure in the application.
+
 ## Server-side rendering
 
 Committed, and it constrains work already underway — a primitive that touches
@@ -307,6 +355,16 @@ already there.
 - [ ] Portals — render inline on the server, relocate on hydration
 - [ ] Event delegation attaches once on hydration rather than per element
 - [ ] Async boundaries, so streaming can flush a shell before data arrives
+- [ ] Out-of-order streaming: emit a placeholder, fill it when the data lands,
+      rather than holding the response until the slowest query returns
+- [ ] `renderToStaticMarkup` for output with no hydration at all — an email, an
+      RSS page, a PDF source
+- [ ] SSG: enumerate routes, prerender, write files; revalidation as a cache
+      policy over the same renderer
+- [ ] A build check that nothing on the render path imports a `node:` builtin,
+      since an edge deployment fails only where the tests never ran
+- [ ] Per-route rendering mode, and partial hydration driven by the compiler's
+      existing static/dynamic split rather than an island annotation
 
 ## Server functions
 

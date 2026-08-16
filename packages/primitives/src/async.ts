@@ -544,6 +544,17 @@ export function createResource<T, S = undefined>(
     if (wasLoading) status.set(peek(data) === undefined ? 'idle' : 'success');
   };
 
+  /**
+   * What `enabled` last said, so that only the change to false cancels.
+   *
+   * Seeded before the effect exists, because its first run is deferred: a
+   * resource created disabled has nothing in flight to cancel, and a
+   * `refetch()` issued in the meantime must survive that first run. Cancelling
+   * on every run while disabled would also mean any unrelated re-render killed
+   * an explicit refetch, which `enabled` is documented not to gate.
+   */
+  let wasEnabled = untrack(() => (options.enabled ? options.enabled() : true));
+
   effect(() => {
     const enabled = options.enabled ? options.enabled() : true;
     const source = readSource();
@@ -552,8 +563,11 @@ export function createResource<T, S = undefined>(
     // this resource's own state, and tracking that would make the effect
     // depend on what it writes.
     untrack(() => {
+      const toggled = enabled !== wasEnabled;
+      wasEnabled = enabled;
+
       if (!enabled) {
-        abort();
+        if (toggled) abort();
         return;
       }
 
