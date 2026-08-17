@@ -94,10 +94,10 @@ jobs:
             pnpm pack >/dev/null
             tarball=$(ls ./*.tgz)
 
-            # `--tag alpha` deliberately leaves `latest` unset, so
-            # `npm install @voltdev/core` fails rather than quietly handing
-            # somebody a version that is still being reshaped. Taking it means
-            # asking for it: `npm install @voltdev/core@alpha`.
+            # The tag is what `npm install @voltdev/core@alpha` resolves.
+            # It does not keep a package off `latest` on its first publish —
+            # npm points `latest` at the first version regardless of the tag
+            # given, and only honours this from the second publish onward.
             if [ "${DRY_RUN:-false}" = "true" ]; then
               echo "== would publish $name@$version under tag ${DIST_TAG}"
               npm publish "$tarball" --provenance --access public --tag "$DIST_TAG" --dry-run
