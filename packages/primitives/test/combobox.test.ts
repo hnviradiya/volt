@@ -19,7 +19,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { compileTemplate } from '@voltdev/core/jit';
-import { Component, Signal, flushSync, mount } from '@voltdev/core';
+import { Component, Signal, createRoot, flushSync, mount } from '@voltdev/core';
 import { directionWatcherCount } from '../src/anchoring.ts';
 import {
   createCombobox,
@@ -29,7 +29,7 @@ import {
   type Select,
   type SelectOptions,
 } from '../src/combobox.ts';
-import { dismissStackSize } from '../src/dismiss.ts';
+import { createDismiss, dismissStackSize } from '../src/dismiss.ts';
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -58,6 +58,8 @@ const ENABLED = 4;
 
 let host: HTMLElement;
 let mounted: { unmount(): void }[] = [];
+/** Bare dismissal layers a test puts up around a component. */
+let layers: (() => void)[] = [];
 let items: Signal.State<readonly Fruit[]>;
 let selectOptions: Partial<SelectOptions>;
 let comboOptions: Partial<ComboboxOptions<Fruit>>;
@@ -69,6 +71,10 @@ let fromSearch = false;
 let anchored = false;
 /** Back a `multiple` combobox with an `<input>`, which cannot hold its values. */
 let inputBacked = false;
+/** Narrow the list in the consumer's own code rather than through `matches`. */
+let ownFilter = false;
+/** What a server-rendered page sends down in the textbox. */
+let prefill = '';
 let seq = 0;
 
 beforeEach(() => {
@@ -81,6 +87,8 @@ beforeEach(() => {
   fromSearch = false;
   anchored = false;
   inputBacked = false;
+  ownFilter = false;
+  prefill = '';
 });
 
 afterEach(() => {
@@ -88,6 +96,8 @@ afterEach(() => {
   // registry; a test that leaves one mounted is a test that breaks the next.
   for (const handle of mounted) handle.unmount();
   mounted = [];
+  for (const dispose of layers) dispose();
+  layers = [];
   flushSync();
   vi.useRealTimers();
 });
@@ -146,6 +156,44 @@ function key(el: HTMLElement, name: string, modifiers: Partial<KeyboardEventInit
   el.dispatchEvent(event);
   flushSync();
   return event.defaultPrevented;
+}
+
+/**
+ * A layer around `el` that claims Escape without closing on it.
+ *
+ * What a dialog with `closeOnEscape: false` puts on the stack: the press is
+ * spoken for, and the layer stays where it is.
+ */
+function layerAround(el: Element) {
+  const onDismiss = vi.fn();
+  createRoot((dispose) => {
+    layers.push(dispose);
+    createDismiss(() => el, onDismiss);
+  });
+  flushSync();
+  return onDismiss;
+}
+
+/**
+ * A layer around `el` that closes on Escape, the way a real dialog does.
+ *
+ * The stack shrinks under this one, which is the difference that matters: a
+ * press answered here is a press nothing else may answer as well.
+ */
+function dialogAround(el: Element): { isOpen(): boolean } {
+  let open = true;
+  createRoot((dispose) => {
+    layers.push(dispose);
+    createDismiss(
+      () => el,
+      () => {
+        open = false;
+        dispose();
+      },
+    );
+  });
+  flushSync();
+  return { isOpen: () => open };
 }
 
 /** Replace the textbox's contents, as an insertion or a deletion would. */
@@ -250,7 +298,13 @@ function selectDemo(): SelectHarness {
 // Combobox
 // ---------------------------------------------------------------------------
 
-const COMBOBOX_TEMPLATE = `
+/**
+ * Built per demo rather than declared once, because `prefill` is markup: a
+ * server that has already filled the form in sends the label of the value it
+ * holds down in the textbox, and nothing this component does afterwards can
+ * put it back.
+ */
+const comboboxTemplate = (): string => `
   <form class="form" :submit="onSubmit($event)">
     <div class="wrapper" :ref="wrapper" :spread="wrapperProps()">
       <ul class="chips" :if="multiple" :spread="combo.chipsProps()">
@@ -260,12 +314,17 @@ const COMBOBOX_TEMPLATE = `
                   :click="combo.deselect(v)">x</button>
         </li>
       </ul>
-      <input class="input" :ref="input" :spread="combo.inputProps()"
+      <input class="input" :ref="input" ${prefill === '' ? '' : `value="${prefill}"`}
+             :spread="combo.inputProps()"
              :input="combo.onInput($event)"
              :keydown="combo.onInputKeyDown($event)"
              :click="combo.onInputClick()"
              :blur="combo.onInputBlur()">
       <button class="toggle" :spread="combo.toggleProps()" :click="combo.onToggleClick()"
+              :pointerdown="combo.onTogglePointerDown($event)">v</button>
+      <!-- The same two handlers with none of the props, which is all the doc
+           for them asks for. -->
+      <button class="plain-toggle" :click="combo.onToggleClick()"
               :pointerdown="combo.onTogglePointerDown($event)">v</button>
       <button class="clear" :spread="combo.clearProps()" :click="combo.clear()">x</button>
     </div>
@@ -296,6 +355,8 @@ interface ComboHarness {
   /** An `<input>`, or a `<select multiple>` when several may be chosen. */
   native(): HTMLElement;
   toggle(): HTMLButtonElement;
+  /** A toggle wired the way the doc describes and given none of the props. */
+  plainToggle(): HTMLButtonElement;
   clear(): HTMLButtonElement;
   listbox(): HTMLElement | null;
   wrapper(): HTMLElement;
@@ -310,7 +371,7 @@ interface ComboHarness {
 }
 
 function comboDemo(): ComboHarness {
-  @Component({ selector: `v-combo-${++seq}`, render: compileTemplate(COMBOBOX_TEMPLATE) })
+  @Component({ selector: `v-combo-${++seq}`, render: compileTemplate(comboboxTemplate()) })
   class ComboDemo {
     input = new Signal.State<Element | null>(null);
     list = new Signal.State<Element | null>(null);
@@ -347,6 +408,12 @@ function comboDemo(): ComboHarness {
     /** What the consumer's own markup decides to render, filter included. */
     visible(): readonly Fruit[] {
       if (fromSearch) return this.combo.items();
+      // Narrowing the list without going near `matches`, which is what
+      // `inputValue()` is on the surface for and what nothing forbids.
+      if (ownFilter) {
+        const typed = this.combo.inputValue().toLowerCase();
+        return this.items.get().filter((item) => item.label.toLowerCase().startsWith(typed));
+      }
       return this.items.get().filter((item) => this.combo.matches(item.label));
     }
 
@@ -368,6 +435,7 @@ function comboDemo(): ComboHarness {
     input: () => find<HTMLInputElement>('.input'),
     native: () => find('.native'),
     toggle: () => find<HTMLButtonElement>('.toggle'),
+    plainToggle: () => find<HTMLButtonElement>('.plain-toggle'),
     clear: () => find<HTMLButtonElement>('.clear'),
     listbox: () => host.querySelector<HTMLElement>('.listbox'),
     wrapper: () => find('.wrapper'),
@@ -935,8 +1003,139 @@ describe('the combobox textbox', () => {
     expect(new FormData(ui.form()).get('fruit')).toBe('ba');
     // The component owns the textbox's value — it forbids a `:value` binding
     // beside it — so an empty box here is the two halves of one control
-    // disagreeing about what has been chosen.
-    expect(ui.input().value).not.toBe('');
+    // disagreeing about what has been chosen: the form would go on submitting
+    // `ba` under a field that reads as untouched. Nothing on this page can say
+    // what `ba` is called, so the identifier is what there is, and it is at
+    // least the thing the form holds. The tests below are the four ways a name
+    // reaches it instead.
+    expect(ui.input().value).toBe('ba');
+  });
+
+  it('keeps the name the page was rendered with, over the identifier behind it', () => {
+    comboOptions = { name: 'fruit', defaultValue: 'ba' };
+    // What a server that has already filled the form in sends: the value in the
+    // control that submits, and its label in the box the user reads. It is the
+    // only name for that value on a page whose popup has never been opened, and
+    // seeding the box over the top of it would throw it away.
+    prefill = 'Banana';
+    const ui = comboDemo();
+
+    expect(ui.input().value).toBe('Banana');
+    expect(ui.combo.inputValue()).toBe('Banana');
+    // And it is a name like any other from there on, so the chips, the
+    // announcements and a blur all have it too.
+    expect(ui.combo.labelOf('ba')).toBe('Banana');
+    expect(new FormData(ui.form()).get('fruit')).toBe('ba');
+  });
+
+  it('shows the label of the value it starts with when `labelFor` supplies one', () => {
+    comboOptions = {
+      name: 'fruit',
+      defaultValue: 'ba',
+      labelFor: (value) => FRUITS.find((fruit) => fruit.value === value)?.label,
+    };
+    const ui = comboDemo();
+
+    // Nothing has rendered, and the control behind a single-value combobox is
+    // an `<input>` with no options in it, so this is the only thing on the page
+    // that can say what `ba` is called. Without it the box shows the identifier
+    // the form submits, which is not what the user chose.
+    expect(ui.input().value).toBe('Banana');
+    expect(new FormData(ui.form()).get('fruit')).toBe('ba');
+  });
+
+  it('replaces that identifier with the label as soon as the list can supply one', () => {
+    comboOptions = { name: 'fruit', defaultValue: 'ba' };
+    const ui = comboDemo();
+    // With nothing to ask, the identifier is all there is — a poor label and a
+    // good clue.
+    expect(ui.input().value).toBe('ba');
+
+    press(ui.toggle());
+    // The first render of the list is the first moment anything on the page
+    // knows the name of the value the form is holding, and the box is this
+    // component's to keep right: the user has typed nothing into it.
+    expect(ui.input().value).toBe('Banana');
+    expect(ui.combo.value()).toBe('ba');
+    expect(ui.options()).toHaveLength(FRUITS.length);
+  });
+
+  it('replaces it the moment the caller can name the value, popup or no popup', async () => {
+    // A catalogue that is still loading: the names for the values the form
+    // already holds arrive a turn after the field does.
+    const names = new Signal.State<Record<string, string>>({});
+    comboOptions = { name: 'fruit', defaultValue: 'ba', labelFor: (value) => names.get()[value] };
+    const ui = comboDemo();
+    expect(ui.input().value).toBe('ba');
+
+    names.set({ ba: 'Banana' });
+    await settle();
+    // Waiting for the list to be opened would leave the identifier in front of
+    // a user who never opens it, over a form that submits something else.
+    expect(ui.input().value).toBe('Banana');
+    expect(ui.combo.value()).toBe('ba');
+  });
+
+  it('does not report a name turning up as text somebody typed', async () => {
+    const seen: string[] = [];
+    const names = new Signal.State<Record<string, string>>({});
+    comboOptions = {
+      name: 'fruit',
+      defaultValue: 'ba',
+      labelFor: (value) => names.get()[value],
+      onInputValueChange: (value) => seen.push(value),
+    };
+    const ui = comboDemo();
+    expect(seen).toEqual([]);
+
+    names.set({ ba: 'Banana' });
+    await settle();
+    // The box says Banana and nobody has typed a letter of it: what changed is
+    // what the page can call the value, not what has been chosen.
+    expect(ui.input().value).toBe('Banana');
+    expect(seen).toEqual([]);
+
+    press(ui.toggle());
+    // Nor is the list rendering the name it already had a change to report.
+    expect(ui.input().value).toBe('Banana');
+    expect(seen).toEqual([]);
+
+    press(ui.option('ch'));
+    // A press on an option is a change, and it is reported — the pointer route
+    // says exactly what the keyboard's own Enter says.
+    expect(ui.input().value).toBe('Cherry');
+    expect(seen).toEqual(['Cherry']);
+  });
+
+  it('keeps the label an option really had over one promised for it', () => {
+    comboOptions = { name: 'fruit', defaultValue: 'ba', labelFor: () => 'Stale' };
+    const ui = comboDemo();
+
+    press(ui.toggle());
+    expect(ui.combo.labelOf('ba')).toBe('Banana');
+
+    key(ui.input(), 'Escape');
+    // `labelFor` answers for a value nothing has rendered; once something has,
+    // what was on the page is what the chip and the box keep saying.
+    expect(ui.listbox()).toBeNull();
+    expect(ui.combo.labelOf('ba')).toBe('Banana');
+    expect(ui.input().value).toBe('Banana');
+  });
+
+  it('leaves text that reads like a value alone while the list is still filtering', async () => {
+    comboOptions = { name: 'fruit', defaultValue: 'ba' };
+    const ui = comboDemo();
+    const input = ui.input();
+
+    type(input, 'b');
+    type(input, 'ba');
+    // Once the observer has caught up, the box holds what the seed put there
+    // character for character, and the list has rendered Banana beneath it.
+    // Correcting it now would rewrite the query under the caret of the person
+    // typing it.
+    await settle();
+    expect(input.value).toBe('ba');
+    expect(ui.labels()).toEqual(['Banana']);
   });
 
   it('keeps DOM focus in the textbox and points at the option instead', () => {
@@ -1090,6 +1289,21 @@ describe('opening and closing a combobox', () => {
     expect(ui.combo.isOpen()).toBe(false);
   });
 
+  it('closes from a toggle that was given the handlers and none of the props', () => {
+    const ui = comboDemo();
+
+    press(ui.plainToggle());
+    expect(ui.combo.isOpen()).toBe(true);
+
+    // `aria-controls` is how a button on the page says it belongs to this
+    // popup, but it is only there while the popup is open and only if the
+    // consumer spread `toggleProps()` — which the doc for these two handlers
+    // never mentions. The press has to be what says so, or dismissal reads it
+    // as a press outside: the popup closes and the click opens it again.
+    press(ui.plainToggle());
+    expect(ui.combo.isOpen()).toBe(false);
+  });
+
   it('keeps focus in the textbox when the toggle is pressed', () => {
     const ui = comboDemo();
     const input = ui.input();
@@ -1132,6 +1346,60 @@ describe('opening and closing a combobox', () => {
     expect(other.combo.isOpen()).toBe(false);
     expect(input.value).toBe('ch');
     expect(ui.combo.inputValue()).toBe('ch');
+  });
+
+  it('still clears the box inside a layer it is rendered in', () => {
+    const ui = comboDemo();
+    const input = ui.input();
+    input.focus();
+    // A dialog around the page that keeps its own Escape, which is the layer a
+    // combobox is nested *inside* rather than one stacked over the top of it —
+    // and how many layers there are cannot tell the two apart.
+    const dialog = layerAround(document.body);
+
+    type(input, 'ch');
+    key(input, 'Escape');
+    expect(ui.combo.isOpen()).toBe(false);
+    expect(input.value).toBe('ch');
+    expect(dialog).not.toHaveBeenCalled();
+
+    key(input, 'Escape');
+    // The second stage APG asks for. A combobox that can never reach it is one
+    // whose textbox cannot be emptied from the keyboard for as long as it is in
+    // a dialog.
+    expect(input.value).toBe('');
+    expect(ui.combo.inputValue()).toBe('');
+    // And one press answers one layer: the press the textbox took is not also
+    // the press the dialog around it hears.
+    expect(dialog).not.toHaveBeenCalled();
+  });
+
+  it('empties its box without taking down the dialog it is inside', () => {
+    const ui = comboDemo();
+    const input = ui.input();
+    input.focus();
+    // A dialog that really closes on Escape, which is the layer configuration
+    // where a press answered twice can be seen: the box empties and the dialog
+    // it was in goes with it.
+    const dialog = dialogAround(document.body);
+
+    type(input, 'ch');
+    key(input, 'ArrowDown');
+    key(input, 'Enter');
+    expect(ui.combo.value()).toBe('ch');
+    expect(input.value).toBe('Cherry');
+
+    key(input, 'Escape');
+    expect(input.value).toBe('');
+    expect(ui.combo.value()).toBeNull();
+    // The layer the user is addressing is the one they have focus in. Losing
+    // the dialog on the same press loses the value with it, and there is no
+    // press left to undo either.
+    expect(dialog.isOpen()).toBe(true);
+
+    key(input, 'Escape');
+    // Nothing left to clear, so this one belongs to the dialog.
+    expect(dialog.isOpen()).toBe(false);
   });
 
   it('names its two side buttons and keeps them out of the tab order', () => {
@@ -1285,6 +1553,182 @@ describe('a combobox that searches', () => {
     // keystroke and its answer is telling the user something untrue.
     expect(ui.combo.isEmpty()).toBe(false);
     expect(ui.empty()).toBeNull();
+  });
+
+  it('does not claim there are no results in the quiet time before it asks', () => {
+    fromSearch = true;
+    // The documented default rather than the zero the rest of these pin: the
+    // resource is not told about a keystroke until the debounce fires, so for
+    // the whole quarter second after every one of them it is not loading and
+    // the list is empty.
+    comboOptions = { searchDebounce: 250, search: () => new Promise<readonly Fruit[]>(() => {}) };
+    const ui = comboDemo();
+
+    type(ui.input(), 'ch');
+    expect(ui.combo.isLoading()).toBe(false);
+    expect(ui.combo.isEmpty()).toBe(false);
+    expect(ui.empty()).toBeNull();
+    // And a live region politely reading "No results" out over a search that
+    // has not been made is the same untruth said aloud.
+    expect(ui.status().textContent).toBe('Loading…');
+  });
+
+  it('does not read an answer to the last keystroke as the answer to this one', async () => {
+    const pending: { source: string; resolve: (results: readonly Fruit[]) => void }[] = [];
+    fromSearch = true;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    comboOptions = {
+      searchDebounce: 250,
+      search: (request) =>
+        new Promise<readonly Fruit[]>((resolve) => pending.push({ source: request.source, resolve })),
+    };
+    const ui = comboDemo();
+    const input = ui.input();
+
+    type(input, 'c');
+    vi.advanceTimersByTime(300);
+    await settle();
+    expect(pending.map((request) => request.source)).toEqual(['c']);
+
+    // A second character, and the answer to the first arriving inside the quiet
+    // time before the second goes out.
+    type(input, 'ch');
+    pending[0]!.resolve([]);
+    await settle();
+
+    // "No results" here is an answer to a question nobody has asked yet: the
+    // request for "ch" is still sitting on the debounce timer.
+    expect(pending.map((request) => request.source)).toEqual(['c']);
+    expect(ui.combo.isEmpty()).toBe(false);
+    expect(ui.empty()).toBeNull();
+    expect(ui.status().textContent).toBe('Loading…');
+
+    vi.advanceTimersByTime(300);
+    await settle();
+    expect(pending.map((request) => request.source)).toEqual(['c', 'ch']);
+  });
+
+  it('asks for the whole list up front when there is no `defaultValue` to seed', async () => {
+    const asked: string[] = [];
+    fromSearch = true;
+    // The documented "characters before a search goes out at all: 0", which is
+    // how a caller loads every option once and lets the popup narrow it.
+    comboOptions = {
+      minLength: 0,
+      searchDebounce: 0,
+      search: (request) => {
+        asked.push(request.source);
+        return Promise.resolve<readonly Fruit[]>(FRUITS);
+      },
+    };
+    const ui = comboDemo();
+    await settle();
+    expect(asked).toEqual(['']);
+
+    press(ui.toggle());
+    await settle();
+    expect(ui.labels()).toEqual(FRUITS.map((fruit) => fruit.label));
+    expect(ui.combo.isEmpty()).toBe(false);
+  });
+
+  it('keeps a search in flight when the popup is opened by hand', async () => {
+    const aborted: string[] = [];
+    const gate = deferred<readonly Fruit[]>();
+    fromSearch = true;
+    comboOptions = {
+      searchDebounce: 0,
+      search: (request) => {
+        request.signal.addEventListener('abort', () => aborted.push(request.source));
+        return gate.promise;
+      },
+    };
+    const ui = comboDemo();
+    const input = ui.input();
+
+    type(input, 'ch');
+    key(input, 'Escape');
+    press(ui.toggle());
+    gate.resolve([FRUITS[3]!]);
+    await settle();
+
+    // Opening the popup says nothing about the question already asked, and
+    // throwing the request away leaves the list the user opened saying "No
+    // results" for an answer that was on its way.
+    expect(aborted).toEqual([]);
+    expect(ui.labels()).toEqual(['Cherry']);
+    expect(ui.combo.isEmpty()).toBe(false);
+  });
+
+  it('asks nothing, and announces nothing, for a value it was handed', async () => {
+    const asked: string[] = [];
+    const seen: string[] = [];
+    const names = new Signal.State<Record<string, string>>({});
+    fromSearch = true;
+    comboOptions = {
+      defaultValue: 'ba',
+      searchDebounce: 0,
+      labelFor: (value) => names.get()[value],
+      onInputValueChange: (value) => seen.push(value),
+      search: (request) => {
+        asked.push(request.source);
+        return Promise.resolve<readonly Fruit[]>([]);
+      },
+    };
+    const ui = comboDemo();
+    await settle();
+
+    // Filling the box from `defaultValue` is not typing in it: a search for the
+    // identifier behind a value nobody has touched is a request the user never
+    // asked for, and `onInputValueChange` is for what they type.
+    expect(asked).toEqual([]);
+    expect(seen).toEqual([]);
+    // The box still shows what the form holds, by the only name anything on
+    // the page has for it yet.
+    expect(ui.input().value).toBe('ba');
+
+    names.set({ ba: 'Banana' });
+    await settle();
+    // And the name arriving is the same thing again from the other end: the box
+    // fills in, the question nobody asked is still not asked, and text the user
+    // has never entered is still not reported as text they entered.
+    expect(ui.input().value).toBe('Banana');
+    expect(asked).toEqual([]);
+    expect(seen).toEqual([]);
+
+    type(ui.input(), 'ch');
+    await settle();
+    expect(asked).toEqual(['ch']);
+    expect(seen).toEqual(['ch']);
+  });
+
+  it('asks for text put in the box from outside, the way it asks for typing', async () => {
+    const asked: string[] = [];
+    fromSearch = true;
+    comboOptions = {
+      searchDebounce: 0,
+      search: (request) => {
+        asked.push(request.source);
+        return Promise.resolve<readonly Fruit[]>(
+          FRUITS.filter((fruit) => fruit.label.toLowerCase().startsWith(request.source)),
+        );
+      },
+    };
+    const ui = comboDemo();
+
+    // A query restored with the session, or a "search for this" button beside
+    // the field: no key has been pressed, and there is still a question in the
+    // box.
+    ui.combo.setInputValue('ch');
+    ui.combo.open();
+    await settle();
+
+    expect(asked).toEqual(['ch']);
+    expect(ui.labels()).toEqual(['Cherry']);
+    // A popup that answers "No results" for a search nothing ever made says the
+    // untruth on screen and again in the live region.
+    expect(ui.combo.isEmpty()).toBe(false);
+    expect(ui.empty()).toBeNull();
+    expect(ui.status().textContent).toBe('1 result available');
   });
 
   it('lets a fast later answer stand over a slow earlier one', async () => {
@@ -1450,6 +1894,36 @@ describe('committing a value', () => {
     expect(ui.input().value).toBe('');
     expect(new FormData(ui.form()).get('fruit')).toBe('');
   });
+
+  it('refuses to select while read-only, and still collapses the list', () => {
+    comboOptions = { name: 'fruit', readOnly: () => true, defaultValue: 'ch' };
+    const ui = comboDemo();
+    const input = openCombo(ui);
+    expect(ui.combo.isOpen()).toBe(true);
+
+    key(input, 'ArrowDown');
+    key(input, 'Enter');
+    // Nothing was taken, so nothing about the widget may say otherwise: a box
+    // reading "Apple" over a form submitting `ch`, under a list still up
+    // waiting for a press that will never do anything, is three lies from one
+    // keystroke.
+    expect(ui.combo.value()).toBe('ch');
+    expect(input.value).toBe('Cherry');
+    expect(ui.combo.isOpen()).toBe(false);
+
+    press(ui.toggle());
+    press(ui.option('ap'));
+    // And the pointer answers it the same way, as it does everywhere else.
+    expect(ui.combo.value()).toBe('ch');
+    expect(input.value).toBe('Cherry');
+    expect(ui.combo.isOpen()).toBe(false);
+
+    key(input, 'Escape');
+    // Emptying the box is a change too, and one that would leave the widget
+    // showing nothing over a value it still holds and still submits.
+    expect(input.value).toBe('Cherry');
+    expect(ui.combo.value()).toBe('ch');
+  });
 });
 
 describe('choosing several, with chips', () => {
@@ -1508,6 +1982,36 @@ describe('choosing several, with chips', () => {
     key(input, 'Enter');
     expect(ui.combo.values()).toEqual(['ap', 'ba']);
     expect(ui.combo.isOpen()).toBe(true);
+  });
+
+  it('answers a press that removes a value the way both routes answer one that adds', () => {
+    comboOptions = { multiple: true, closeOnSelect: true, name: 'fruit' };
+    const pointer = comboDemo();
+
+    press(pointer.input());
+    press(pointer.option('ap'));
+    expect(pointer.combo.isOpen()).toBe(false);
+
+    press(pointer.input());
+    press(pointer.option('ap'));
+    // `closeOnSelect` is about the press, not about which way it went. The
+    // keyboard closes here, and a pointer that left the list up would be one
+    // gesture answered two ways — in the one configuration the option exists to
+    // express.
+    expect(pointer.combo.values()).toEqual([]);
+    expect(pointer.combo.isOpen()).toBe(false);
+
+    dispose(pointer.handle);
+    const keyboard = comboDemo();
+    const input = keyboard.input();
+
+    press(input);
+    press(keyboard.option('ap'));
+    press(input);
+    key(input, 'ArrowDown');
+    key(input, 'Enter');
+    expect(keyboard.combo.values()).toEqual([]);
+    expect(keyboard.combo.isOpen()).toBe(false);
   });
 
   it('carries every value chosen into the control that submits, not only the first', () => {
@@ -1629,6 +2133,66 @@ describe('completing the textbox inline', () => {
     expect(input.selectionStart).toBe(1);
     expect(input.selectionEnd).toBe(5);
     expect(ui.combo.activeValue()).toBe('ap');
+  });
+
+  it('completes from a list the consumer narrowed themselves', () => {
+    ownFilter = true;
+    const ui = comboDemo();
+    const input = ui.input();
+    input.focus();
+
+    // Whoever did the narrowing, what is in the popup is what there is to
+    // complete from.
+    type(input, 'ap');
+    expect(input.value).toBe('Apple');
+    expect(input.selectionStart).toBe(2);
+    expect(input.selectionEnd).toBe(5);
+    expect(ui.combo.activeValue()).toBe('ap');
+  });
+
+  it('does not complete from a list that turns up with no keystroke behind it', async () => {
+    // A consumer who narrows the list in their own code and never goes near
+    // `matches` — so nothing this component can see says whether the popup is
+    // empty because the filter emptied it or because the data is late.
+    ownFilter = true;
+    const ui = comboDemo();
+    const input = ui.input();
+    input.focus();
+
+    type(input, 'q');
+    expect(input.value).toBe('q');
+    expect(ui.labels()).toEqual([]);
+
+    items.set([...FRUITS, { value: 'qu', label: 'Quince' }]);
+    await settle();
+
+    // A poll or a websocket changing the options is not a keystroke, and the
+    // keystroke it would be answering was dealt with when the popup rendered
+    // empty. Completing here rewrites the textbox under a caret nobody moved.
+    expect(input.value).toBe('q');
+    expect(input.selectionEnd).toBe(1);
+    expect(ui.combo.activeValue()).toBeNull();
+  });
+
+  it('does not complete a keystroke the list has already answered', async () => {
+    const ui = comboDemo();
+    const input = ui.input();
+    input.focus();
+
+    type(input, 'q');
+    // The list is here and nothing in it starts with that, which is an answer:
+    // there is no completion for this keystroke.
+    expect(input.value).toBe('q');
+
+    items.set([...FRUITS, { value: 'qu', label: 'Quince' }]);
+    await settle();
+
+    // A poll or a websocket changing the options is not a keystroke. Completing
+    // from one rewrites the textbox under a caret nobody moved, and moves
+    // virtual focus onto an option the user never asked for.
+    expect(input.value).toBe('q');
+    expect(input.selectionEnd).toBe(1);
+    expect(ui.combo.activeValue()).toBeNull();
   });
 
   it('does not complete after a deletion, or the box can never be emptied', () => {

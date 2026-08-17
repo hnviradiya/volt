@@ -117,6 +117,19 @@ const MARKED = `
   </div>
 `;
 
+/** The mirrors behind a consumer's `:if`, the way a lazily revealed panel holds them. */
+const LATE_MIRRORS = `
+  <div class="slider" :ref="root" :spread="slider.rootProps()" :keydown="onKey($event)">
+    <span class="track" :ref="track" :spread="slider.trackProps()"></span>
+    <span class="thumb" :for="(v, i) of slider.values()" :key="i"
+          :spread="slider.thumbProps(i)"></span>
+    <span class="panel" :if="ready.get()">
+      <input class="mirror" :for="(v, i) of slider.values()" :key="i"
+             :spread="slider.inputProps(i)">
+    </span>
+  </div>
+`;
+
 type Options = Omit<SliderOptions, 'root' | 'track' | 'label' | 'description' | 'errorMessage'>;
 
 interface SliderHarness {
@@ -126,6 +139,8 @@ interface SliderHarness {
   thumbs(): HTMLElement[];
   thumb(index: number): HTMLElement;
   mirrors(): HTMLInputElement[];
+  /** Render whatever the template kept behind its `:if`, and settle it. */
+  reveal(): void;
   /** What `onKeyDown` returned for the last key the slider saw. */
   handled(): boolean;
   unmount(): void;
@@ -144,6 +159,7 @@ function build(
     label = new Signal.State<Element | null>(null);
     hint = new Signal.State<Element | null>(null);
     error = new Signal.State<Element | null>(null);
+    ready = new Signal.State(false);
     lastHandled = false;
     slider: Slider = createSlider({
       ...options,
@@ -175,6 +191,10 @@ function build(
     thumbs: () => [...parent.querySelectorAll<HTMLElement>('.thumb')],
     thumb: (index) => parent.querySelectorAll<HTMLElement>('.thumb')[index]!,
     mirrors: () => [...parent.querySelectorAll<HTMLInputElement>('.mirror')],
+    reveal: () => {
+      instance.ready.set(true);
+      flushSync();
+    },
     handled: () => instance.lastHandled,
     unmount: () => handle.unmount(),
   };
@@ -1044,12 +1064,21 @@ describe('slider: dirtiness', () => {
   });
 
   it('goes dirty from a press on the track', () => {
-    const { slider, track } = setup({ defaultValue: [20], name: 'price' });
+    const { slider, root, track } = setup({ defaultValue: [20], name: 'price' });
 
     pointerDown(track, { clientX: 100 });
     pointerUp();
     expect(slider.value()).toBe(50);
     expect(slider.field.isDirty()).toBe(true);
+    expect(root.getAttribute('data-dirty')).toBe('');
+
+    // A press that lands back on the default is as much a way home as the
+    // keyboard is.
+    pointerDown(track, { clientX: 40 });
+    pointerUp();
+    expect(slider.value()).toBe(20);
+    expect(slider.field.isDirty()).toBe(false);
+    expect(root.hasAttribute('data-dirty')).toBe(false);
   });
 
   it('goes dirty when the value is set through the API', () => {
@@ -1132,6 +1161,247 @@ describe('slider: dirtiness', () => {
     expect(slider.values()).toEqual([20, 80]);
     expect(slider.field.isDirty()).toBe(false);
     expect(root.hasAttribute('data-dirty')).toBe(false);
+  });
+
+  it('counts a value the mirror was given by something other than the slider', () => {
+    const form = document.createElement('form');
+    host.append(form);
+    const { slider, root, mirrors } = build(SLIDER, { defaultValue: [20], name: 'price' }, form);
+
+    // A session restore, an autofill or a script writes the control itself: no
+    // thumb moves and no signal is set, and the form goes on to submit a value
+    // the user never chose. A guard that only ever hears about the slider's own
+    // writes has nothing to say about it.
+    const mirror = mirrors()[0]!;
+    mirror.value = '77';
+    mirror.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+
+    expect(new FormData(form).getAll('price')).toEqual(['77']);
+    expect(slider.field.isDirty()).toBe(true);
+    expect(root.getAttribute('data-dirty')).toBe('');
+
+    // Not a latch: the next value the slider writes fills the mirrors from
+    // itself, so what was written over them is gone with it.
+    slider.setValues([30]);
+    flushSync();
+    slider.setValues([20]);
+    flushSync();
+    expect(mirrors()[0]!.value).toBe('20');
+    expect(slider.field.isDirty()).toBe(false);
+    expect(root.hasAttribute('data-dirty')).toBe(false);
+  });
+
+  it('lets a form reset take back a mirror the slider never wrote', async () => {
+    const form = document.createElement('form');
+    host.append(form);
+    const { slider, mirrors } = build(SLIDER, { defaultValue: [20], name: 'price' }, form);
+
+    const mirror = mirrors()[0]!;
+    mirror.value = '77';
+    mirror.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(slider.field.isDirty()).toBe(true);
+
+    // The platform puts every mirror back to the `value` attribute the slider
+    // wrote, so the reset is what ends the drift — the slider itself has no
+    // value to rewrite them with, being on its default throughout.
+    form.reset();
+    await Promise.resolve();
+    flushSync();
+    expect(mirrors()[0]!.value).toBe('20');
+    expect(slider.field.isDirty()).toBe(false);
+  });
+
+  it('clears a mirror it never wrote when the field is reset', () => {
+    const form = document.createElement('form');
+    host.append(form);
+    const { slider, root, mirrors } = build(SLIDER, { defaultValue: [20], name: 'price' }, form);
+
+    const mirror = mirrors()[0]!;
+    mirror.value = '77';
+    mirror.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(slider.field.isDirty()).toBe(true);
+
+    // `reset` clears what the field has recorded, and this is a record of the
+    // field's: a form that was autofilled once could otherwise never be called
+    // saved again, since nothing else can reach it.
+    slider.field.reset();
+    flushSync();
+    expect(slider.field.isDirty()).toBe(false);
+    expect(root.hasAttribute('data-dirty')).toBe(false);
+  });
+
+  it('is clean at the default even when the mirrors arrive after the first render', () => {
+    const { slider, root, thumb, mirrors, reveal } = build(LATE_MIRRORS, {
+      defaultValue: [20],
+      name: 'price',
+    });
+
+    // The control the field found at mount was the root itself, which has no
+    // value and no default of its own — so an answer that leans on the field's
+    // own comparison latches on the first move and never comes back.
+    reveal();
+    expect(mirrors()[0]!.value).toBe('20');
+    expect(slider.field.isDirty()).toBe(false);
+
+    press(thumb(0), 'ArrowRight');
+    expect(slider.field.isDirty()).toBe(true);
+
+    press(thumb(0), 'ArrowLeft');
+    expect(slider.values()).toEqual([20]);
+    expect(slider.field.isDirty()).toBe(false);
+    expect(root.hasAttribute('data-dirty')).toBe(false);
+  });
+
+  it('answers in the same tick as the gesture, in both directions', () => {
+    const { slider, thumb } = setup({ defaultValue: [20], name: 'price' });
+    const arrow = (key: string) =>
+      thumb(0).dispatchEvent(
+        new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+      );
+
+    // Nothing is flushed in between: a handler that reads both halves of the
+    // slider's own API must not be told the value moved and the form is
+    // untouched.
+    arrow('ArrowRight');
+    expect(slider.value()).toBe(21);
+    expect(slider.field.isDirty()).toBe(true);
+    expect(slider.field.fieldProps()['data-dirty']).toBe(true);
+    flushSync();
+
+    // The way home is the half that an answer taken from the control gets
+    // wrong: the mirror still holds the value this gesture has just replaced,
+    // so a Save button driven from here stays lit over a form at its default.
+    arrow('ArrowLeft');
+    expect(slider.value()).toBe(20);
+    expect(slider.field.isDirty()).toBe(false);
+    expect(slider.field.fieldProps()['data-dirty']).toBeUndefined();
+    flushSync();
+  });
+
+  it('answers in the same tick as a drag', () => {
+    const { slider, track } = setup({ defaultValue: [20], name: 'price' });
+
+    pointerDown(track, { clientX: 100 });
+    expect(slider.value()).toBe(50);
+    expect(slider.field.isDirty()).toBe(true);
+
+    // A drag reports every move, and a move that passes back over the default
+    // is where the answer has to change with it rather than a frame later.
+    document.dispatchEvent(
+      new PointerEvent('pointermove', { bubbles: true, pointerId: 1, clientX: 40 }),
+    );
+    expect(slider.value()).toBe(20);
+    expect(slider.field.isDirty()).toBe(false);
+    pointerUp();
+  });
+
+  it('answers in the same tick as a value set through the API', () => {
+    const { slider } = setup({ defaultValue: [20], name: 'price' });
+
+    slider.setValues([90]);
+    expect(slider.values()).toEqual([90]);
+    expect(slider.field.isDirty()).toBe(true);
+    expect(slider.field.fieldProps()['data-dirty']).toBe(true);
+    flushSync();
+
+    slider.setValues([20]);
+    expect(slider.values()).toEqual([20]);
+    expect(slider.field.isDirty()).toBe(false);
+    expect(slider.field.fieldProps()['data-dirty']).toBeUndefined();
+    flushSync();
+  });
+
+  it('answers in the same tick as a write to the signal it was given', () => {
+    const value = new Signal.State<readonly number[]>([30]);
+    const { slider } = setup({ value, name: 'price' });
+
+    value.set([70]);
+    expect(slider.field.isDirty()).toBe(true);
+    flushSync();
+
+    value.set([30]);
+    expect(slider.field.isDirty()).toBe(false);
+    flushSync();
+  });
+
+  it('tells a value-change listener what it tells the form', () => {
+    const seen: [readonly number[], boolean][] = [];
+    const { slider, thumb } = setup({
+      defaultValue: [20],
+      name: 'price',
+      onValueChange: (values) => seen.push([values, slider.field.isDirty()]),
+    });
+
+    // The callback runs from inside the write, which is the earliest anything
+    // outside can ask — and the answer it gets is the one a consumer's
+    // unsaved-changes guard is built on.
+    press(thumb(0), 'ArrowRight');
+    press(thumb(0), 'ArrowLeft');
+    expect(seen).toEqual([
+      [[21], true],
+      [[20], false],
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Slider: validation
+// ---------------------------------------------------------------------------
+
+describe('slider: validation', () => {
+  it('records the value the mirror settled on, not the one it replaced', () => {
+    const { slider, thumb } = setup({ defaultValue: [20], name: 'price' });
+
+    // The field reads its record from the control, and the control is a mirror
+    // the consumer's template fills — so a field told about the edit before
+    // that has happened records the value the gesture replaced, for ever.
+    press(thumb(0), 'ArrowRight');
+    expect(slider.value()).toBe(21);
+    expect(slider.field.value()).toBe('21');
+  });
+
+  it('revalidates as the thumb moves, once validation has run', async () => {
+    const harness = build(DESCRIBED, {
+      defaultValue: [20],
+      validate: (values) => ((values[0] ?? 0) > 50 ? 'Too expensive' : null),
+    });
+
+    expect(await harness.slider.field.validate()).toBe(true);
+    flushSync();
+
+    // Nothing asks again: the edit is the trigger. A field that has to be
+    // asked leaves a verdict on screen about a value the user has already
+    // corrected.
+    press(harness.thumb(0), 'End');
+    expect(harness.slider.field.messages()).toEqual(['Too expensive']);
+    expect(harness.thumb(0).getAttribute('aria-invalid')).toBe('true');
+
+    press(harness.thumb(0), 'Home');
+    expect(harness.slider.field.messages()).toEqual([]);
+    expect(harness.thumb(0).hasAttribute('aria-invalid')).toBe(false);
+  });
+
+  it('revalidates a value driven from the signal it was given', async () => {
+    const value = new Signal.State<readonly number[]>([80]);
+    const harness = build(DESCRIBED, {
+      value,
+      validate: (values) => ((values[0] ?? 0) > 50 ? 'Too expensive' : null),
+    });
+
+    expect(await harness.slider.field.validate()).toBe(false);
+    flushSync();
+    expect(harness.slider.field.messages()).toEqual(['Too expensive']);
+
+    // A controlled slider is moved by writing the signal, which calls no method
+    // of the slider's — so a field told about edits from the setters alone
+    // never hears that the value it refused is gone.
+    value.set([10]);
+    flushSync();
+    expect(harness.slider.field.isValid()).toBe(true);
+    expect(harness.slider.field.messages()).toEqual([]);
   });
 });
 

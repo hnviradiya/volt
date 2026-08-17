@@ -2154,10 +2154,11 @@ function backKey(event: KeyboardEvent): 'ArrowLeft' | 'ArrowRight' {
 /**
  * Writing direction where the press happened.
  *
- * Asked of `resolveDirection`, which is the rule roving focus applies too — a
- * row that mixes `dir` with a stylesheet has to agree with the group it hands
- * its unconsumed arrows to, and two copies of one rule only agree until one of
- * them is edited.
+ * Asked of `resolveDirection`, the one rule in the library for this question, so
+ * that a row which delegates the decision — `dir="auto"`, or a direction only a
+ * stylesheet states — cannot be read one way here and another way wherever else
+ * it is asked. A second copy of the rule agrees only until one of them is
+ * edited.
  */
 function isRtl(event: KeyboardEvent): boolean {
   const target = event.currentTarget ?? event.target;

@@ -573,6 +573,53 @@ export function createSlider(options: SliderOptions): Slider {
   });
 
   /**
+   * A mirror holding something the slider never put there.
+   *
+   * The mirrors are the controls the form is actually read from, and a session
+   * restore, an autofill or a script can write one without a thumb moving —
+   * what it writes is what gets submitted. Kept in a signal and read on the
+   * events that can change the answer, because the DOM announces nothing that
+   * `data-dirty` could follow.
+   */
+  const drifted = new Signal.State(false);
+
+  const readDrift = (): boolean => {
+    const root = options.root();
+    if (!root) return false;
+
+    const list = current();
+    const mirrors = root.querySelectorAll<HTMLInputElement>(`[${SLIDER_INPUT_ATTRIBUTE}]`);
+    for (const mirror of mirrors) {
+      const index = Number(mirror.getAttribute(SLIDER_INPUT_ATTRIBUTE));
+      if (mirror.value !== String(list[index] ?? min)) return true;
+    }
+    return false;
+  };
+
+  // Delegated from the root, because the mirrors are the consumer's `:for` to
+  // render and unrender and there is no moment at which the whole set can be
+  // subscribed to one by one. `change` as well as `input`: a restored session
+  // fires only that one in some engines.
+  effect(() => {
+    const root = options.root();
+    if (!root) return;
+
+    const onWrite = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Element && target.hasAttribute(SLIDER_INPUT_ATTRIBUTE)) {
+        drifted.set(readDrift());
+      }
+    };
+
+    root.addEventListener('input', onWrite);
+    root.addEventListener('change', onWrite);
+    onCleanup(() => {
+      root.removeEventListener('input', onWrite);
+      root.removeEventListener('change', onWrite);
+    });
+  });
+
+  /**
    * Dirtiness for the whole value, which is more than the field can see.
    *
    * A field measures it against the one control it validates, and that control
@@ -581,15 +628,26 @@ export function createSlider(options: SliderOptions): Slider {
    * could ever make an unsaved-changes guard speak up. What a reset restores is
    * the array, so the array is what the comparison is over, and the field is
    * handed that answer in place of its own everywhere it publishes one.
+   *
+   * Derived from the value rather than stored beside it: a stored answer would
+   * settle a microtask after the gesture, and until it did, an `onValueChange`
+   * handler or a key handler that had already read `values()` would be told the
+   * slider is back at its default and the form is not.
    */
   const pristine = initial.join(',');
-  const dirty = new Signal.State(false);
+  const isDirty = (): boolean => current().join(',') !== pristine || drifted.get();
 
   const field: FormField = {
     ...composed,
-    isDirty: () => dirty.get(),
-    fieldProps: () => ({ ...composed.fieldProps(), 'data-dirty': dirty.get() || undefined }),
-    controlProps: () => ({ ...composed.controlProps(), 'data-dirty': dirty.get() || undefined }),
+    isDirty,
+    // The drift is a record this field keeps and nothing else can reach, and
+    // `reset` is what clears the records a field keeps.
+    reset: () => {
+      drifted.set(false);
+      composed.reset();
+    },
+    fieldProps: () => ({ ...composed.fieldProps(), 'data-dirty': isDirty() || undefined }),
+    controlProps: () => ({ ...composed.controlProps(), 'data-dirty': isDirty() || undefined }),
   };
 
   // The field clears its own record on reset; the value is ours to put back.
@@ -599,13 +657,18 @@ export function createSlider(options: SliderOptions): Slider {
     const form = options.root()?.closest('form');
     if (!form) return;
 
-    const onReset = () => queueMicrotask(() => setValues(initial));
+    const onReset = () => {
+      // Every mirror is about to be put back to the `value` attribute this
+      // slider wrote, so whatever was written over them goes with it.
+      drifted.set(false);
+      queueMicrotask(() => setValues(initial));
+    };
     form.addEventListener('reset', onReset);
     onCleanup(() => form.removeEventListener('reset', onReset));
   });
 
   /**
-   * The settled value, watched: dirtiness, and the record the field keeps.
+   * The settled value, watched, for the record the field keeps of its control.
    *
    * The field revalidates from the control's own value, and that control is a
    * mirror the consumer's `:spread` fills. Telling it from the write itself
@@ -618,8 +681,10 @@ export function createSlider(options: SliderOptions): Slider {
   let edited: string | null = null;
   effect(() => {
     const values = current().join(',');
-    dirty.set(values !== pristine);
     untrack(() => {
+      // The mirrors have just been filled from this value, so anything written
+      // over them before it is gone.
+      drifted.set(readDrift());
       // The first pass is the mount, which is not an edit: nothing has been
       // typed, and a validator that runs on input has nothing to run about.
       if (edited !== null && edited !== values) composed.markEdited();

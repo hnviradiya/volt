@@ -209,6 +209,19 @@ export interface ListboxSharedOptions {
    * and `value()` returns the first entry for the common case.
    */
   value?: Signal.State<readonly string[]>;
+  /**
+   * The value to start with, which is a value and not a name for one.
+   *
+   * A select reads the name off its native `<select>`, which carries an
+   * `<option>` per value whether or not the popup has ever been opened. A
+   * combobox has no such list: its native control is an `<input>`, and the
+   * options only exist while the popup does. So a combobox handed a value this
+   * way — or through `value` — has two places left to find a name for it: the
+   * text the page was rendered with in the textbox, which is kept, and
+   * `labelFor`. With neither, the box shows the identifier the form submits
+   * until the user opens the list, because a box left empty over a value that
+   * is still submitted is the same field lying about what it holds.
+   */
   defaultValue?: string | readonly string[];
 
   /** More than one value at a time. Default false. */
@@ -216,6 +229,17 @@ export interface ListboxSharedOptions {
 
   /** Submitted as `name=value`. Without a name the native control submits nothing. */
   name?: string;
+
+  /**
+   * The text for a value nothing has rendered yet.
+   *
+   * Labels come from the options on screen, from the native `<select>` behind
+   * them, and from the text the page was rendered with — and a combobox served
+   * by an empty client-rendered `<input>` has none of the three until its popup
+   * has been opened once. Supply this and every value has a name from the first
+   * paint, whoever handed it in; without it, see `defaultValue`.
+   */
+  labelFor?: (value: string) => string | undefined;
 
   /** Blocks opening and choosing, and is written through to the native control. */
   disabled?: () => boolean;
@@ -368,19 +392,43 @@ function createListboxCore(
   };
 
   const select = (value: string): void => {
-    if (disabled() || readOnly()) return;
-    const current = valuesNow();
-    if (multiple) {
-      if (!current.includes(value)) setValues([...current, value]);
-    } else {
-      setValues([value]);
+    if (disabled()) return;
+    if (!readOnly()) {
+      const current = valuesNow();
+      if (multiple) {
+        if (!current.includes(value)) setValues([...current, value]);
+      } else {
+        setValues([value]);
+      }
     }
+    // Closing answers the press rather than what it changed: a read-only
+    // widget that stayed open on the one gesture that collapses it everywhere
+    // else leaves the user holding a list nothing will take.
     if (closesOnSelect) setOpen(false);
   };
 
   const deselect = (value: string): void => {
     if (disabled() || readOnly()) return;
     setValues(valuesNow().filter((v) => v !== value));
+  };
+
+  /**
+   * Add or remove, which is what a press on an option in a multiple does.
+   *
+   * One decision for both routes — the pointer arrives through `onOptionClick`
+   * and the keyboard through the component's own Enter — and `closeOnSelect` is
+   * about the press rather than about which way it went: a list that closes
+   * when a press adds a value and stays up when the same press removes one
+   * answers one gesture two ways.
+   */
+  const toggleValue = (value: string): void => {
+    if (disabled()) return;
+    if (!multiple || !valuesNow().includes(value)) {
+      select(value);
+      return;
+    }
+    deselect(value);
+    if (closesOnSelect) setOpen(false);
   };
 
   const clear = (): void => {
@@ -446,8 +494,22 @@ function createListboxCore(
    * `aria-controls` is already the statement that the button belongs to this
    * popup — a button that has not made it is one this component cannot vouch
    * for, and an option is one more thing every consumer has to remember.
+   *
+   * The element under the press is remembered as well, because the attribute
+   * is only there while the popup is open and only if the consumer spread
+   * `toggleProps()`: one who wired the two handlers the toggle documents onto
+   * markup of their own would otherwise have a button that opens and can never
+   * close. A press is what makes a controller of it, so the press is what
+   * records it.
    */
-  const popupControllers = (): Element[] => [
+  let pressedController: Element | null = null;
+
+  const rememberController = (target: EventTarget | null): void => {
+    pressedController = target instanceof Element ? target : null;
+  };
+
+  const popupControllers = (): (Element | null)[] => [
+    pressedController,
     ...document.querySelectorAll(`[aria-controls="${listboxId}"]`),
   ];
 
@@ -494,6 +556,17 @@ function createListboxCore(
       const value = option.getAttribute('data-value');
       if (value !== null) labelCache.set(value, textOf(option));
     }
+  };
+
+  /**
+   * Record a name for a value that came from somewhere other than an option.
+   *
+   * The text a server rendered into the control is the one name on a page that
+   * has not opened its popup yet, and it is a name something really used —
+   * which is what the cache is for. Nothing is a name, so nothing is recorded.
+   */
+  const rememberLabel = (value: string, text: string): void => {
+    if (text !== '') labelCache.set(value, text);
   };
 
   // Everything that only applies while open lives in one effect, so it is set
@@ -668,9 +741,22 @@ function createListboxCore(
       }
     }
 
+    // Text that was really on the page outranks text that was promised: a chip
+    // keeps what its option said after the popup has gone, and a `labelFor`
+    // written against data that has moved on cannot rewrite it.
+    const seen = labelCache.get(value);
+    if (seen !== undefined) return seen;
+
+    // Neither of the three exists before a popup has been opened once, which is
+    // where a value the caller handed in starts life — so this is the only
+    // answer there can be at that point, and without it the identifier ends up
+    // in front of the user.
+    const supplied = options.labelFor?.(value);
+    if (supplied !== undefined) return supplied;
+
     // The value itself is a poor label and a good clue: it shows up as the
     // identifier it is, rather than as a blank space nobody can explain.
-    return labelCache.get(value) ?? value;
+    return value;
   };
 
   const emptyMessage = (): string => options.labels?.empty ?? message('noResults', 'No results');
@@ -794,12 +880,7 @@ function createListboxCore(
     const value = option.getAttribute('data-value');
     if (value === null) return;
     labelCache.set(value, textOf(option));
-    if (multiple) {
-      if (valuesNow().includes(value)) deselect(value);
-      else select(value);
-    } else {
-      select(value);
-    }
+    toggleValue(value);
   };
 
   const onOptionPointerMove = (event: PointerEvent): void => {
@@ -852,17 +933,20 @@ function createListboxCore(
     setValues,
     select,
     deselect,
+    toggleValue,
     clear,
     setOpen,
     openListbox,
     close,
     optionFor,
     activeOption,
+    rememberController,
     setActive,
     move,
     moveTo,
     typeaheadMove,
     rememberLabels,
+    rememberLabel,
     recount,
     labelOf,
     emptyMessage,
@@ -990,10 +1074,7 @@ function commonSurface(core: ListboxCore): ListboxCommon {
     toggle: () => (core.openState.get() ? core.close() : core.openListbox()),
     select: core.select,
     deselect: core.deselect,
-    toggleValue: (value) => {
-      if (core.valuesNow().includes(value)) core.deselect(value);
-      else core.select(value);
-    },
+    toggleValue: core.toggleValue,
     clear: core.clear,
     setActiveValue: (value) => {
       if (value === null) core.activeValue.set(null);
@@ -1301,6 +1382,11 @@ export interface Combobox<T = unknown> extends ListboxCommon {
 
   /** What has been typed. The element's own value may be further along — see `autocomplete`. */
   inputValue(): string;
+  /**
+   * Put text in the box from outside — a query restored with the session, a
+   * "search for this" button. It stands as a question the same way a keystroke
+   * does, so `search` is asked for it.
+   */
   setInputValue(value: string): void;
   /** Whether the list should be narrowed at all — false until something is typed. */
   isFiltering(): boolean;
@@ -1377,36 +1463,93 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
   /** Bumped by an insertion, so inline completion runs for typing and not for deletion. */
   const completions = new Signal.State(0);
 
-  const search = options.search
-    ? createResource<readonly T[], string>(options.search, {
-        source: () => query.get(),
-        enabled: () => query.get().length >= minLength,
-        debounce: options.searchDebounce ?? 250,
-        retry: options.searchRetry ?? 0,
-        // The combobox announces the count itself; a resource that also said
-        // "Loaded" would talk over it after every keystroke.
-        labels: { loading: core.loadingMessage(), success: '' },
-      })
+  /**
+   * Whether what is in the box is a question worth asking.
+   *
+   * Separate from `filtering`, which is about the list rather than about the
+   * text: opening the popup stops the list being narrowed, and a request
+   * already in flight for what the user typed is still a question they asked.
+   */
+  const searchable = new Signal.State(true);
+
+  const searchEnabled = (): boolean => searchable.get() && query.get().length >= minLength;
+
+  /**
+   * The query the results in hand are the answer to.
+   *
+   * `isLoading` is false for the whole debounce window: the resource is not
+   * told about a keystroke until the timer fires, and until then it is still
+   * holding the answer to the query before this one. So whether the popup may
+   * call itself empty is settled by which query was answered rather than by the
+   * status — the request that is about to go out has not been made yet, and a
+   * list that has not been asked is not a list that came back with nothing.
+   */
+  const answered = new Signal.State<string | null>(null);
+
+  const fetcher = options.search;
+  const search = fetcher
+    ? createResource<readonly T[], string>(
+        async (request) => {
+          try {
+            return await fetcher(request);
+          } finally {
+            // Stamped by the request rather than by whatever is in the box when
+            // it lands: an answer to an earlier query arriving inside the quiet
+            // time before a later one goes out is not an answer to the later
+            // one. A superseded request is aborted before its answer is
+            // dropped, and saying it had been answered would let the popup call
+            // itself empty for a query nothing has asked.
+            if (!request.signal.aborted) answered.set(request.source);
+          }
+        },
+        {
+          source: () => query.get(),
+          enabled: searchEnabled,
+          debounce: options.searchDebounce ?? 250,
+          retry: options.searchRetry ?? 0,
+          // The combobox announces the count itself; a resource that also said
+          // "Loaded" would talk over it after every keystroke.
+          labels: { loading: core.loadingMessage(), success: '' },
+        },
+      )
     : null;
 
-  const setQuery = (next: string): void => {
-    if (untrack(() => query.get()) === next) return;
-    query.set(next);
-    options.onInputValueChange?.(next);
-  };
+  /** Whether the list is still catching up with what has been typed. */
+  const searching = (): boolean =>
+    search !== null && searchEnabled() && (search.isLoading() || answered.get() !== query.get());
 
   const inputElement = (): HTMLInputElement | null => {
     const el = options.input();
     return el && 'value' in el && 'setSelectionRange' in el ? (el as HTMLInputElement) : null;
   };
 
-  const setInputValue = (value: string): void => {
-    setQuery(value);
+  /**
+   * Put text in the box, saying whether it is a question for `search`.
+   *
+   * Text this component wrote to say what is held is an answer rather than a
+   * question, and asking it means a request at mount for a value nobody typed
+   * and another after every choice, for the label of the thing chosen. Text put
+   * there from anywhere else — a keystroke, or the caller's own `setInputValue`
+   * for a restored query or a "search for this" button — is the question it
+   * looks like, and a combobox that showed it without asking would render the
+   * empty state for a search nothing had made. The empty box is a question
+   * whoever emptied it: it asks for everything, which is where a search with no
+   * minimum length starts and what it goes back to when the box is cleared.
+   */
+  const showInputValue = (value: string, asked = false): void => {
+    if (untrack(() => query.get()) !== value) query.set(value);
+    searchable.set(asked || value === '');
     const el = inputElement();
     // Written straight to the element rather than bound in the template: this
     // owns the textbox's value — it completes it, reverts it and clears it —
     // and a `:value` binding beside that is two writers for one string.
     if (el && el.value !== value) el.value = value;
+  };
+
+  const setInputValue = (value: string, asked = false): void => {
+    const changed = untrack(() => query.get()) !== value;
+    showInputValue(value, asked);
+    if (changed) options.onInputValueChange?.(value);
   };
 
   const fold = (text: string): string =>
@@ -1456,17 +1599,17 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
   };
 
   const takeOption = (value: string): void => {
-    if (core.multiple) {
-      common.toggleValue(value);
-      // The query has done its job; leaving it would filter the list down to
-      // the chip that was just added.
-      filtering.set(false);
-      setInputValue('');
-    } else {
-      core.select(value);
-      filtering.set(false);
-      setInputValue(core.labelOf(value));
-    }
+    if (core.multiple) common.toggleValue(value);
+    else core.select(value);
+    // Nothing was taken, so nothing goes in the box: text for an option a
+    // read-only combobox will not hold is the widget claiming a value the form
+    // has never seen. Whether the popup collapses is the core's decision, and
+    // it has already made it.
+    if (core.disabled() || core.readOnly()) return;
+    // The query has done its job; leaving it would filter the list down to the
+    // one option just taken — or, in a multiple, to the chip just added.
+    filtering.set(false);
+    setInputValue(core.multiple ? '' : core.labelOf(value));
   };
 
   /**
@@ -1481,16 +1624,55 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
    * box, leaving an empty combobox over a form that holds a value. The element
    * is read as a dependency rather than inside the untracked write below,
    * because this first runs before the template has handed the textbox over.
+   *
+   * That first value arrives before anything can say what it is called, so the
+   * settled text is read as a dependency too: `labelOf` has only the identifier
+   * to answer with until an option carrying the value has rendered or
+   * `labelFor` can name it, and whichever of those happens first re-runs this
+   * and replaces the identifier. Waiting for the popup to be opened would leave
+   * the box showing what the form submits to a user who never opens it. Only
+   * this component's own text is replaced that way — anything else in the box
+   * was typed since, and belongs to the person typing it.
+   *
+   * None of those writes is an edit. The caller handed the value in, and a name
+   * for it turning up afterwards changes what the box can say rather than what
+   * has been chosen, so neither goes out as an input value change or to
+   * `search`: both would be this component telling the caller what they have
+   * just told it. A value that really changes after setup is the one case that
+   * does — a press on an option, or a controlled signal set from outside — and
+   * it is reported through the same route the keyboard's own `takeOption` uses,
+   * so the pointer and the keyboard say the same thing.
    */
   let lastValues: readonly string[] | null = null;
+  let shown: string | null = null;
   effect(() => {
     const values = core.valueState.get();
-    if (!inputElement()) return;
-    if (lastValues !== null && sameValues(values, lastValues)) return;
+    core.listRevision.get();
+    const el = inputElement();
+    if (!el) return;
+
+    const setup = lastValues === null;
+    const changed = setup || !sameValues(values, lastValues ?? []);
     lastValues = values;
+    // Text the page was rendered with is a name something really used: a form
+    // the server filled in, or one the browser restored, arrives with the label
+    // of the value it holds already in the box — the only name for it on a page
+    // whose popup has never been opened. Overwriting that with the identifier
+    // would throw away the one thing that knew better.
+    const held = values[0];
+    if (setup && !core.multiple && held !== undefined) core.rememberLabel(held, el.value);
+    const settled = settledText();
+    // A label that has only just become knowable replaces the identifier this
+    // had to write in its place — but only while the box is still holding that,
+    // and only while nothing is being typed into it.
+    const stale = untrack(() => !filtering.get() && query.get() === shown && settled !== shown);
+    if (!changed && !stale) return;
+    shown = settled;
+
     untrack(() => {
       filtering.set(false);
-      setInputValue(settledText());
+      if (changed && !setup) setInputValue(settled);
+      else showInputValue(settled);
     });
   });
 
@@ -1507,27 +1689,42 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
    * core bumps for every rendered change is the dependency, and `completed`
    * records which keystroke has been answered so a settled list is not
    * re-completed under a caret the user has since moved.
+   *
+   * Answered is not the same as completed. A popup that has rendered and holds
+   * no completion has answered the keystroke — with "there is none for that" —
+   * and a request left standing on it would be waiting for a keystroke that has
+   * been dealt with: the next change to the options, from a poll or a websocket
+   * the user is not driving, would rewrite the textbox and move virtual focus
+   * with nothing behind it. So an empty popup answers, and the one thing that
+   * keeps the keystroke waiting is a request for that exact query still being
+   * in flight. Whether the emptiness came from this component's own filter or
+   * from a consumer who narrowed their candidates themselves cannot be told
+   * apart from the outside, and guessing wrong that way rewrites text under a
+   * caret nobody moved — where guessing wrong the other way costs a completion
+   * the next keystroke offers again.
    */
   let completed = 0;
   effect(() => {
+    if (autocomplete !== 'both') return;
     const asked = completions.get();
     core.listRevision.get();
-    if (autocomplete !== 'both' || asked === completed) return;
+    if (asked === completed) return;
 
     untrack(() => {
       const typed = query.get();
       const el = inputElement();
       if (!el || typed === '') return;
 
+      // The list the keystroke asked about is not here yet: the popup renders
+      // after the handler that opened it, and a search answers later still.
+      if (!options.listbox() || searching()) return;
+
+      completed = asked;
       const first = core.items.first();
-      // Nothing to complete from yet. Left outstanding rather than written
-      // off, so the answer still in flight can complete the keystroke that
-      // asked for it.
       if (!first) return;
       const text = textOf(first);
       if (!fold(text).startsWith(fold(typed))) return;
 
-      completed = asked;
       el.value = text;
       el.setSelectionRange(typed.length, text.length);
       // The completion is a proposal the user is looking at, so the option it
@@ -1545,9 +1742,65 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
     untrack(() => core.recount());
   });
 
+  /** Escape's second stage. False when there was nothing to clear. */
+  const clearTextbox = (): boolean => {
+    // Emptying the box is a change like any other, and a read-only one left
+    // showing nothing over a value it still holds is the same disagreement a
+    // press on an option would have caused.
+    if (core.disabled() || core.readOnly()) return false;
+    if (untrack(() => query.get()) === '' && core.valuesNow().length === 0) return false;
+    filtering.set(false);
+    setInputValue('');
+    // A single-value combobox showing nothing holds nothing; a multiple keeps
+    // its chips, which Backspace and the chip buttons remove.
+    if (!core.multiple) core.clear();
+    return true;
+  };
+
+  /**
+   * How many layers were up when the Escape now being handled arrived.
+   *
+   * Dismissal owns Escape on the document and in the capture phase, so by the
+   * time a handler on the textbox runs the topmost layer has already been given
+   * the press — and counting the stack then cannot tell a layer that answered
+   * and went away from one that was never there. Counted first, it can.
+   */
+  let layersAtPress = 0;
+
+  /**
+   * Escape's second stage, claimed ahead of dismissal when this textbox is
+   * where the press landed.
+   *
+   * One press closes one layer, and the layer a user pressing Escape into a
+   * focused textbox is addressing is this one — not the dialog around it, which
+   * would otherwise be dismissed by the same press that clears the box. Nothing
+   * else on the page can answer that press first: the window is the one place
+   * in the path ahead of the document, and stopping it there is what keeps the
+   * two from happening at once. The popup, while it is up, is the layer being
+   * addressed instead, and dismissal is left to take it.
+   */
+  effect(() => {
+    const el = inputElement();
+    const view = el?.ownerDocument.defaultView;
+    if (!el || !view) return;
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      layersAtPress = dismissStackSize();
+      if (el.ownerDocument.activeElement !== el) return;
+      if (untrack(() => core.openState.get())) return;
+      if (!untrack(clearTextbox)) return;
+      event.stopPropagation();
+      event.preventDefault();
+    };
+
+    view.addEventListener('keydown', onKeyDown, true);
+    onCleanup(() => view.removeEventListener('keydown', onKeyDown, true));
+  });
+
   const status = (): string => {
     if (!core.openState.get()) return '';
-    if (search?.isLoading() === true) return core.loadingMessage();
+    if (searching()) return core.loadingMessage();
     if (search?.isError() === true) return search.errorMessage();
     const count = core.optionCount.get();
     return count === 0 ? core.emptyMessage() : core.resultsMessage(count);
@@ -1566,15 +1819,15 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
     search,
     status,
 
-    // "Open, settled, and showing nothing" — a search still in flight is not
-    // settled, and a popup that flashes "No results" between every keystroke
-    // and its answer tells the user something untrue. `status()` has always
-    // said the right thing here; the popup's empty state renders from this.
-    isEmpty: () =>
-      core.openState.get() && search?.isLoading() !== true && core.optionCount.get() === 0,
+    // "Open, settled, and showing nothing" — a search the list has not caught
+    // up with is not settled, and a popup that flashes "No results" between
+    // every keystroke and its answer tells the user something untrue. The
+    // quiet time before a debounced request even goes out is part of that
+    // window; the popup's empty state and `status()` both render from this.
+    isEmpty: () => core.openState.get() && !searching() && core.optionCount.get() === 0,
 
     inputValue: () => query.get(),
-    setInputValue,
+    setInputValue: (value) => setInputValue(value, true),
     isFiltering: () => filtering.get(),
     matches,
     items: () => search?.data() ?? [],
@@ -1591,7 +1844,7 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
       // the filter, and `aria-activedescendant` must never point at an id that
       // has left the document.
       core.activeValue.set(null);
-      setQuery(typed);
+      setInputValue(typed, true);
       // Typing opens the popup — including a deletion back to empty, where the
       // list is simply unfiltered again.
       core.openListbox('none');
@@ -1610,6 +1863,9 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
     },
 
     onTogglePointerDown(event: PointerEvent) {
+      // Whatever this is wired to controls the popup, whether or not it also
+      // carries the `aria-controls` that says so — see `popupControllers`.
+      core.rememberController(event.currentTarget ?? event.target);
       // A `tabindex="-1"` button is still click-focusable, so the press would
       // otherwise take focus out of the textbox: `onInputBlur` closes the
       // popup, and the click that follows opens it again — the button would
@@ -1664,10 +1920,10 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
           // Closing is the core's decision, and it is the same decision a
           // press on the option makes: `closeOnSelect` defaults to false when
           // `multiple`, and a keyboard that closed anyway would mean reopening
-          // the list once per chip.
+          // the list once per chip — or closing on the one press that takes a
+          // chip away, which the pointer leaves open.
           if (value !== null) {
             takeOption(value);
-            if (core.closesOnSelect) core.close();
             break;
           }
           if (options.allowCustomValue === true && query.get().trim() !== '') {
@@ -1687,20 +1943,14 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
             event.preventDefault();
             return;
           }
-          // A layer this component does not own is still up — a dialog above
-          // it, another popup elsewhere — and dismissal has just answered the
-          // press on that layer's behalf. One press closes one layer, so this
-          // one stands down rather than throwing away text the user can still
-          // see under a list they were not addressing. The stack is the only
-          // thing that knows; this combobox is collapsed here, so anything on
-          // it belongs to somebody else.
-          if (dismissStackSize() > 0) return;
-          if (query.get() === '' && core.valuesNow().length === 0) return;
-          filtering.set(false);
-          setInputValue('');
-          // A single-value combobox showing nothing holds nothing; a multiple
-          // keeps its chips, which Backspace and the chip buttons remove.
-          if (!core.multiple) core.clear();
+          // A layer was up when this press arrived — a dialog over the page,
+          // another popup elsewhere — and dismissal has already answered it on
+          // that layer's behalf. One press closes one layer, so this one stands
+          // down rather than throwing away text the user can still see under a
+          // list they were not addressing. A press into the textbox itself
+          // never reaches here: it is claimed before dismissal sees it.
+          if (layersAtPress > 0) return;
+          if (!clearTextbox()) return;
           break;
 
         case 'Tab':

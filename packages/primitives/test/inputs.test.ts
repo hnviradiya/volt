@@ -19,7 +19,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { compileTemplate } from '@voltdev/core/jit';
 import { Component, Signal, flushSync, mount } from '@voltdev/core';
-import { createLocaleProvider } from '../src/i18n.ts';
+import { createLocaleProvider, resolveDirection } from '../src/i18n.ts';
 import {
   PIN_BOX_ATTRIBUTE,
   createInput,
@@ -1492,14 +1492,14 @@ interface TagsInstance {
   handled: boolean;
 }
 
-function tagsInput(dir = '') {
+function tagsInput(dir = '', row = '') {
   @Component({
     selector: `v-tags-${++selectors}`,
     render: compileTemplate(`
       <form${dir}>
         <label :ref="label" :spread="tags.labelProps()">Topics</label>
         <div :ref="root" :spread="tags.rootProps()">
-          <ul :ref="list" :spread="tags.listProps()">
+          <ul${row} :ref="list" :spread="tags.listProps()">
             <li class="tag" :for="(tag, i) in tags.tags()" :key="tag" :spread="tags.tagProps(i)"
                 :keydown="onTagKey($event, i)">
               <span class="text">{ tag }</span>
@@ -1817,6 +1817,27 @@ describe('tags input', () => {
     expect(document.activeElement).toBe(input());
   });
 
+  it('reads a direction the markup delegates the way the library reads it', () => {
+    tagsOptions = { defaultValue: ['ada', 'grace', 'zoe'] };
+    // `dir="auto"` states no direction, so the stylesheet's is the one left,
+    // and `resolveDirection` is where the whole library goes to be told that.
+    // A rule of its own here would answer the same element differently from
+    // every other part of the field that has to ask.
+    const { instance, input, chip } = tagsInput(' dir="auto" style="direction: rtl"');
+
+    expect(resolveDirection(input())).toBe('rtl');
+
+    input().focus();
+    press(input(), 'ArrowRight');
+    expect(document.activeElement).toBe(chip(2));
+
+    input().focus();
+    // Left runs along an RTL row, so it stays the caret's.
+    expect(press(input(), 'ArrowLeft').defaultPrevented).toBe(false);
+    expect(instance.handled).toBe(false);
+    expect(document.activeElement).toBe(input());
+  });
+
   it('falls back to the text box when the last tag goes', () => {
     tagsOptions = { defaultValue: ['ada'] };
     const { input, chip } = tagsInput();
@@ -1842,13 +1863,57 @@ describe('tags input', () => {
 
   it('leaves focus where it is when the tags cleared were not holding it', () => {
     tagsOptions = { defaultValue: ['ada', 'grace'] };
-    const { instance, input } = tagsInput();
+    const { instance, chip } = tagsInput();
 
-    input().focus();
+    // Left the row before the clear arrived. Landing the user in the text box
+    // would be the field grabbing focus off whatever they moved on to, so the
+    // record has to be let go of on the way out and not only on the removal.
+    chip(0).focus();
+    chip(0).blur();
+    instance.tags.clear();
+    flushSync();
+
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('falls back to the text box when the row goes with the tag in it', () => {
+    tagsOptions = { defaultValue: ['ada'] };
+    // A row a consumer only renders when there is something in it: the last
+    // tag and the list around it go in the same change, so a rescue hung off
+    // the row's own listeners would have let go of the tag before it acted.
+    const { instance, input, chip } = tagsInput('', ' :if="tags.tags().length > 0"');
+
+    chip(0).focus();
+    instance.tags.removeAt(0);
+    flushSync();
+
+    expect(document.activeElement).toBe(input());
+  });
+
+  it('falls back to the text box when clearing takes the row with it', () => {
+    tagsOptions = { defaultValue: ['ada', 'grace'] };
+    const { instance, input, chip } = tagsInput('', ' :if="tags.tags().length > 0"');
+
+    chip(1).focus();
     instance.tags.clear();
     flushSync();
 
     expect(document.activeElement).toBe(input());
+  });
+
+  it('hands the tab stop back to the first tag after a clear', () => {
+    tagsOptions = { defaultValue: ['ada', 'grace'] };
+    const { instance, input, chip } = tagsInput();
+
+    // The stop is on the last tag when the row is emptied, and an index that
+    // no longer exists is a row Tab cannot reach at all.
+    press(input(), 'ArrowLeft');
+    instance.tags.clear();
+    flushSync();
+    instance.tags.add('zoe');
+    flushSync();
+
+    expect(chip(0).getAttribute('tabindex')).toBe('0');
   });
 
   it('leaves focus somewhere useful when a tag goes from the signal it was handed', () => {
@@ -2293,6 +2358,49 @@ describe('rating', () => {
     expect(submitted(form())).toEqual([['score', '2']]);
   });
 
+  it('restores a score the caller owns, and it is the caller that hears about it', async () => {
+    const value = new Signal.State(4);
+    const changes: number[] = [];
+    ratingOptions = {
+      name: 'score',
+      value,
+      readOnly: () => true,
+      onValueChange: (next) => changes.push(next),
+    };
+    const { radios, form } = rating();
+
+    value.set(1);
+    flushSync();
+    form().reset();
+    await settle();
+
+    // The signal is the contract, so a reset that put the score back only in
+    // the mirrors would leave the caller holding a number the form is no
+    // longer sending.
+    expect(value.get()).toBe(4);
+    expect(changes).toEqual([4]);
+    expect(radios().filter((el) => el.checked)).toHaveLength(1);
+    expect(submitted(form())).toEqual([['score', '4']]);
+  });
+
+  it('goes back to a half step when the form is reset', async () => {
+    ratingOptions = { name: 'score', defaultValue: 2.5, allowHalf: true };
+    const { instance, marks, stars, form } = rating();
+
+    click(stars()[8]!);
+    expect(submitted(form())).toEqual([['score', '4.5']]);
+
+    form().reset();
+    await settle();
+
+    // What is painted, what is reported and what submits are one answer, and
+    // a half is the one a mirror keyed by whole numbers would miss.
+    expect(instance.rating.value()).toBe(2.5);
+    expect(marks().filter((el) => el.getAttribute('aria-checked') === 'true')).toHaveLength(1);
+    expect(marks()[4]!.getAttribute('aria-checked')).toBe('true');
+    expect(submitted(form())).toEqual([['score', '2.5']]);
+  });
+
   it('starts the next answer from nothing when it had no default', async () => {
     ratingOptions = { name: 'score' };
     const { instance, stars, form } = rating();
@@ -2317,6 +2425,22 @@ describe('rating', () => {
     // Still submitted, though — that is what separates read-only from disabled.
     expect(radios().some((el) => el.disabled)).toBe(false);
     expect(form().checkValidity()).toBe(true);
+  });
+
+  it('takes the constraint back the moment the rating can be answered', () => {
+    const readOnly = new Signal.State(true);
+    ratingOptions = { name: 'score', required: () => true, readOnly: () => readOnly.get() };
+    const { radios, form } = rating();
+
+    expect(form().checkValidity()).toBe(true);
+
+    // Read-only is a state a field moves in and out of, so the constraint has
+    // to follow it rather than be settled once when the rating was built.
+    readOnly.set(false);
+    flushSync();
+
+    expect(radios().every((el) => el.required)).toBe(true);
+    expect(form().checkValidity()).toBe(false);
   });
 
   it('reports an unrated required field', () => {
