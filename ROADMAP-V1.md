@@ -576,6 +576,68 @@ automatically, so the result is cached without anyone writing `computed`. That
 is a real compile-time optimisation and fits the same analysis the rest of the
 compiler already does.
 
+## Accessibility the compiler can prove
+
+The primitives are held to the WAI-ARIA Authoring Practices, and that rigour
+stops at the package boundary: nothing checks the `<div :click="select()">` an
+application author writes. The compiler is already the strictest part of this
+project — it rejects a misspelled directive, a `:for` without `:key`, and a
+`templateUrl` whose case differs from the file on disk — so this is the same
+mechanism pointed at a class of bug that is invisible until somebody tries to
+use the page with a keyboard.
+
+What it can decide from the template alone, with no type information:
+
+- [ ] An interactive listener (`:click`, `:keydown`) on a non-interactive
+      element with no `role` and no `tabindex`. The remedy is named: use a
+      `<button>`, or say what the role is.
+- [ ] `<img>` with no `alt`. An empty `alt=""` is correct for decoration and
+      must stay allowed — the error is silence, not emptiness.
+- [ ] `<label>` whose `for` names nothing in the same template, and a form
+      control with no accessible name by any of the four routes.
+- [ ] `aria-*` attributes that are misspelled, take an enumerated value that
+      is not in the enum, or reference an id no template defines.
+- [ ] `role` on an element whose implicit role it silently overrides —
+      `role="button"` on `<a href>` loses the link.
+- [ ] Positive `tabindex`, which reorders the whole page and is essentially
+      never intended.
+- [ ] Nesting that the ARIA content model forbids — an interactive control
+      inside a `role="option"`, a heading inside a `<button>`.
+
+Deliberately not attempted: anything needing to know what a value means at
+runtime, or whether a colour pair has enough contrast. A rule that fires on
+correct code teaches people to disable the rules.
+
+Severity follows the existing convention: things that are certainly wrong are
+errors, things that are usually wrong are warnings, and both name the remedy
+rather than the violation.
+
+## Imperative islands
+
+A canvas, a map, a video player and an editor surface all own their own DOM.
+Every framework handles this badly, and the workarounds are the framework's
+own escape hatches — `memo`, refs, `watch`, "please do not re-render this".
+
+Volt starts from an unusually good position: there is no re-render to
+suppress, so nothing is fighting for the subtree in the first place. What is
+missing is a declared boundary, so the framework knows the region is not its
+to touch and the author knows what they are responsible for.
+
+- [ ] A primitive that owns a subtree: the framework renders the host element
+      and nothing inside it, and hands the author a scope tied to the
+      component's lifetime.
+- [ ] Fine-grained synchronization *into* the island. This is the part worth
+      having: a signal changing should reach one object in the scene, not
+      trigger a redraw. The dependency graph already knows which signal
+      changed; the island declares how to apply it.
+- [ ] Teardown that cannot be forgotten — the island's cleanup is the scope's
+      cleanup.
+- [ ] Server rendering emits the host element and no children, since the
+      island's content does not exist until a client draws it.
+
+The motivating case is a document viewer with hundreds of pages and thousands
+of annotations, where selecting one annotation must touch one object.
+
 ## Gaps found by comparison
 
 Three things a survey of other frameworks showed missing from the plan. What

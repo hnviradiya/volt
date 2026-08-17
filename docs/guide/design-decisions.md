@@ -261,3 +261,55 @@ they are handled rather than documented:
   them were never rendered.
 
 A performance technique that breaks the page is not a performance technique.
+
+## Components are classes, not functions
+
+The functional model asks a function to be re-entered to produce a view, which
+is why it then needs rules about where state may be declared, and memoization
+to stop the work it just created. Volt's components are constructed once and
+never re-run, so a field is simply a field and there is nothing to memoize.
+
+The usual argument for functions is that they avoid lifecycle ceremony. That
+is worth having, and Volt gets it a different way: there is no `render`, no
+`updated`, no `beforeUnmount`. A class body runs once, effects clean up with
+their scope, and `onMount` exists for the one thing that genuinely cannot be
+known before the DOM exists.
+
+## Custom elements are an interoperability target, not the output
+
+Compiling components to custom elements is appealing because the result runs
+anywhere. The costs are paid by every component: styles land on the wrong side
+of a shadow boundary or leak, `<form>` participation needs explicit opt-in,
+and server rendering means declarative shadow DOM with a different set of
+hydration problems.
+
+Volt renders to the DOM directly and treats custom elements as something to
+consume. A hyphenated tag that is not a Volt component and *has* been defined
+with `customElements.define` renders as the element it is, which is what
+interoperability actually requires.
+
+## The web, and nothing else
+
+A single component model targeting web, iOS, Android and desktop is a
+different product with a different renderer, not a later phase of this one.
+Frameworks that have tried it either abandon platform conventions or spend
+most of their effort reconciling four sets of them.
+
+Volt's leverage comes from compiling against one platform closely: build-time
+DOM paths, delegated events, CSS-owned animation, `Intl` for every locale
+question. None of that survives an abstraction layer over four renderers.
+
+## Effects are scheduled, not abolished
+
+Wishlists for a "next-generation" framework usually ask for no `useEffect` and,
+a few lines later, for a resource primitive that cancels stale requests. Those
+are the same thing. A resource *is* an effect, and a framework that claims to
+have removed effects has only moved where they run.
+
+Volt says the honest version: effects exist, they are scheduled in lanes, and
+which lane something is in is a decision with consequences. The server
+rendering design turned on exactly this — `createResource` starts its first
+fetch from a deferred effect, so "no effects on the server" and "the server
+awaits data" cannot both be true, and a third lane is the fix. Pretending the
+category is gone would have hidden that until it was expensive.
+
