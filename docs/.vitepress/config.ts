@@ -14,7 +14,7 @@ export default defineConfig({
   sitemap: { hostname: 'https://voltjs.dev' },
 
   // Maintainer notes that live next to the docs but are not part of them.
-  srcExclude: ['DEPLOY.md'],
+  srcExclude: ['DEPLOY.md', 'design/**'],
 
   themeConfig: {
     logo: { light: '/logo.svg', dark: '/logo-dark.svg' },

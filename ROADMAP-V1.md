@@ -341,6 +341,11 @@ reconcile and no chance of a "hydration mismatch" in the React sense, because
 nothing is being compared — bindings simply attach to the nodes that are
 already there.
 
+The design is settled and written up in
+[`docs/design/ssr.md`](docs/design/ssr.md): a compiler-led server emitter
+writing bytes through a segment tree, rather than building a node tree and
+serialising it. Build order and what each stage has to prove are there.
+
 - [ ] `renderToString`, then `renderToStream` for streaming
 - [ ] A hydration codegen mode reusing the existing path resolution
 - [ ] Serialize initial signal state, and adopt it on the client
