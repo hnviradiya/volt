@@ -1282,6 +1282,27 @@ describe('the tri-state checkbox', () => {
     expect(chosen(tree)).toEqual([]);
   });
 
+  it('turns a folder off at the first press when it was filled child by child', () => {
+    treeOptions = { selectionMode: 'checkbox', defaultExpanded: ['docs'] };
+    const { tree } = setup();
+    const box = (id: string): HTMLElement => rowEl(id).querySelector<HTMLElement>('.box')!;
+
+    click(box('readme'));
+    click(box('guide'));
+    click(box('changelog'));
+
+    // Docs reads `checked` off its children without its own id ever being put
+    // in the set, so asking what is left to check finds Docs itself — and the
+    // press goes on putting it there, where the reader sees nothing happen.
+    expect(tree.checkedState('docs')).toBe(true);
+    expect(tree.selection().has('docs')).toBe(false);
+
+    click(box('docs'));
+    expect(chosen(tree)).toEqual([]);
+    expect(rowEl('docs').getAttribute('aria-checked')).toBe('false');
+    expect(box('docs').getAttribute('data-state')).toBe('unchecked');
+  });
+
   it('gives a folder its own box when nothing under it takes the cascade', () => {
     nodes.set([
       { id: 'src', label: 'Src', children: [{ id: 'util', label: 'Util', disabled: true }] },
@@ -1306,6 +1327,118 @@ describe('the tri-state checkbox', () => {
     click(rowEl('src').querySelector<HTMLElement>('.box')!);
     expect(chosen(tree)).toEqual([]);
     expect(rowEl('src').getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('moves that box even when the whole subtree is disabled and checked', () => {
+    nodes.set([
+      {
+        id: 'top',
+        label: 'Top',
+        children: [
+          {
+            id: 'perms',
+            label: 'Perms',
+            children: [
+              { id: 'read', label: 'Read', disabled: true },
+              { id: 'write', label: 'Write', disabled: true },
+            ],
+          },
+        ],
+      },
+    ]);
+    treeOptions = {
+      selectionMode: 'checkbox',
+      defaultExpanded: ['top', 'perms'],
+      defaultSelected: ['read', 'write'],
+    };
+    const { tree, root } = setup();
+    tree.focusNode('perms');
+    flushSync();
+
+    // Reading Read and Write instead leaves Perms at `checked` before it has
+    // been pressed at all, and there for ever after: the selection flips under
+    // a box that never moves, and `selection()` and `isSelected()` disagree
+    // about the folder from the first press on.
+    expect(tree.checkedState('perms')).toBe(false);
+    expect(tree.isSelected('perms')).toBe(false);
+
+    press(root, ' ');
+    expect(chosen(tree)).toEqual(['perms', 'read', 'write']);
+    expect(tree.checkedState('perms')).toBe(true);
+    expect(tree.isSelected('perms')).toBe(true);
+    expect(rowEl('perms').getAttribute('aria-checked')).toBe('true');
+    expect(rowEl('perms').querySelector('.box')!.getAttribute('data-state')).toBe('checked');
+
+    press(root, ' ');
+    expect(chosen(tree)).toEqual(['read', 'write']);
+    expect(tree.checkedState('perms')).toBe(false);
+    expect(tree.isSelected('perms')).toBe(false);
+    expect(rowEl('perms').getAttribute('aria-checked')).toBe('false');
+    expect(rowEl('perms').querySelector('.box')!.getAttribute('data-state')).toBe('unchecked');
+    // What the consumer checked is still not a press's to clear.
+    expect(tree.checkedState('read')).toBe(true);
+  });
+
+  it('does the same for the part-checked half of it, by every door', () => {
+    nodes.set([
+      {
+        id: 'top',
+        label: 'Top',
+        children: [
+          {
+            id: 'perms',
+            label: 'Perms',
+            children: [
+              { id: 'read', label: 'Read', disabled: true },
+              { id: 'write', label: 'Write', disabled: true },
+            ],
+          },
+        ],
+      },
+    ]);
+    treeOptions = {
+      selectionMode: 'checkbox',
+      defaultExpanded: ['top', 'perms'],
+      defaultSelected: ['read'],
+    };
+    const { tree, root } = setup();
+    const box = (id: string): HTMLElement => rowEl(id).querySelector<HTMLElement>('.box')!;
+    tree.focusNode('perms');
+    flushSync();
+
+    // Half of a subtree that refuses every press is still an answer no press
+    // can change, so aggregating it holds Perms at `mixed` through all four
+    // doors at once — the state the folder can be pressed to is its own.
+    press(root, ' ');
+    expect(rowEl('perms').getAttribute('aria-checked')).toBe('true');
+    press(root, ' ');
+    expect(rowEl('perms').getAttribute('aria-checked')).toBe('false');
+
+    click(box('perms'));
+    expect(chosen(tree)).toEqual(['perms', 'read']);
+    expect(box('perms').getAttribute('data-state')).toBe('checked');
+    click(box('perms'));
+    expect(chosen(tree)).toEqual(['read']);
+    expect(box('perms').getAttribute('data-state')).toBe('unchecked');
+
+    click(rowEl('perms'));
+    expect(tree.checkedState('perms')).toBe(true);
+    tree.select('perms');
+    flushSync();
+    expect(tree.checkedState('perms')).toBe(false);
+    tree.toggleSelected('perms');
+    flushSync();
+    expect(tree.checkedState('perms')).toBe(true);
+
+    // The ancestor reads the folder's box rather than the frozen nodes under
+    // it, so it is not stuck in the state the folder was rescued from.
+    expect(tree.checkedState('top')).toBe(true);
+    expect(rowEl('top').getAttribute('aria-checked')).toBe('true');
+    click(box('top'));
+    expect(chosen(tree)).toEqual(['read']);
+    expect(rowEl('top').getAttribute('aria-checked')).toBe('false');
+    // Read keeps the state a consumer gave it through all of that.
+    expect(tree.checkedState('read')).toBe(true);
   });
 
   it('leaves every node its own fact in the strict model', () => {
@@ -1511,6 +1644,37 @@ describe('children that arrive later', () => {
     expect(rowEl('c').getAttribute('aria-checked')).toBe('true');
   });
 
+  it('turns a lazy folder off again when what arrived holds it part-checked', async () => {
+    treeOptions = { ...treeOptions, selectionMode: 'checkbox' };
+    const { tree, root } = setup();
+    tree.focusNode('alpha');
+    flushSync();
+
+    // Checked while it is still closed, so the cascade lands only when the
+    // children do — and one of them refuses it, exactly as a disabled child
+    // written into the data does.
+    press(root, ' ');
+    tree.expand('alpha');
+    await settle();
+    loads.get('alpha')!.resolve([
+      { id: 'a1', label: 'One' },
+      { id: 'a2', label: 'Two', disabled: true },
+    ]);
+    await settle();
+
+    expect(chosen(tree)).toEqual(['a1', 'alpha']);
+    expect(tree.checkedState('alpha')).toBe('indeterminate');
+
+    // Which way the next press goes has to be asked of what is left to check,
+    // not of the aggregate: A2 holds the folder at `mixed` for ever, so a rule
+    // reading the state asks for the same check again and the box never
+    // turns off.
+    press(root, ' ');
+    expect(chosen(tree)).toEqual([]);
+    expect(tree.checkedState('alpha')).toBe(false);
+    expect(rowEl('alpha').getAttribute('aria-checked')).toBe('false');
+  });
+
   it('keeps focus on a node whose children have not arrived', async () => {
     const { tree, root } = setup();
     press(root, 'ArrowDown');
@@ -1524,6 +1688,28 @@ describe('children that arrive later', () => {
     // node is its next sibling, so taking it throws the reader out of the
     // branch they just opened.
     expect(tree.activeId()).toBe('alpha');
+  });
+
+  it('carries the reader out of a branch a reload takes away', async () => {
+    const { tree } = setup();
+    tree.expand('alpha');
+    await settle();
+    loads.get('alpha')!.resolve([{ id: 'a1', label: 'One' }]);
+    await settle();
+
+    tree.focusNode('a1');
+    flushSync();
+    expect(document.activeElement).toBe(rowEl('a1'));
+
+    // Forgetting a node's children takes the row under the reader out of the
+    // model without touching expansion, the selection or the data: a route
+    // through none of the calls a fix could be hung off.
+    tree.reload('alpha');
+    flushSync();
+
+    expect(tree.activeId()).toBe('alpha');
+    expect(document.activeElement).toBe(rowEl('alpha'));
+    expect(tabStops()).toEqual(['alpha']);
   });
 });
 
@@ -1653,6 +1839,57 @@ describe('filtering', () => {
     tree.setFilter('notes');
     flushSync();
     expect(tabStops()).toEqual(['notes']);
+  });
+
+  it('keeps a reader who is standing in the tree on it when a query empties it', () => {
+    const filter = new Signal.State('');
+    treeOptions = { filter };
+    const { tree, root } = setup();
+    tree.focusNode('notes');
+    flushSync();
+    expect(document.activeElement).toBe(rowEl('notes'));
+
+    filter.set('zzz');
+    flushSync();
+
+    // Every row goes, the one under the reader with them, and a browser
+    // answers a removed focus with <body> — the top of the document, nowhere
+    // near what they were reading. An empty tree holds the tab stop itself, so
+    // that is where they stay.
+    expect(visible()).toEqual([]);
+    expect(tree.activeId()).toBeNull();
+    expect(root.getAttribute('tabindex')).toBe('0');
+    expect(document.activeElement).toBe(root);
+
+    // And from there straight back into the rows the next query returns.
+    filter.set('');
+    flushSync();
+    press(root, 'ArrowDown');
+    expect(document.activeElement).toBe(rowEl('docs'));
+  });
+
+  it('leaves a reader who is typing in the search box in it instead', () => {
+    const filter = new Signal.State('');
+    treeOptions = { filter };
+    const { tree, root } = setup();
+    tree.focusNode('notes');
+    flushSync();
+
+    const search = document.createElement('input');
+    document.body.append(search);
+    search.focus();
+
+    filter.set('zzz');
+    flushSync();
+
+    // The row the reader was on is going, which is what an empty tree reads as
+    // focus lost to <body> — but the query that emptied it was typed
+    // somewhere, and taking that box away mid-word is the worse bug.
+    expect(visible()).toEqual([]);
+    expect(tree.activeId()).toBeNull();
+    expect(document.activeElement).toBe(search);
+    // The tree is still a stop for when they tab back into it.
+    expect(root.getAttribute('tabindex')).toBe('0');
   });
 
   it('takes a match function of the consumer’s own', () => {

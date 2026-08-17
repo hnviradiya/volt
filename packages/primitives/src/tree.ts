@@ -906,10 +906,11 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
       }
 
       // A folder holding nothing the cascade may write is a leaf as far as
-      // checking goes, and its own box is the only state it has. Aggregating
-      // descendants that refuse every press instead leaves it answering each
-      // one with no change at all — checked in the selection, unchecked on
-      // screen, and inert however often it is pressed.
+      // checking goes, and its own membership is the only state a press can
+      // move it to. Aggregating descendants that refuse every press instead —
+      // whichever way a consumer set them — gives it a state no press can
+      // change, so its box stands still while the selection flips underneath
+      // it and `selection()` and `isSelected()` come apart.
       const aggregate: CheckedState = all ? true : none ? false : 'indeterminate';
       const state = writable ? aggregate : set.has(node.id);
       states.set(node.id, state);
@@ -974,11 +975,17 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
    * cascade will not touch that node — so that rule asks for the same check on
    * every press, and the control never turns off. What a press really asks is
    * whether there is anything here left for it to check.
+   *
+   * A box already reading `checked` is the exception, because a folder whose
+   * children were checked one by one reads that way without its own id being
+   * in the set: asking what is left to check finds the folder itself and
+   * swallows a press that changes nothing anybody can see.
    */
   const wouldCheck = (id: string): boolean =>
     untrack(() => {
       const node = nodeById(id);
       if (!node) return false;
+      if (checkedState(id) === true) return false;
       const set = selectedState.get();
 
       const unchecked = (target: TreeNode<T>): boolean => {
@@ -1192,6 +1199,25 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
     focusedEl !== null && !focusedEl.isConnected && !focusTakenElsewhere();
 
   /**
+   * Put focus on the tree itself, for when no row is left to hold it.
+   *
+   * An empty tree is its own tab stop, so it is somewhere the reader can stay
+   * and keep arrowing — where `<body>` is the top of the document and no way
+   * back to what they were reading.
+   */
+  const focusTree = (): void => {
+    const root = options.tree();
+    if (!(root instanceof HTMLElement)) return;
+    // The stop `treeProps` gives an empty tree is applied by a render that has
+    // not happened yet, and `focus()` on an element that cannot hold it does
+    // nothing at all. That render overwrites this attribute a moment later.
+    if (!root.hasAttribute('tabindex')) root.setAttribute('tabindex', '-1');
+    root.focus();
+    // Focus is on no row now, so there is no removal left to read off one.
+    focusedEl = null;
+  };
+
+  /**
    * A row that was asked for before it was rendered, and is still wanted.
    *
    * The id rather than a flag, so the request expires: it is honoured only
@@ -1288,7 +1314,10 @@ export function createTree<T = unknown>(options: TreeOptions<T>): Tree<T> {
     if (!row) {
       // Nothing survived at all — the search box's "no results". Naming no
       // node is the honest answer; naming a gone one is what this is here for.
+      // The reader is still owed somewhere to be, though: the row under them
+      // is going, and the browser answers that with `<body>`.
       activeState.set(null);
+      if (holdsFocus() || lostFocusWithRow()) focusTree();
       return;
     }
 
