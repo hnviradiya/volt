@@ -880,13 +880,7 @@ describe('removal', () => {
     expect(client.getData(['users', 1])).toBeUndefined();
   });
 
-  // Skipped, not deleted, and not passing quietly: it fails on a defect that
-  // is real and reproducible — `setData` writing a new value leaves `getData`
-  // reading the old one, but only when the query test files run together. It
-  // is characterised in docs/design/primitives-outstanding.md, along with what
-  // was ruled out: it is the write itself, not collection and not scheduling.
-  // Un-skip it as the check that the fix worked.
-  it.skip('lets a subscriber that outlived a clear go on working', async () => {
+  it('lets a subscriber that outlived a clear go on working', async () => {
     useClock();
     // Fresh for good, so the holder below reads the replacement rather than
     // revalidating it away — the assertion is about which entry is in the map,

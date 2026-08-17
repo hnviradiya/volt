@@ -68,27 +68,31 @@ autofill — where the form submits a restored value while `isDirty()` is false.
 The dirty model is the thing to redesign: it currently infers dirtiness from
 who wrote the value, and it needs to compare state instead.
 
-## query — a write that does not land, under load
+## query — the write that did not land, resolved
 
-Not a primitive, but the same shape of problem and worth recording next to the
-others.
+Kept as a record of how it was found, because the shape recurs: a defect that
+only appeared with the other test files in the room.
 
-`@voltdev/query` is new and unreviewed-into-green. One defect is reproducible
-and precisely characterised:
+The symptom was `client.setData(key, 'Grace')` on an entry holding `'Ada'`
+leaving `client.getData(key)` reading `'Ada'`, but only when the query test
+files ran together. It was attributed to the process-wide `queryClient` the
+module exported as `createQuery`'s fallback, shared by every test in a run and
+by every request on a server.
 
-`client.setData(key, 'Grace')` on an entry currently holding `'Ada'` leaves
-`client.getData(key)` reading `'Ada'` — the write does not land — but only when
-the query test files run together. The identical sequence in a file on its own
-writes correctly. Asserting immediately after the write, with no timer advance
-in between, still reads the old value, so it is the write itself and not
-collection or scheduling.
+That export is gone. The cache is reached through `provideQueryClient` and a
+scoped context, which `docs/design/ssr.md` requires of request-derived state,
+and four tests in `query.test.ts` hold the boundary — including one asserting
+that a scope with no cache throws rather than inventing one. The symptom no
+longer reproduces: `lets a subscriber that outlived a clear go on working` is
+un-skipped and passes across repeated, shuffled and isolated runs.
 
-This is very likely the process-wide `queryClient` the review already flagged:
-the module exports a mutable default that `createQuery` falls back to when no
-client is given, so anything reaching it is shared by every test in a run — and
-would be shared by every request on a server.
+Attribution is the one loose end. Restoring the singleton on its own does not
+bring the symptom back — it reddens the four scope tests first, and those now
+pass a client explicitly — so the singleton is established as a design defect
+and only inferred as the cause of the write. Nothing here is waiting on it.
 
-Two things were established while finding it, and both stand:
+Two things established while finding it, both still true and now each covered
+by a test that fails without them:
 
 - Restarting the collection clock when an unobserved entry is written to is a
   real fix, proven under both real and fake timers. Without it an entry's age,
@@ -97,3 +101,7 @@ Two things were established while finding it, and both stand:
   replacement filed under the same key. The test that appeared to prove
   otherwise could not distinguish that from the replacement's own legitimate
   collection, because it left the replacement unobserved. It now holds it.
+
+Still landed unfinished on purpose: two `it.skip`s in `infinite.test.ts` —
+superseding an append with an invalidation, and two infinite queries sharing
+one key. Twelve of the fourteen cases pass; these two are the remaining work.
