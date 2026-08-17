@@ -67,3 +67,33 @@ autofill — where the form submits a restored value while `isDirty()` is false.
 
 The dirty model is the thing to redesign: it currently infers dirtiness from
 who wrote the value, and it needs to compare state instead.
+
+## query — a write that does not land, under load
+
+Not a primitive, but the same shape of problem and worth recording next to the
+others.
+
+`@voltdev/query` is new and unreviewed-into-green. One defect is reproducible
+and precisely characterised:
+
+`client.setData(key, 'Grace')` on an entry currently holding `'Ada'` leaves
+`client.getData(key)` reading `'Ada'` — the write does not land — but only when
+the query test files run together. The identical sequence in a file on its own
+writes correctly. Asserting immediately after the write, with no timer advance
+in between, still reads the old value, so it is the write itself and not
+collection or scheduling.
+
+This is very likely the process-wide `queryClient` the review already flagged:
+the module exports a mutable default that `createQuery` falls back to when no
+client is given, so anything reaching it is shared by every test in a run — and
+would be shared by every request on a server.
+
+Two things were established while finding it, and both stand:
+
+- Restarting the collection clock when an unobserved entry is written to is a
+  real fix, proven under both real and fake timers. Without it an entry's age,
+  not its last write, decides when data written a moment ago is collected.
+- `evict`'s identity guard is correct: an orphan's collection does not take a
+  replacement filed under the same key. The test that appeared to prove
+  otherwise could not distinguish that from the replacement's own legitimate
+  collection, because it left the replacement unobserved. It now holds it.

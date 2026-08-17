@@ -129,6 +129,81 @@ describe('event delegation is limited to events it suits', () => {
   });
 });
 
+describe('the event types a page must listen for before it hydrates', () => {
+  const names = (template: string) => compile(template).delegatedEventNames;
+
+  it('reports the type a delegated handler needs', () => {
+    expect(names(`<button :click="go()">x</button>`)).toEqual(['click']);
+  });
+
+  it('leaves out one that compiles to a listener on the element', () => {
+    // `delegate` installs the document listener itself; a direct listener is
+    // attached with the element and needs nothing installed ahead of it.
+    expect(names(`<div :wheel="go()"></div>`)).toEqual([]);
+    expect(names(`<button :click.once="go()"></button>`)).toEqual([]);
+  });
+
+  it('reports each type once, however many handlers ask for it', () => {
+    expect(
+      names(`<ul><li :for="n in ns.get()" :key="n" :click="pick(n)"><b :click="go()">x</b></li></ul>`),
+    ).toEqual(['click']);
+  });
+
+  it('reports several types in a stable order', () => {
+    expect(names(`<div :keydown="a()" :click="b()" :focusin="c()"></div>`)).toEqual([
+      'click', 'focusin', 'keydown',
+    ]);
+  });
+
+  it('leaves out a component output, which is not a DOM event at all', () => {
+    expect(names(`<v-thing :on-changed="handle($event)"></v-thing>`)).toEqual([]);
+  });
+});
+
+describe('how wide one `:for` row is', () => {
+  const rows = (template: string) => compile(template).rowRootCounts;
+
+  it('is one for a row that is a single element', () => {
+    expect(rows(`<ul><li :for="n in ns.get()" :key="n">{ n }</li></ul>`)).toEqual([1]);
+  });
+
+  it('counts the roots of a multi-root row', () => {
+    expect(
+      rows(`<dl><template :for="e in es.get()" :key="e.id"><dt>{ e.term }</dt><dd>{ e.def }</dd></template></dl>`),
+    ).toEqual([2]);
+  });
+
+  it('stays fixed when the dynamic parts are inside a root', () => {
+    // The row is one `<li>` whatever the condition does inside it, so server
+    // markup needs nothing marking where the row ends.
+    expect(
+      rows(`<ul><li :for="n in ns.get()" :key="n"><b :if="n > 1">big</b><i :else>small</i></li></ul>`),
+    ).toEqual([1]);
+  });
+
+  it('is unknown when a conditional sits at the row root', () => {
+    expect(
+      rows(`<dl><template :for="e in es.get()" :key="e.id"><dt :if="e.on">{ e.term }</dt><dd>x</dd></template></dl>`),
+    ).toEqual([null]);
+  });
+
+  it('is unknown for a component row, whose root element belongs to another module', () => {
+    expect(rows(`<ul><v-item :for="n in ns.get()" :key="n"></v-item></ul>`)).toEqual([null]);
+  });
+
+  it('records the containing loop before the one nested in it', () => {
+    // Two rows of different widths, so the order is what is being asserted
+    // rather than something both entries happen to agree on.
+    expect(
+      rows(`<dl><template :for="g in gs.get()" :key="g.id"><dt>{ g.name }</dt><dd><em :for="c in g.cs" :key="c">{ c }</em></dd></template></dl>`),
+    ).toEqual([2, 1]);
+  });
+
+  it('is empty for a template with no list at all', () => {
+    expect(rows(`<div>{ n.get() }</div>`)).toEqual([]);
+  });
+});
+
 describe('components that cannot render on first paint', () => {
   const deferrable = (template: string) => compile(template).deferrable.sort();
 

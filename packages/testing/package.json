@@ -1,0 +1,53 @@
+{
+  "name": "@voltdev/testing",
+  "version": "0.1.0-alpha.1",
+  "description": "Test a Volt application through its accessibility surface: mount, query by role, interact, unmount.",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "vite build && tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@voltdev/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@voltdev/primitives": "workspace:*"
+  },
+  "keywords": [
+    "volt",
+    "testing",
+    "accessibility",
+    "vitest"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/volt-js/volt.git",
+    "directory": "packages/testing"
+  },
+  "homepage": "https://voltjs.dev",
+  "bugs": {
+    "url": "https://github.com/volt-js/volt/issues"
+  },
+  "author": "Hardik Viradiya",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

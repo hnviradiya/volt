@@ -53,6 +53,9 @@ export default defineConfig({
       '@voltdev/reactivity': resolve(root, 'packages/reactivity/src/index.ts'),
       '@voltdev/compiler': resolve(root, 'packages/compiler/src/index.ts'),
       '@voltdev/primitives': resolve(root, 'packages/primitives/src/index.ts'),
+      '@voltdev/query': resolve(root, 'packages/query/src/index.ts'),
+      '@voltdev/testing': resolve(root, 'packages/testing/src/index.ts'),
+      '@voltdev/router': resolve(root, 'packages/router/src/index.ts'),
       // Longest first — '@voltdev/core' would otherwise shadow its subpaths.
       '@voltdev/core/runtime': resolve(root, 'packages/core/src/runtime.ts'),
       '@voltdev/core/jit': resolve(root, 'packages/core/src/jit.ts'),

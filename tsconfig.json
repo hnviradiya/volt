@@ -6,8 +6,11 @@
     { "path": "./packages/core" },
     { "path": "./packages/vite-plugin" },
     { "path": "./packages/primitives" },
+    { "path": "./packages/query" },
     { "path": "./packages/ui" },
     { "path": "./packages/grid" },
-    { "path": "./packages/editor" }
+    { "path": "./packages/editor" },
+    { "path": "./packages/testing" },
+    { "path": "./packages/router" }
   ]
 }

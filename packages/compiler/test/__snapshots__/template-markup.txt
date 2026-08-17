@@ -1,0 +1,1670 @@
+## default
+
+### empty-element
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=1 classToggles=0
+
+### static-nested
+  "<div class=\"a\"><span>hi</span></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=3 classToggles=0
+
+### static-deep
+  "<div class=\"card\"><h2>Title</h2><p>Body</p></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=5 classToggles=0
+
+### attribute-quoting
+  "<div id=\"plain\" class=\"double\" data-x=\"single\"></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=1 classToggles=0
+
+### boolean-attribute
+  "<input type=\"checkbox\" checked disabled>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=1 classToggles=0
+
+### void-tags
+  "<div><br><hr><img src=\"x.png\"><input></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=5 classToggles=0
+
+### entities
+  "<p>a &amp; b &lt; c &gt; d &nbsp;e</p>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### bare-ampersand
+  "<p>Smith &amp; Co, 5 &lt; 6</p>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### attribute-entities
+  "<a href=\"/a?x=1&amp;y=2\" title=\"He said &quot;hi&quot;\">go</a>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### raw-text-pre
+  "<pre>line1\n  line2</pre>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### textarea-raw-text
+  "<textarea>  keep   me  </textarea>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### comment-dropped
+  "<div>visible</div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### comment-between-elements
+  "<div><b>a</b><i>b</i></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=5 classToggles=0
+
+### multi-root-static
+  "<h1>a</h1><p>b</p>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=4 classToggles=0
+
+### text-then-element
+  "<div>lead <b>bold</b> tail</div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=5 classToggles=0
+
+### unicode-text
+  "<p>café — 日本語 — 🎉</p>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### self-closing-nonvoid
+  "<div><span></span></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### deep-nesting
+  "<d><e><f>deep</f></e></d>"
+  "<a><b></b></a>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=6 classToggles=0
+
+### svg-static
+  "<svg viewBox=\"0 0 10 10\"><circle cx=\"5\" cy=\"5\" r=\"4\"></circle></svg>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### svg-dynamic-attr
+  "<svg viewBox=\"0 0 10 10\"><circle></circle></svg>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### svg-camelcase-tag
+  "<svg><linearGradient id=\"g\"><stop offset=\"0\"></stop></linearGradient></svg>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=3 classToggles=0
+
+### svg-mixed-with-html
+  "<div><svg><rect></rect></svg><span></span></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=4 classToggles=0
+
+### svg-for-in-group
+  "<circle r=\"2\"></circle>"
+  "<svg viewBox=\"0 0 20 10\"><g class=\"pts\"></g></svg>"
+  stats: templates=2 deduped=0 effects=3 folded=0 delegated=0 static=2 classToggles=0
+
+### svg-if-branch
+  "<circle></circle>"
+  "<rect width=\"4\" height=\"4\"></rect>"
+  "<svg><!></svg>"
+  stats: templates=3 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### interpolation-only-child
+  "<span></span>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-mixed-text
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-two-adjacent
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-with-siblings
+  "<p>[<!>]<b>x</b></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=5 classToggles=0
+
+### interpolation-folded-constant
+  "<span>5</span>"
+  stats: templates=1 deduped=0 effects=0 folded=1 delegated=0 static=1 classToggles=0
+
+### interpolation-folded-among-text
+  "<span>a2b</span>"
+  stats: templates=1 deduped=0 effects=0 folded=1 delegated=0 static=1 classToggles=0
+
+### interpolation-at-root
+  (no markup)
+  stats: templates=0 deduped=0 effects=0 folded=0 delegated=0 static=0 classToggles=0
+
+### interpolation-root-with-sibling
+  "<!><b>x</b>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=2 classToggles=0
+
+### interpolation-optional-chain
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-template-literal
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-globals
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-escaped-brace
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-object-literal
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### bind-prop
+  "<input>"
+  stats: templates=1 deduped=0 effects=2 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-attr-escape
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-class-string
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-class-object
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=2 folded=0 delegated=0 static=0 classToggles=2
+
+### bind-class-quoted-key
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=1
+
+### bind-class-array
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-class-merged-with-static
+  "<div class=\"base pad\"></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=1
+
+### bind-style-object
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-style-string
+  "<div style=\"color:red\"></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-must-use-attribute
+  "<label>x</label>"
+  stats: templates=1 deduped=0 effects=2 folded=0 delegated=0 static=1 classToggles=0
+
+### bind-spread
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-ref
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-text-directive
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-html-directive
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-many-on-one-element
+  "<a href=\"/x\" class=\"c\">go</a>"
+  stats: templates=1 deduped=0 effects=5 folded=0 delegated=1 static=1 classToggles=1
+
+### bind-folded-constants
+  "<div class=\"btn\" disabled=\"\">5</div>"
+  stats: templates=1 deduped=0 effects=0 folded=3 delegated=0 static=1 classToggles=0
+
+### bind-folded-false-boolean
+  "<input>"
+  stats: templates=1 deduped=0 effects=0 folded=1 delegated=0 static=1 classToggles=0
+
+### bind-folded-style
+  "<div style=\"color:red\"></div>"
+  stats: templates=1 deduped=0 effects=0 folded=1 delegated=0 static=1 classToggles=0
+
+### bind-folded-class-merges
+  "<div class=\"a b\"></div>"
+  stats: templates=1 deduped=0 effects=0 folded=1 delegated=0 static=1 classToggles=0
+
+### event-delegated
+  "<button></button>"
+  stats: templates=1 deduped=0 effects=2 folded=0 delegated=1 static=0 classToggles=0
+
+### event-direct
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### event-option-modifier
+  "<button></button>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### event-guard-modifiers
+  "<form></form>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=1 static=0 classToggles=0
+
+### event-key-modifier
+  "<input>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=1 static=0 classToggles=0
+
+### event-explicit-on
+  (no markup)
+  stats: templates=0 deduped=0 effects=0 folded=0 delegated=0 static=0 classToggles=0
+
+### event-arrow-handler
+  "<button>go</button>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=1 static=1 classToggles=0
+
+### event-several-types
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=3 folded=0 delegated=2 static=0 classToggles=0
+
+### model-text
+  "<input>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### model-checkbox
+  "<input type=\"checkbox\">"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### model-radio
+  "<input type=\"radio\" value=\"a\">"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### model-number
+  "<input type=\"number\">"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### model-modifiers
+  "<input>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### model-textarea
+  "<textarea></textarea>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### model-select
+  "<select><option value=\"a\">A</option><option value=\"b\">B</option></select>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=4 classToggles=0
+
+### model-with-sibling
+  "<div><input><span></span></div>"
+  stats: templates=1 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### if-alone
+  "<span>yes</span>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=3 classToggles=0
+
+### if-else
+  "<div><!></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### if-else-if-else
+  "<span>big</span>"
+  "<span>small</span>"
+  "<span>none</span>"
+  "<div><!></div>"
+  stats: templates=4 deduped=0 effects=1 folded=0 delegated=0 static=7 classToggles=0
+
+### if-nested
+  "<b>both</b>"
+  "<i>outer only</i>"
+  "<section><!></section>"
+  "<p>neither</p>"
+  "<div><!></div>"
+  stats: templates=5 deduped=0 effects=2 folded=0 delegated=0 static=8 classToggles=0
+
+### if-sole-child-of-element
+  "<span>only</span>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=3 classToggles=0
+
+### if-on-template
+  "<b>a</b><i>b</i>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=5 classToggles=0
+
+### if-at-root
+  "<span>x</span>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### if-between-statics
+  "<b>mid</b>"
+  "<div><header>top</header><!><footer>end</footer></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=7 classToggles=0
+
+### for-simple
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-with-index
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-key-index
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-destructured
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-destructured-nested
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-destructured-array
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-destructured-rest
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-nested
+  "<em></em>"
+  "<li><span></span><!></li>"
+  "<ul></ul>"
+  stats: templates=3 deduped=0 effects=4 folded=0 delegated=0 static=4 classToggles=0
+
+### for-row-with-if
+  "<b></b>"
+  "<i></i>"
+  "<li><!></li>"
+  "<ul></ul>"
+  stats: templates=4 deduped=0 effects=4 folded=0 delegated=0 static=4 classToggles=0
+
+### for-row-multi-root
+  "<dt></dt><dd></dd>"
+  "<dl></dl>"
+  stats: templates=2 deduped=0 effects=3 folded=0 delegated=0 static=3 classToggles=0
+
+### for-row-component
+  "n = <!>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-two-lists-in-one-parent
+  "<li></li>"
+  "<div><ul class=\"a\"></ul><ul class=\"b\"></ul></div>"
+  stats: templates=2 deduped=1 effects=4 folded=0 delegated=0 static=5 classToggles=0
+
+### for-at-root
+  "<li></li>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### for-row-static
+  "<li>static</li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=3 classToggles=0
+
+### for-inside-if
+  "<li></li>"
+  "<ul></ul>"
+  "<div></div>"
+  stats: templates=3 deduped=0 effects=3 folded=0 delegated=0 static=3 classToggles=0
+
+### for-table-rows
+  "<tr><td class=\"id\"></td><td><a></a></td></tr>"
+  "<table class=\"t\"><tbody></tbody></table>"
+  stats: templates=2 deduped=0 effects=5 folded=0 delegated=1 static=4 classToggles=1
+
+### component-plain
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### component-props
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=1 delegated=0 static=1 classToggles=0
+
+### component-static-attrs
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### component-spread
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### component-model
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### component-ref
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### component-pascal-case
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=1 delegated=0 static=1 classToggles=0
+
+### component-with-children
+  "<p>Body content</p>"
+  "<h1>Hello</h1>"
+  stats: templates=2 deduped=0 effects=0 folded=0 delegated=0 static=4 classToggles=0
+
+### slot-default-and-named
+  "Untitled"
+  "<div class=\"card\"><header></header><main></main></div>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=4 classToggles=0
+
+### slot-no-fallback
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### slot-with-props
+  "none"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=2 classToggles=0
+
+### slot-sole-child
+  "<li></li>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### portal-default-target
+  "<span>hello</span>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=3 classToggles=0
+
+### portal-selector-target
+  "<span>hi</span>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=3 classToggles=0
+
+### portal-between-siblings
+  "<span>x</span>"
+  "<div><b>a</b><b>c</b></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=7 classToggles=0
+
+### portal-two-in-a-row
+  "<i>1</i>"
+  "<i>2</i>"
+  "<div></div>"
+  stats: templates=3 deduped=0 effects=2 folded=0 delegated=0 static=5 classToggles=0
+
+### portal-with-if
+  "<span>modal</span>"
+  "<div><!></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=3 classToggles=0
+
+### portal-component
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### portal-only-child
+  "<span></span>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### portal-on-template
+  "<b>a</b><i>b</i>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=5 classToggles=0
+
+### template-grouping
+  "<b>a</b><i>b</i>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=5 classToggles=0
+
+### template-at-root
+  "<b>a</b><i>b</i>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=4 classToggles=0
+
+### whitespace-indented
+  "<div><span>a</span><span>b</span></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=5 classToggles=0
+
+### whitespace-inline-space
+  "<div><b>a</b> <i>b</i></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=6 classToggles=0
+
+### whitespace-leading-trailing
+  "<div> padded </div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### whitespace-around-interpolation
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### siblings-many-dynamic
+  "<div><a></a><b></b><!><d></d></div>"
+  stats: templates=1 deduped=0 effects=4 folded=0 delegated=0 static=4 classToggles=0
+
+### dedupe-identical-branches
+  "<p><b>same</b></p>"
+  "<div><!></div>"
+  stats: templates=2 deduped=1 effects=1 folded=0 delegated=0 static=7 classToggles=0
+
+### mixed-static-and-holes
+  "<li></li>"
+  "<section><h1></h1><p>static</p><ul></ul><footer>end</footer></section>"
+  stats: templates=2 deduped=0 effects=4 folded=0 delegated=0 static=7 classToggles=1
+
+### kitchen-sink
+  "<p class=\"err\"></p>"
+  "<li><span></span><button>x</button></li>"
+  "<em>no footer</em>"
+  "<form class=\"f\"><label>Name</label><input><!><ul></ul><!></form>"
+  stats: templates=4 deduped=0 effects=15 folded=0 delegated=2 static=7 classToggles=2
+
+## preserve-whitespace
+
+### empty-element
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=1 classToggles=0
+
+### static-nested
+  "<div class=\"a\"><span>hi</span></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=3 classToggles=0
+
+### static-deep
+  "<div class=\"card\"><h2>Title</h2><p>Body</p></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=5 classToggles=0
+
+### attribute-quoting
+  "<div id=\"plain\" class=\"double\" data-x=\"single\"></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=1 classToggles=0
+
+### boolean-attribute
+  "<input type=\"checkbox\" checked disabled>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=1 classToggles=0
+
+### void-tags
+  "<div><br><hr><img src=\"x.png\"><input></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=5 classToggles=0
+
+### entities
+  "<p>a &amp; b &lt; c &gt; d &nbsp;e</p>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### bare-ampersand
+  "<p>Smith &amp; Co, 5 &lt; 6</p>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### attribute-entities
+  "<a href=\"/a?x=1&amp;y=2\" title=\"He said &quot;hi&quot;\">go</a>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### raw-text-pre
+  "<pre>line1\n  line2</pre>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### textarea-raw-text
+  "<textarea>  keep   me  </textarea>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### comment-dropped
+  "<div>visible</div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### comment-between-elements
+  "<div><b>a</b><i>b</i></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=5 classToggles=0
+
+### multi-root-static
+  "<h1>a</h1><p>b</p>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=4 classToggles=0
+
+### text-then-element
+  "<div>lead <b>bold</b> tail</div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=5 classToggles=0
+
+### unicode-text
+  "<p>café — 日本語 — 🎉</p>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### self-closing-nonvoid
+  "<div><span></span></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### deep-nesting
+  "<d><e><f>deep</f></e></d>"
+  "<a><b></b></a>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=6 classToggles=0
+
+### svg-static
+  "<svg viewBox=\"0 0 10 10\"><circle cx=\"5\" cy=\"5\" r=\"4\"></circle></svg>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### svg-dynamic-attr
+  "<svg viewBox=\"0 0 10 10\"><circle></circle></svg>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### svg-camelcase-tag
+  "<svg><linearGradient id=\"g\"><stop offset=\"0\"></stop></linearGradient></svg>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=3 classToggles=0
+
+### svg-mixed-with-html
+  "<div><svg><rect></rect></svg><span></span></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=4 classToggles=0
+
+### svg-for-in-group
+  "<circle r=\"2\"></circle>"
+  "<svg viewBox=\"0 0 20 10\"><g class=\"pts\"></g></svg>"
+  stats: templates=2 deduped=0 effects=3 folded=0 delegated=0 static=2 classToggles=0
+
+### svg-if-branch
+  "<circle></circle>"
+  "<rect width=\"4\" height=\"4\"></rect>"
+  "<svg><!></svg>"
+  stats: templates=3 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### interpolation-only-child
+  "<span></span>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-mixed-text
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-two-adjacent
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-with-siblings
+  "<p>[<!>]<b>x</b></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=5 classToggles=0
+
+### interpolation-folded-constant
+  "<span>5</span>"
+  stats: templates=1 deduped=0 effects=0 folded=1 delegated=0 static=1 classToggles=0
+
+### interpolation-folded-among-text
+  "<span>a2b</span>"
+  stats: templates=1 deduped=0 effects=0 folded=1 delegated=0 static=1 classToggles=0
+
+### interpolation-at-root
+  (no markup)
+  stats: templates=0 deduped=0 effects=0 folded=0 delegated=0 static=0 classToggles=0
+
+### interpolation-root-with-sibling
+  "<!><b>x</b>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=2 classToggles=0
+
+### interpolation-optional-chain
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-template-literal
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-globals
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-escaped-brace
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-object-literal
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### bind-prop
+  "<input>"
+  stats: templates=1 deduped=0 effects=2 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-attr-escape
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-class-string
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-class-object
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=2 folded=0 delegated=0 static=0 classToggles=2
+
+### bind-class-quoted-key
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=1
+
+### bind-class-array
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-class-merged-with-static
+  "<div class=\"base pad\"></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=1
+
+### bind-style-object
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-style-string
+  "<div style=\"color:red\"></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-must-use-attribute
+  "<label>x</label>"
+  stats: templates=1 deduped=0 effects=2 folded=0 delegated=0 static=1 classToggles=0
+
+### bind-spread
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-ref
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-text-directive
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-html-directive
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-many-on-one-element
+  "<a href=\"/x\" class=\"c\">go</a>"
+  stats: templates=1 deduped=0 effects=5 folded=0 delegated=1 static=1 classToggles=1
+
+### bind-folded-constants
+  "<div class=\"btn\" disabled=\"\">5</div>"
+  stats: templates=1 deduped=0 effects=0 folded=3 delegated=0 static=1 classToggles=0
+
+### bind-folded-false-boolean
+  "<input>"
+  stats: templates=1 deduped=0 effects=0 folded=1 delegated=0 static=1 classToggles=0
+
+### bind-folded-style
+  "<div style=\"color:red\"></div>"
+  stats: templates=1 deduped=0 effects=0 folded=1 delegated=0 static=1 classToggles=0
+
+### bind-folded-class-merges
+  "<div class=\"a b\"></div>"
+  stats: templates=1 deduped=0 effects=0 folded=1 delegated=0 static=1 classToggles=0
+
+### event-delegated
+  "<button></button>"
+  stats: templates=1 deduped=0 effects=2 folded=0 delegated=1 static=0 classToggles=0
+
+### event-direct
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### event-option-modifier
+  "<button></button>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### event-guard-modifiers
+  "<form></form>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=1 static=0 classToggles=0
+
+### event-key-modifier
+  "<input>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=1 static=0 classToggles=0
+
+### event-explicit-on
+  (no markup)
+  stats: templates=0 deduped=0 effects=0 folded=0 delegated=0 static=0 classToggles=0
+
+### event-arrow-handler
+  "<button>go</button>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=1 static=1 classToggles=0
+
+### event-several-types
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=3 folded=0 delegated=2 static=0 classToggles=0
+
+### model-text
+  "<input>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### model-checkbox
+  "<input type=\"checkbox\">"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### model-radio
+  "<input type=\"radio\" value=\"a\">"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### model-number
+  "<input type=\"number\">"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### model-modifiers
+  "<input>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### model-textarea
+  "<textarea></textarea>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### model-select
+  "<select><option value=\"a\">A</option><option value=\"b\">B</option></select>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=4 classToggles=0
+
+### model-with-sibling
+  "<div><input><span></span></div>"
+  stats: templates=1 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### if-alone
+  "<span>yes</span>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=3 classToggles=0
+
+### if-else
+  "<div><!></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### if-else-if-else
+  "<span>big</span>"
+  "<span>small</span>"
+  "<span>none</span>"
+  "<div><!></div>"
+  stats: templates=4 deduped=0 effects=1 folded=0 delegated=0 static=7 classToggles=0
+
+### if-nested
+  "<b>both</b>"
+  "<i>outer only</i>"
+  "<section><!></section>"
+  "<p>neither</p>"
+  "<div><!></div>"
+  stats: templates=5 deduped=0 effects=2 folded=0 delegated=0 static=8 classToggles=0
+
+### if-sole-child-of-element
+  "<span>only</span>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=3 classToggles=0
+
+### if-on-template
+  "<b>a</b><i>b</i>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=5 classToggles=0
+
+### if-at-root
+  "<span>x</span>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### if-between-statics
+  "<b>mid</b>"
+  "<div><header>top</header><!><footer>end</footer></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=7 classToggles=0
+
+### for-simple
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-with-index
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-key-index
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-destructured
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-destructured-nested
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-destructured-array
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-destructured-rest
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-nested
+  "<em></em>"
+  "<li><span></span><!></li>"
+  "<ul></ul>"
+  stats: templates=3 deduped=0 effects=4 folded=0 delegated=0 static=4 classToggles=0
+
+### for-row-with-if
+  "<b></b>"
+  "<i></i>"
+  "<li><!></li>"
+  "<ul></ul>"
+  stats: templates=4 deduped=0 effects=4 folded=0 delegated=0 static=4 classToggles=0
+
+### for-row-multi-root
+  "<dt></dt><dd></dd>"
+  "<dl></dl>"
+  stats: templates=2 deduped=0 effects=3 folded=0 delegated=0 static=3 classToggles=0
+
+### for-row-component
+  "n = <!>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-two-lists-in-one-parent
+  "<li></li>"
+  "<div><ul class=\"a\"></ul><ul class=\"b\"></ul></div>"
+  stats: templates=2 deduped=1 effects=4 folded=0 delegated=0 static=5 classToggles=0
+
+### for-at-root
+  "<li></li>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### for-row-static
+  "<li>static</li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=3 classToggles=0
+
+### for-inside-if
+  "<li></li>"
+  "<ul></ul>"
+  "<div></div>"
+  stats: templates=3 deduped=0 effects=3 folded=0 delegated=0 static=3 classToggles=0
+
+### for-table-rows
+  "<tr><td class=\"id\"></td><td><a></a></td></tr>"
+  "<table class=\"t\"><tbody></tbody></table>"
+  stats: templates=2 deduped=0 effects=5 folded=0 delegated=1 static=4 classToggles=1
+
+### component-plain
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### component-props
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=1 delegated=0 static=1 classToggles=0
+
+### component-static-attrs
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### component-spread
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### component-model
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### component-ref
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### component-pascal-case
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=1 delegated=0 static=1 classToggles=0
+
+### component-with-children
+  "<p>Body content</p>"
+  "<h1>Hello</h1>"
+  stats: templates=2 deduped=0 effects=0 folded=0 delegated=0 static=4 classToggles=0
+
+### slot-default-and-named
+  "Untitled"
+  "<div class=\"card\"><header></header><main></main></div>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=4 classToggles=0
+
+### slot-no-fallback
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### slot-with-props
+  "none"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=2 classToggles=0
+
+### slot-sole-child
+  "<li></li>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### portal-default-target
+  "<span>hello</span>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=3 classToggles=0
+
+### portal-selector-target
+  "<span>hi</span>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=3 classToggles=0
+
+### portal-between-siblings
+  "<span>x</span>"
+  "<div><b>a</b><b>c</b></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=7 classToggles=0
+
+### portal-two-in-a-row
+  "<i>1</i>"
+  "<i>2</i>"
+  "<div></div>"
+  stats: templates=3 deduped=0 effects=2 folded=0 delegated=0 static=5 classToggles=0
+
+### portal-with-if
+  "<span>modal</span>"
+  "<div><!></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=3 classToggles=0
+
+### portal-component
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### portal-only-child
+  "<span></span>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### portal-on-template
+  "<b>a</b><i>b</i>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=5 classToggles=0
+
+### template-grouping
+  "<b>a</b><i>b</i>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=5 classToggles=0
+
+### template-at-root
+  "<b>a</b><i>b</i>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=4 classToggles=0
+
+### whitespace-indented
+  "<div>\n  <span>a</span>\n  <span>b</span>\n</div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=8 classToggles=0
+
+### whitespace-inline-space
+  "<div><b>a</b> <i>b</i></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=6 classToggles=0
+
+### whitespace-leading-trailing
+  "<div>  padded  </div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### whitespace-around-interpolation
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### siblings-many-dynamic
+  "<div><a></a><b></b><!><d></d></div>"
+  stats: templates=1 deduped=0 effects=4 folded=0 delegated=0 static=4 classToggles=0
+
+### dedupe-identical-branches
+  "<p><b>same</b></p>"
+  "<div><!></div>"
+  stats: templates=2 deduped=1 effects=1 folded=0 delegated=0 static=7 classToggles=0
+
+### mixed-static-and-holes
+  "<li></li>"
+  "<section><h1></h1><p>static</p><ul></ul><footer>end</footer></section>"
+  stats: templates=2 deduped=0 effects=4 folded=0 delegated=0 static=7 classToggles=1
+
+### kitchen-sink
+  "<p class=\"err\"></p>"
+  "<li>\n          <span></span>\n          <button>x</button>\n        </li>"
+  "<em>no footer</em>"
+  "<form class=\"f\">\n      <label>Name</label>\n      <input>\n      <!>\n      <ul></ul>\n      \n      <!>\n    </form>"
+  stats: templates=4 deduped=0 effects=15 folded=0 delegated=2 static=17 classToggles=2
+
+## keep-comments
+
+### empty-element
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=1 classToggles=0
+
+### static-nested
+  "<div class=\"a\"><span>hi</span></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=3 classToggles=0
+
+### static-deep
+  "<div class=\"card\"><h2>Title</h2><p>Body</p></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=5 classToggles=0
+
+### attribute-quoting
+  "<div id=\"plain\" class=\"double\" data-x=\"single\"></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=1 classToggles=0
+
+### boolean-attribute
+  "<input type=\"checkbox\" checked disabled>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=1 classToggles=0
+
+### void-tags
+  "<div><br><hr><img src=\"x.png\"><input></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=5 classToggles=0
+
+### entities
+  "<p>a &amp; b &lt; c &gt; d &nbsp;e</p>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### bare-ampersand
+  "<p>Smith &amp; Co, 5 &lt; 6</p>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### attribute-entities
+  "<a href=\"/a?x=1&amp;y=2\" title=\"He said &quot;hi&quot;\">go</a>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### raw-text-pre
+  "<pre>line1\n  line2</pre>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### textarea-raw-text
+  "<textarea>  keep   me  </textarea>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### comment-dropped
+  "<div><!-- hidden -->visible</div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### comment-between-elements
+  "<div><b>a</b><!-- gap --><i>b</i></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=5 classToggles=0
+
+### multi-root-static
+  "<h1>a</h1><p>b</p>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=4 classToggles=0
+
+### text-then-element
+  "<div>lead <b>bold</b> tail</div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=5 classToggles=0
+
+### unicode-text
+  "<p>café — 日本語 — 🎉</p>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### self-closing-nonvoid
+  "<div><span></span></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### deep-nesting
+  "<d><e><f>deep</f></e></d>"
+  "<a><b></b></a>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=6 classToggles=0
+
+### svg-static
+  "<svg viewBox=\"0 0 10 10\"><circle cx=\"5\" cy=\"5\" r=\"4\"></circle></svg>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### svg-dynamic-attr
+  "<svg viewBox=\"0 0 10 10\"><circle></circle></svg>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### svg-camelcase-tag
+  "<svg><linearGradient id=\"g\"><stop offset=\"0\"></stop></linearGradient></svg>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=3 classToggles=0
+
+### svg-mixed-with-html
+  "<div><svg><rect></rect></svg><span></span></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=4 classToggles=0
+
+### svg-for-in-group
+  "<circle r=\"2\"></circle>"
+  "<svg viewBox=\"0 0 20 10\"><g class=\"pts\"></g></svg>"
+  stats: templates=2 deduped=0 effects=3 folded=0 delegated=0 static=2 classToggles=0
+
+### svg-if-branch
+  "<circle></circle>"
+  "<rect width=\"4\" height=\"4\"></rect>"
+  "<svg><!></svg>"
+  stats: templates=3 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### interpolation-only-child
+  "<span></span>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-mixed-text
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-two-adjacent
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-with-siblings
+  "<p>[<!>]<b>x</b></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=5 classToggles=0
+
+### interpolation-folded-constant
+  "<span>5</span>"
+  stats: templates=1 deduped=0 effects=0 folded=1 delegated=0 static=1 classToggles=0
+
+### interpolation-folded-among-text
+  "<span>a2b</span>"
+  stats: templates=1 deduped=0 effects=0 folded=1 delegated=0 static=1 classToggles=0
+
+### interpolation-at-root
+  (no markup)
+  stats: templates=0 deduped=0 effects=0 folded=0 delegated=0 static=0 classToggles=0
+
+### interpolation-root-with-sibling
+  "<!><b>x</b>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=2 classToggles=0
+
+### interpolation-optional-chain
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-template-literal
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-globals
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-escaped-brace
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### interpolation-object-literal
+  "<p></p>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### bind-prop
+  "<input>"
+  stats: templates=1 deduped=0 effects=2 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-attr-escape
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-class-string
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-class-object
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=2 folded=0 delegated=0 static=0 classToggles=2
+
+### bind-class-quoted-key
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=1
+
+### bind-class-array
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-class-merged-with-static
+  "<div class=\"base pad\"></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=1
+
+### bind-style-object
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-style-string
+  "<div style=\"color:red\"></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-must-use-attribute
+  "<label>x</label>"
+  stats: templates=1 deduped=0 effects=2 folded=0 delegated=0 static=1 classToggles=0
+
+### bind-spread
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-ref
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-text-directive
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-html-directive
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### bind-many-on-one-element
+  "<a href=\"/x\" class=\"c\">go</a>"
+  stats: templates=1 deduped=0 effects=5 folded=0 delegated=1 static=1 classToggles=1
+
+### bind-folded-constants
+  "<div class=\"btn\" disabled=\"\">5</div>"
+  stats: templates=1 deduped=0 effects=0 folded=3 delegated=0 static=1 classToggles=0
+
+### bind-folded-false-boolean
+  "<input>"
+  stats: templates=1 deduped=0 effects=0 folded=1 delegated=0 static=1 classToggles=0
+
+### bind-folded-style
+  "<div style=\"color:red\"></div>"
+  stats: templates=1 deduped=0 effects=0 folded=1 delegated=0 static=1 classToggles=0
+
+### bind-folded-class-merges
+  "<div class=\"a b\"></div>"
+  stats: templates=1 deduped=0 effects=0 folded=1 delegated=0 static=1 classToggles=0
+
+### event-delegated
+  "<button></button>"
+  stats: templates=1 deduped=0 effects=2 folded=0 delegated=1 static=0 classToggles=0
+
+### event-direct
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### event-option-modifier
+  "<button></button>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### event-guard-modifiers
+  "<form></form>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=1 static=0 classToggles=0
+
+### event-key-modifier
+  "<input>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=1 static=0 classToggles=0
+
+### event-explicit-on
+  (no markup)
+  stats: templates=0 deduped=0 effects=0 folded=0 delegated=0 static=0 classToggles=0
+
+### event-arrow-handler
+  "<button>go</button>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=1 static=1 classToggles=0
+
+### event-several-types
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=3 folded=0 delegated=2 static=0 classToggles=0
+
+### model-text
+  "<input>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### model-checkbox
+  "<input type=\"checkbox\">"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### model-radio
+  "<input type=\"radio\" value=\"a\">"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### model-number
+  "<input type=\"number\">"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### model-modifiers
+  "<input>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### model-textarea
+  "<textarea></textarea>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=0 classToggles=0
+
+### model-select
+  "<select><option value=\"a\">A</option><option value=\"b\">B</option></select>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=4 classToggles=0
+
+### model-with-sibling
+  "<div><input><span></span></div>"
+  stats: templates=1 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### if-alone
+  "<span>yes</span>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=3 classToggles=0
+
+### if-else
+  "<div><!></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### if-else-if-else
+  "<span>big</span>"
+  "<span>small</span>"
+  "<span>none</span>"
+  "<div><!></div>"
+  stats: templates=4 deduped=0 effects=1 folded=0 delegated=0 static=7 classToggles=0
+
+### if-nested
+  "<b>both</b>"
+  "<i>outer only</i>"
+  "<section><!></section>"
+  "<p>neither</p>"
+  "<div><!></div>"
+  stats: templates=5 deduped=0 effects=2 folded=0 delegated=0 static=8 classToggles=0
+
+### if-sole-child-of-element
+  "<span>only</span>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=3 classToggles=0
+
+### if-on-template
+  "<b>a</b><i>b</i>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=5 classToggles=0
+
+### if-at-root
+  "<span>x</span>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### if-between-statics
+  "<b>mid</b>"
+  "<div><header>top</header><!><footer>end</footer></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=7 classToggles=0
+
+### for-simple
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-with-index
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-key-index
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-destructured
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-destructured-nested
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-destructured-array
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-destructured-rest
+  "<li></li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-nested
+  "<em></em>"
+  "<li><span></span><!></li>"
+  "<ul></ul>"
+  stats: templates=3 deduped=0 effects=4 folded=0 delegated=0 static=4 classToggles=0
+
+### for-row-with-if
+  "<b></b>"
+  "<i></i>"
+  "<li><!></li>"
+  "<ul></ul>"
+  stats: templates=4 deduped=0 effects=4 folded=0 delegated=0 static=4 classToggles=0
+
+### for-row-multi-root
+  "<dt></dt><dd></dd>"
+  "<dl></dl>"
+  stats: templates=2 deduped=0 effects=3 folded=0 delegated=0 static=3 classToggles=0
+
+### for-row-component
+  "n = <!>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### for-two-lists-in-one-parent
+  "<li></li>"
+  "<div><ul class=\"a\"></ul><ul class=\"b\"></ul></div>"
+  stats: templates=2 deduped=1 effects=4 folded=0 delegated=0 static=5 classToggles=0
+
+### for-at-root
+  "<li></li>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### for-row-static
+  "<li>static</li>"
+  "<ul></ul>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=3 classToggles=0
+
+### for-inside-if
+  "<li></li>"
+  "<ul></ul>"
+  "<div></div>"
+  stats: templates=3 deduped=0 effects=3 folded=0 delegated=0 static=3 classToggles=0
+
+### for-table-rows
+  "<tr><td class=\"id\"></td><td><a></a></td></tr>"
+  "<table class=\"t\"><tbody></tbody></table>"
+  stats: templates=2 deduped=0 effects=5 folded=0 delegated=1 static=4 classToggles=1
+
+### component-plain
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### component-props
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=1 delegated=0 static=1 classToggles=0
+
+### component-static-attrs
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### component-spread
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### component-model
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### component-ref
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### component-pascal-case
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=1 delegated=0 static=1 classToggles=0
+
+### component-with-children
+  "<p>Body content</p>"
+  "<h1>Hello</h1>"
+  stats: templates=2 deduped=0 effects=0 folded=0 delegated=0 static=4 classToggles=0
+
+### slot-default-and-named
+  "Untitled"
+  "<div class=\"card\"><header></header><main></main></div>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=4 classToggles=0
+
+### slot-no-fallback
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### slot-with-props
+  "none"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=2 classToggles=0
+
+### slot-sole-child
+  "<li></li>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### portal-default-target
+  "<span>hello</span>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=3 classToggles=0
+
+### portal-selector-target
+  "<span>hi</span>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=3 classToggles=0
+
+### portal-between-siblings
+  "<span>x</span>"
+  "<div><b>a</b><b>c</b></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=7 classToggles=0
+
+### portal-two-in-a-row
+  "<i>1</i>"
+  "<i>2</i>"
+  "<div></div>"
+  stats: templates=3 deduped=0 effects=2 folded=0 delegated=0 static=5 classToggles=0
+
+### portal-with-if
+  "<span>modal</span>"
+  "<div><!></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=3 classToggles=0
+
+### portal-component
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### portal-only-child
+  "<span></span>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=2 folded=0 delegated=0 static=2 classToggles=0
+
+### portal-on-template
+  "<b>a</b><i>b</i>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=5 classToggles=0
+
+### template-grouping
+  "<b>a</b><i>b</i>"
+  "<div></div>"
+  stats: templates=2 deduped=0 effects=1 folded=0 delegated=0 static=5 classToggles=0
+
+### template-at-root
+  "<b>a</b><i>b</i>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=4 classToggles=0
+
+### whitespace-indented
+  "<div><span>a</span><span>b</span></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=5 classToggles=0
+
+### whitespace-inline-space
+  "<div><b>a</b> <i>b</i></div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=6 classToggles=0
+
+### whitespace-leading-trailing
+  "<div> padded </div>"
+  stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=2 classToggles=0
+
+### whitespace-around-interpolation
+  "<div></div>"
+  stats: templates=1 deduped=0 effects=1 folded=0 delegated=0 static=1 classToggles=0
+
+### siblings-many-dynamic
+  "<div><a></a><b></b><!><d></d></div>"
+  stats: templates=1 deduped=0 effects=4 folded=0 delegated=0 static=4 classToggles=0
+
+### dedupe-identical-branches
+  "<p><b>same</b></p>"
+  "<div><!></div>"
+  stats: templates=2 deduped=1 effects=1 folded=0 delegated=0 static=7 classToggles=0
+
+### mixed-static-and-holes
+  "<li></li>"
+  "<section><h1></h1><p>static</p><ul></ul><footer>end</footer></section>"
+  stats: templates=2 deduped=0 effects=4 folded=0 delegated=0 static=7 classToggles=1
+
+### kitchen-sink
+  "<p class=\"err\"></p>"
+  "<li><span></span><button>x</button></li>"
+  "<em>no footer</em>"
+  "<form class=\"f\"><label>Name</label><input><!><ul></ul><!></form>"
+  stats: templates=4 deduped=0 effects=15 folded=0 delegated=2 static=7 classToggles=2

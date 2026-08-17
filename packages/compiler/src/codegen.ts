@@ -17,6 +17,7 @@
 
 import {
   type AttributeNode,
+  type DirectiveKind,
   type DirectiveNode,
   type ElementNode,
   type RootNode,
@@ -35,6 +36,13 @@ import {
   SVG_TAGS,
   SYSTEM_MODIFIERS,
 } from './dom-info.js';
+import { validateContentModel } from './content-model.js';
+import {
+  clientMarkup,
+  MarkupBuilder,
+  rootArity,
+  type TemplateBlock,
+} from './markup.js';
 import { CompilerError } from './parser.js';
 import { parseExpression, parseForExpression } from './expression/parser.js';
 import {
@@ -85,6 +93,40 @@ export interface CodegenResult {
   renderExpression: string;
   /** Hoisted static markup strings, in emission order. */
   templates: string[];
+  /**
+   * Every block generated, as chunks and holes.
+   *
+   * `templates` is what the client clones — one string per *distinct* markup.
+   * This is the same markup unjoined, one entry per block, so two blocks that
+   * dedupe to one cloner appear twice under one `id` with the holes each of
+   * them actually has. A server writes bytes and values alternately and needs
+   * the seams; the client string is `clientMarkup` of these chunks, so the two
+   * agree by construction rather than by test.
+   *
+   * Ordered by when each block finished, so a nested block precedes the one
+   * containing it.
+   */
+  blocks: TemplateBlock[];
+  /**
+   * Distinct event names this template compiles to delegated listeners.
+   *
+   * `delegate` installs the document-level listener for a type the first time
+   * a handler of that type is attached, which on a server-rendered page is
+   * after hydration — so a click landing on markup that is on screen but not
+   * yet claimed has nothing listening. Knowing the set up front is what lets a
+   * boot record install them before that gap opens.
+   */
+  delegatedEventNames: string[];
+  /**
+   * Per `:for` in source order, the top-level nodes one row occupies — or null
+   * where only the runtime can know, because the row is a component or has
+   * something dynamic at its root.
+   *
+   * Server markup needs delimiters around a row whose width can change, and
+   * needs none around one that cannot. On a ten-thousand-row table that is the
+   * difference between two comments and twenty thousand.
+   */
+  rowRootCounts: (number | null)[];
   /** What the compiler removed or folded before runtime ever sees it. */
   stats: CompileStats;
   /**
@@ -133,7 +175,7 @@ interface PendingEffect {
 
 /** One contiguous static DOM subtree with holes punched for dynamic parts. */
 class Block {
-  html: string[] = [];
+  readonly markup = new MarkupBuilder();
   effects: PendingEffect[] = [];
   /** Per-depth child bookkeeping so paths account for merged text nodes. */
   private stack: { index: number; lastWasText: boolean }[] = [
@@ -176,6 +218,9 @@ class Block {
 }
 
 export function generate(root: RootNode, options: CodegenOptions = {}): CodegenResult {
+  // Before any path is computed, because every path below a node the HTML
+  // parser relocates is resolved against a tree that will not exist.
+  validateContentModel(root, options.filename);
   return new Generator(options).run(root);
 }
 
@@ -196,6 +241,9 @@ class Generator {
 
   private templates: string[] = [];
   private templateIds = new Map<string, string>();
+  private blocks: TemplateBlock[] = [];
+  private delegatedEventNames = new Set<string>();
+  private rowRootCounts: (number | null)[] = [];
   private hoisted: string[] = [];
   private uid = 0;
 
@@ -257,6 +305,9 @@ class Generator {
       hoisted: this.hoisted,
       renderExpression: expression,
       templates: this.templates,
+      blocks: this.blocks,
+      delegatedEventNames: [...this.delegatedEventNames].sort(),
+      rowRootCounts: this.rowRootCounts,
       stats: this.stats,
       messageKeys: [...this.messageKeys].sort(),
       deferrable: [...this.componentTags]
@@ -328,12 +379,27 @@ class Generator {
 
   /** Generate an expression producing the DOM for a list of sibling nodes. */
   private genChildrenExpression(nodes: TemplateChildNode[], ctx: PrintContext): string {
+    return this.genChildren(nodes, ctx).expression;
+  }
+
+  /**
+   * The same, plus how many top-level nodes the expression yields — which is
+   * knowable only when the nodes compile to a block with nothing dynamic at
+   * its root. `:for` is the caller that needs it; everything else takes the
+   * expression and ignores the count.
+   */
+  private genChildren(
+    nodes: TemplateChildNode[],
+    ctx: PrintContext,
+  ): { expression: string; rootCount: number | null } {
     // Taken here so the early single-child paths below, which recurse, cannot
     // pass it down to a nested block.
     const groupBindings = this.groupNextBlock;
     this.groupNextBlock = false;
+    /** Whatever this yields, its width is the runtime's business. */
+    const opaque = (expression: string) => ({ expression, rootCount: null });
     const meaningful = nodes.filter((n) => n.type !== 'comment');
-    if (meaningful.length === 0) return 'null';
+    if (meaningful.length === 0) return opaque('null');
 
     // A lone dynamic node needs no template at all — emit its accessor
     // directly. This is not just an optimisation: a block whose only root is a
@@ -341,36 +407,44 @@ class Generator {
     if (meaningful.length === 1) {
       const only = meaningful[0]!;
       if (only.type === 'interpolation') {
-        return this.genInterpolationAccessor(only.exp, ctx, only);
+        return opaque(this.genInterpolationAccessor(only.exp, ctx, only));
       }
       if (only.type === 'slot-outlet') {
-        return this.genSlotOutlet(only, ctx);
+        return opaque(this.genSlotOutlet(only, ctx));
       }
       if (only.type === 'element') {
         // Checked before the rest: a portalled element renders elsewhere, so
         // whatever it is — component, template or plain element — this
         // position yields nothing.
         if (findDirective(only, 'portal') && !findDirective(only, 'if')) {
-          return `(${this.genPortal(only, ctx).replace(/;$/, '')}, null)`;
+          return opaque(`(${this.genPortal(only, ctx).replace(/;$/, '')}, null)`);
         }
-        if (findDirective(only, 'if')) return this.genConditionalChain([only], ctx);
-        if (findDirective(only, 'for')) return this.genFor(only, ctx);
-        if (only.isComponent) return this.genComponent(only, ctx);
-        if (only.isTemplate) return this.genChildrenExpression(only.children, ctx);
+        if (findDirective(only, 'if')) return opaque(this.genConditionalChain([only], ctx));
+        if (findDirective(only, 'for')) return opaque(this.genFor(only, ctx));
+        if (only.isComponent) return opaque(this.genComponent(only, ctx));
+        if (only.isTemplate) return this.genChildren(only.children, ctx);
       }
     }
 
     const block = new Block();
     this.buildChildren(meaningful, block, ctx);
 
-    const html = block.html.join('');
+    const html = clientMarkup(block.markup);
     // Every dynamic child punches a `<!>` marker, so a block with children
     // always produces markup; empty input was handled above.
-    if (!html) return 'null';
+    if (!html) return opaque('null');
 
     const isSvg = block.isSvg;
     const rootCount = block.rootCount;
     const tmplId = this.hoistTemplate(html, isSvg, rootCount);
+    const template: TemplateBlock = {
+      id: tmplId,
+      chunks: block.markup.chunks,
+      holes: block.markup.holes,
+      rootCount,
+      isSvg,
+    };
+    this.blocks.push(template);
 
     const rootVar = this.nextId('el');
     const resolved = new Map<string, string>();
@@ -407,7 +481,10 @@ class Generator {
       statements.push(`return ${rootVar};`);
     }
 
-    return `(() => {\n${indent(statements.join('\n'), 2)}\n})()`;
+    return {
+      expression: `(() => {\n${indent(statements.join('\n'), 2)}\n})()`,
+      rootCount: rootArity(template),
+    };
   }
 
   /**
@@ -521,7 +598,7 @@ class Generator {
     const index = block.addChild(false);
     const path = block.pathTo(index);
     const parentPath = block.currentPath();
-    block.html.push('<!>');
+    block.markup.hole({ kind: 'child', path });
     this.stats.effects++;
     block.effects.push((resolve) => {
       const marker = resolve(path);
@@ -537,14 +614,14 @@ class Generator {
       case 'text': {
         if (!node.content) return;
         block.addChild(true);
-        block.html.push(escapeHtmlText(node.content));
+        block.markup.push(escapeHtmlText(node.content));
         this.stats.staticNodes++;
         return;
       }
 
       case 'comment': {
         block.addChild(false);
-        block.html.push(`<!--${node.content}-->`);
+        block.markup.push(`<!--${node.content}-->`);
         return;
       }
 
@@ -555,14 +632,14 @@ class Generator {
         if (isStaticExpression(parsed)) {
           const value = evaluateStatic(parsed);
           block.addChild(true);
-          block.html.push(escapeHtmlText(toDisplayString(value)));
+          block.markup.push(escapeHtmlText(toDisplayString(value)));
           this.stats.foldedBindings++;
           return;
         }
         const index = block.addChild(false);
         const path = block.pathTo(index);
         const parentPath = block.currentPath();
-        block.html.push('<!>');
+        block.markup.hole({ kind: 'child', path });
         this.stats.effects++;
         block.effects.push((resolve) => {
           const marker = resolve(path);
@@ -666,8 +743,14 @@ class Generator {
     for (const [name, value] of staticAttrs) {
       open += value === true ? ` ${name}` : ` ${name}="${escapeHtmlAttr(value)}"`;
     }
-    open += '>';
-    block.html.push(open);
+    block.markup.push(open);
+    // A server prints these between the folded attributes and the `>`; the
+    // client sets them on the clone, so the hole is zero-width. Listeners and
+    // `:ref` attach behaviour and print nothing, so they open no hole.
+    if (dynamic.some((d) => ATTRIBUTE_POSITION[d.kind])) {
+      block.markup.hole({ kind: 'attribute', path: selfPath, tag });
+    }
+    block.markup.push('>');
 
     if (dynamic.length) {
       for (const dir of dynamic) {
@@ -682,17 +765,19 @@ class Generator {
       const hasTextDirective = node.directives.some(
         (d) => d.kind === 'text' || d.kind === 'html',
       );
-      const handled =
-        !hasTextDirective &&
-        (this.tryTextOnlyChildren(node, block, selfPath, ctx) ||
-          this.trySingleDynamicChild(node, block, selfPath, ctx));
-
-      if (!handled && !hasTextDirective) {
+      if (hasTextDirective) {
+        // The binding owns everything between the tags, so the children the
+        // author wrote are never emitted at all.
+        block.markup.hole({ kind: 'content', path: selfPath, tag });
+      } else if (
+        !this.tryTextOnlyChildren(node, block, selfPath, ctx) &&
+        !this.trySingleDynamicChild(node, block, selfPath, ctx)
+      ) {
         block.enter(index);
         this.buildChildren(node.children, block, ctx);
         block.exit();
       }
-      block.html.push(`</${tag}>`);
+      block.markup.push(`</${tag}>`);
     }
   }
 
@@ -730,6 +815,7 @@ class Generator {
     if (!isDynamic) return false;
 
     const accessor = this.genChildrenExpression([only], ctx);
+    block.markup.hole({ kind: 'content', path: selfPath, tag: node.tag });
     this.stats.effects++;
     block.effects.push((resolve) => [
       `${this.rt}.insert(${resolve(selfPath)}, ${accessor});`,
@@ -784,13 +870,14 @@ class Generator {
       const literal = parts
         .map((p) => JSON.parse(p) as string)
         .join('');
-      block.html.push(escapeHtmlText(literal));
+      block.markup.push(escapeHtmlText(literal));
       return true;
     }
 
     // A lone dynamic part needs no concatenation.
     const expression = parts.length === 1 ? parts[0]! : parts.join(' + ');
 
+    block.markup.hole({ kind: 'content', path: selfPath, tag: node.tag });
     this.stats.effects++;
     block.effects.push((resolve) => [
       `${this.rt}.bindText(${resolve(selfPath)}, ${this.thunk(expression)});`,
@@ -822,6 +909,7 @@ class Generator {
         const canDelegate = options === null && DELEGATED_EVENTS.has(dir.name);
         if (canDelegate) {
           this.stats.delegatedEvents++;
+          this.delegatedEventNames.add(dir.name);
           push((el) => [
             `${this.rt}.delegate(${el}, ${JSON.stringify(dir.name)}, ${handler});`,
           ]);
@@ -1185,13 +1273,19 @@ class Generator {
     const stripped = stripDirectives(node, ['for', 'key']);
     const indexParam = parsed.index ?? this.nextId('idx');
 
+    // Reserved before the body is generated, so a nested `:for` is recorded
+    // after the one containing it rather than before.
+    const rowSlot = this.rowRootCounts.length;
+    this.rowRootCounts.push(null);
+
     const genBody = (): string => {
       this.groupNextBlock = this.groupRowBindings;
-      const body = stripped.isTemplate
-        ? this.genChildrenExpression(stripped.children, ctx)
-        : this.genChildrenExpression([stripped], ctx);
+      const row = stripped.isTemplate
+        ? this.genChildren(stripped.children, ctx)
+        : this.genChildren([stripped], ctx);
       this.groupNextBlock = false;
-      return body;
+      this.rowRootCounts[rowSlot] = row.rootCount;
+      return row.expression;
     };
 
     let rowFn: string;
@@ -1472,6 +1566,37 @@ class Generator {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Whether a directive prints into the element's open tag.
+ *
+ * Total over `DirectiveKind` so a directive added without deciding this is a
+ * type error, rather than an element whose server markup quietly loses an
+ * attribute the client sets. The structural kinds are resolved long before an
+ * open tag exists and could not reach here, but the answer for them is still
+ * no, so they are written down rather than left to a lookup miss.
+ */
+const ATTRIBUTE_POSITION: Record<DirectiveKind, boolean> = {
+  prop: true,
+  attr: true,
+  class: true,
+  style: true,
+  model: true,
+  spread: true,
+  // Attach behaviour to the node; the same bytes with or without them.
+  event: false,
+  ref: false,
+  // Own everything between the tags, which is a hole of its own.
+  text: false,
+  html: false,
+  if: false,
+  'else-if': false,
+  else: false,
+  for: false,
+  key: false,
+  slot: false,
+  portal: false,
+};
 
 function findDirective(node: ElementNode, kind: string): DirectiveNode | undefined {
   return node.directives.find((d) => d.kind === kind);

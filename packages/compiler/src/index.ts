@@ -13,18 +13,29 @@
 
 import { parse, CompilerError, type ParserOptions } from './parser.js';
 import { generate, type CodegenOptions, type CodegenResult, type CompileStats } from './codegen.js';
+import { buildHash, COMPILER_VERSION, type BuildOptions } from './build.js';
 import type { RootNode } from './ast.js';
 
 export interface CompileOptions extends ParserOptions, CodegenOptions {}
 
 export interface CompileResult extends CodegenResult {
   ast: RootNode;
+  /**
+   * `__VOLT_BUILD__` for this compile — the identity a server writes into the
+   * boot record and a client compares its own against.
+   *
+   * Computed here rather than left to the caller because the caller would have
+   * to rebuild the same options object to get the same answer, and the one
+   * mistake this guard cannot survive is being wrong about which build printed
+   * a page: it would then discard every correct tree, or keep a stale one.
+   */
+  buildHash: string;
 }
 
 export function compile(source: string, options: CompileOptions = {}): CompileResult {
   const ast = parse(source, options);
   const result = generate(ast, options);
-  return { ...result, ast };
+  return { ...result, ast, buildHash: buildHash(options) };
 }
 
 export { parse, generate, CompilerError };
@@ -36,6 +47,18 @@ export type {
   CompileStats,
   RootNode,
 };
+
+export { CHILD_MARKER, clientMarkup, rootArity } from './markup.js';
+export type {
+  AttributeHole,
+  ChildHole,
+  ContentHole,
+  TemplateBlock,
+  TemplateHole,
+} from './markup.js';
+
+export { buildHash, COMPILER_VERSION };
+export type { BuildOptions };
 
 export type {
   AttributeNode,
