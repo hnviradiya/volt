@@ -11,9 +11,12 @@
 # and it needs the `repository` field in package.json to match this repository —
 # both are set.
 #
-# The first publish of a package needs NPM_TOKEN, because a trusted publisher
-# can only be configured on npmjs.com once the package exists. After that, set
-# each package's publisher to this workflow and the secret can be deleted.
+# Authentication is whichever of two is available. The first publish of a
+# package needed NPM_TOKEN, because a trusted publisher can only be configured
+# on npmjs.com once the package exists. Once each package names this workflow
+# as its publisher, deleting the secret is the entire switch — the step below
+# writes an auth line only when a token is present, and otherwise lets npm
+# exchange this run's OIDC identity for a short-lived credential.
 name: Release
 
 on:
@@ -47,7 +50,6 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          registry-url: https://registry.npmjs.org
 
       - run: pnpm install --frozen-lockfile
 
@@ -70,6 +72,17 @@ jobs:
           DIST_TAG: ${{ inputs.dist_tag || 'alpha' }}
         run: |
           set -euo pipefail
+
+          # Authenticate only if a token was given. With a trusted publisher
+          # configured on npmjs.com, npm exchanges the workflow's OIDC identity
+          # for a short-lived credential and needs nothing here — so deleting
+          # the NPM_TOKEN secret is the whole switch, with no edit to this file.
+          if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
+            echo "== authenticating with NPM_TOKEN"
+          else
+            echo "== no token; publishing as a trusted publisher over OIDC"
+          fi
 
           # Dependency order. reactivity and compiler stand alone, core needs
           # both, and vite-plugin needs compiler — a package must exist on the
