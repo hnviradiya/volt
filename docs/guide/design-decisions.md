@@ -321,3 +321,42 @@ fetch from a deferred effect, so "no effects on the server" and "the server
 awaits data" cannot both be true, and a third lane is the fix. Pretending the
 category is gone would have hidden that until it was expensive.
 
+## Failure is routed, not swallowed — but not typed into every signature
+
+Effect models a computation as `Effect<Success, Error, Requirements>`, so a
+failure is a value the compiler tracks rather than something thrown past
+everyone. It is the best argument in TypeScript for the position Volt already
+takes elsewhere: the compiler should refuse the wrong thing rather than
+document it. `:for` without `:key` is a build error; a misspelled directive is
+a build error; an interactive listener on an element that cannot take one is a
+build error.
+
+Volt takes the principle and stops short of the mechanism.
+
+**Taken.** An error inside an effect is currently caught and handed to
+`console.error`, which means a throwing binding leaves the interface half
+updated with a message nobody reads in production. That is swallowing, and it
+is the thing Effect is right about. Errors get a channel: they travel to the
+nearest boundary, the boundary decides, and an application can observe every
+one with the scope that produced it attached.
+
+**Declined: the third type parameter.** Requirements-as-a-type is dependency
+injection with a compiler behind it, and Volt has already declined dependency
+injection — a module-scope signal is simpler, statically analysable, and needs
+no container. Adding an `R` channel would reintroduce it wearing a type.
+
+**Declined: the error channel in every signature.** Threading `Effect<A, E>`
+through a UI framework is all-or-nothing in practice: once a data layer returns
+one, every caller does. Volt is a rendering framework that an application uses
+alongside whatever it likes, and a framework that dictates the shape of every
+function in a codebase is not that.
+
+**Declined: fibers.** Volt's scheduler is a two-phase synchronous flush with a
+measure lane. Its whole value is that a flush is a bounded, inspectable thing
+that finishes. Interruptible green threads are a different bargain, and a good
+one, for a different kind of program.
+
+The useful summary: Effect is a plausible thing to use *with* Volt, not against
+it. Being a good citizen beside it — not fighting its cancellation, not
+demanding a competing container — is worth more than matching its features.
+

@@ -56,7 +56,8 @@ leaning it found nothing: removing a per-write allocation made writes slower
       duration, and a library that never animates pays nothing.
 - [ ] **SSR** — not needed for v1, but it constrains API shape, so decide
       before the primitives harden.
-- [ ] **Error boundaries** — no equivalent feature today.
+- [ ] **Error boundaries** — no equivalent feature today, and specified below
+      rather than left as a name.
 
 ## Track 2 — the component library
 
@@ -575,6 +576,48 @@ see that its arguments are all tracked reads and hoist it into a computed
 automatically, so the result is cached without anyone writing `computed`. That
 is a real compile-time optimisation and fits the same analysis the rest of the
 compiler already does.
+
+## Errors have somewhere to go
+
+Today an error thrown inside an effect is caught and passed to `console.error`
+(`reportError` in packages/reactivity/src/effect.ts). Nothing else happens: no
+boundary sees it, no application can observe it, and the interface is left
+half-updated with the bindings after the throw never run. In production, where
+`__VOLT_DEV__` has stripped every developer message, it is invisible.
+
+Fine-grained reactivity makes this harder than it is for a virtual DOM, not
+easier. There is no re-render to fall back on, so a mid-flush failure leaves
+specific nodes stale with nothing to repair them. That is the reason this
+cannot be a `try`/`catch` bolted on later.
+
+- [ ] An error channel replacing `reportError`: a thrown error travels to the
+      nearest boundary in the scope chain rather than to the console. Scopes
+      already form the tree this needs — a boundary is a scope that declares
+      itself one.
+- [ ] `onError` per boundary, receiving the error and the scope that produced
+      it, and deciding: swallow, replace the subtree with a fallback, or
+      rethrow to the boundary above.
+- [ ] Recovery semantics, stated rather than discovered. When a boundary
+      replaces a subtree, everything below it is disposed first — cleanups
+      run, listeners detach — and the fallback mounts into a fresh scope.
+      Retrying re-runs the subtree from its inputs, which is only correct
+      because a component is constructed once and holds no render state.
+- [ ] A global hook, so an application can wire every component error to its
+      own reporting with the component, its props and its scope attached.
+      This is the same information the devtools "why did this update" panel
+      needs, so it is designed once and read twice — a production error report
+      that names the write which woke the failing effect is worth more than a
+      stack trace into framework code.
+- [ ] Errors during server rendering, and after a streamed shell has flushed
+      and the headers are gone. A boundary that can still emit a fallback into
+      the stream is the only recovery available at that point.
+- [ ] Production diagnostics that survive the `__VOLT_DEV__` strip: enough
+      structure in the error to be actionable, without shipping the messages.
+
+What is deliberately not taken from the languages that do this best is in
+[Design decisions](docs/guide/design-decisions.md) — an error channel in every
+function signature is a different bargain, and one that decides the shape of
+every function in an application rather than of this framework.
 
 ## Accessibility the compiler can prove
 
