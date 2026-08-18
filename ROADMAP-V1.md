@@ -588,20 +588,22 @@ use the page with a keyboard.
 
 What it can decide from the template alone, with no type information:
 
-- [ ] An interactive listener (`:click`, `:keydown`) on a non-interactive
+- [x] An interactive listener (`:click`, `:keydown`) on a non-interactive
       element with no `role` and no `tabindex`. The remedy is named: use a
       `<button>`, or say what the role is.
-- [ ] `<img>` with no `alt`. An empty `alt=""` is correct for decoration and
+- [x] `<img>` with no `alt`. An empty `alt=""` is correct for decoration and
       must stay allowed — the error is silence, not emptiness.
-- [ ] `<label>` whose `for` names nothing in the same template, and a form
-      control with no accessible name by any of the four routes.
-- [ ] `aria-*` attributes that are misspelled, take an enumerated value that
+- [x] `<label>` whose `for` names nothing in the same template.
+- [ ] A form control with no accessible name by any of the four routes. Held
+      back because one of the four routes is a name a parent component passes
+      in, which no single template can see.
+- [x] `aria-*` attributes that are misspelled, take an enumerated value that
       is not in the enum, or reference an id no template defines.
-- [ ] `role` on an element whose implicit role it silently overrides —
+- [x] `role` on an element whose implicit role it silently overrides —
       `role="button"` on `<a href>` loses the link.
-- [ ] Positive `tabindex`, which reorders the whole page and is essentially
+- [x] Positive `tabindex`, which reorders the whole page and is essentially
       never intended.
-- [ ] Nesting that the ARIA content model forbids — an interactive control
+- [x] Nesting that the ARIA content model forbids — an interactive control
       inside a `role="option"`, a heading inside a `<button>`.
 
 Deliberately not attempted: anything needing to know what a value means at

@@ -21,7 +21,7 @@
   stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=1 classToggles=0
 
 ### void-tags
-  "<div><br><hr><img src=\"x.png\"><input></div>"
+  "<div><br><hr><img src=\"x.png\" alt=\"\"><input></div>"
   stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=5 classToggles=0
 
 ### entities
@@ -578,7 +578,7 @@
   stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=1 classToggles=0
 
 ### void-tags
-  "<div><br><hr><img src=\"x.png\"><input></div>"
+  "<div><br><hr><img src=\"x.png\" alt=\"\"><input></div>"
   stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=5 classToggles=0
 
 ### entities
@@ -1135,7 +1135,7 @@
   stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=1 classToggles=0
 
 ### void-tags
-  "<div><br><hr><img src=\"x.png\"><input></div>"
+  "<div><br><hr><img src=\"x.png\" alt=\"\"><input></div>"
   stats: templates=1 deduped=0 effects=0 folded=0 delegated=0 static=5 classToggles=0
 
 ### entities

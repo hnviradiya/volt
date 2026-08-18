@@ -572,50 +572,91 @@ export function createSlider(options: SliderOptions): Slider {
     validate: validateValues ? () => validateValues(current()) : undefined,
   });
 
-  /**
-   * A mirror holding something the slider never put there.
-   *
-   * The mirrors are the controls the form is actually read from, and a session
-   * restore, an autofill or a script can write one without a thumb moving —
-   * what it writes is what gets submitted. Kept in a signal and read on the
-   * events that can change the answer, because the DOM announces nothing that
-   * `data-dirty` could follow.
-   */
-  const drifted = new Signal.State(false);
-
-  const readDrift = (): boolean => {
+  /** Every mirror the consumer rendered, paired with the thumb it stands for. */
+  function mirrorInputs(): readonly (readonly [HTMLInputElement, number])[] {
     const root = options.root();
-    if (!root) return false;
+    if (!root) return [];
 
-    const list = current();
-    const mirrors = root.querySelectorAll<HTMLInputElement>(`[${SLIDER_INPUT_ATTRIBUTE}]`);
-    for (const mirror of mirrors) {
+    const out: (readonly [HTMLInputElement, number])[] = [];
+    for (const mirror of root.querySelectorAll<HTMLInputElement>(`[${SLIDER_INPUT_ATTRIBUTE}]`)) {
       const index = Number(mirror.getAttribute(SLIDER_INPUT_ATTRIBUTE));
-      if (mirror.value !== String(list[index] ?? min)) return true;
+      if (Number.isInteger(index) && index >= 0) out.push([mirror, index]);
     }
-    return false;
+    return out;
+  }
+
+  /** What each mirror holds, by thumb index. */
+  const readMirrors = (): readonly string[] => {
+    const out: string[] = [];
+    for (const [mirror, index] of mirrorInputs()) out[index] = mirror.value;
+    return out;
   };
+
+  /**
+   * The mirrors as they stood the last time they agreed with the value.
+   *
+   * Two places hold this slider's value — the signal it reads and the mirrors
+   * the form is read from — and between a gesture and the render that follows
+   * it they disagree. This is the state they last agreed on, which is what
+   * says which of the two has moved since.
+   */
+  let agreed: readonly string[] = [];
+
+  /**
+   * What a submit would send right now, thumb by thumb.
+   *
+   * A mirror still holding the agreed state is a render behind, so the signal
+   * is the newer of the two; a mirror holding anything else has been written
+   * by something outside this component — a session restore, a page back from
+   * the bfcache, an autofill — and what it holds is what the form will send.
+   *
+   * Read from the DOM on every call rather than sampled when an event says to:
+   * assigning to `value` announces nothing, so the restores that fire no event
+   * at all are exactly the ones a sampled answer never sees.
+   */
+  function submitted(): readonly number[] {
+    const list = [...current()];
+    for (const [mirror, index] of mirrorInputs()) {
+      if (index >= list.length || mirror.value === agreed[index]) continue;
+      const value = Number(mirror.value);
+      // A mirror holding something unparseable is not a number this can be
+      // dirty about; a range input is sanitised by the platform and never is.
+      if (Number.isFinite(value)) list[index] = value;
+    }
+    return list;
+  }
+
+  /**
+   * Bumped when something may have written a mirror without the slider.
+   *
+   * It decides nothing — the answer comes from the DOM either way — but a
+   * rendered `data-dirty` has to depend on something, and a property
+   * assignment invalidates nothing on its own. `change` as well as `input`
+   * because a restored session fires only that one in some engines, and
+   * `pageshow` because a page coming back from the bfcache fires neither.
+   */
+  const revision = new Signal.State(0);
+  const invalidate = (): void => revision.set(revision.get() + 1);
 
   // Delegated from the root, because the mirrors are the consumer's `:for` to
   // render and unrender and there is no moment at which the whole set can be
-  // subscribed to one by one. `change` as well as `input`: a restored session
-  // fires only that one in some engines.
+  // subscribed to one by one.
   effect(() => {
     const root = options.root();
     if (!root) return;
 
     const onWrite = (event: Event) => {
       const target = event.target;
-      if (target instanceof Element && target.hasAttribute(SLIDER_INPUT_ATTRIBUTE)) {
-        drifted.set(readDrift());
-      }
+      if (target instanceof Element && target.hasAttribute(SLIDER_INPUT_ATTRIBUTE)) invalidate();
     };
 
     root.addEventListener('input', onWrite);
     root.addEventListener('change', onWrite);
+    window.addEventListener('pageshow', invalidate);
     onCleanup(() => {
       root.removeEventListener('input', onWrite);
       root.removeEventListener('change', onWrite);
+      window.removeEventListener('pageshow', invalidate);
     });
   });
 
@@ -629,21 +670,31 @@ export function createSlider(options: SliderOptions): Slider {
    * the array, so the array is what the comparison is over, and the field is
    * handed that answer in place of its own everywhere it publishes one.
    *
-   * Derived from the value rather than stored beside it: a stored answer would
-   * settle a microtask after the gesture, and until it did, an `onValueChange`
-   * handler or a key handler that had already read `values()` would be told the
-   * slider is back at its default and the form is not.
+   * Two states, compared: what a submit would send, and what a reset would put
+   * back. Nothing here asks which of them wrote it — a value the component
+   * never wrote is still a value the form will submit, and inferring dirtiness
+   * from authorship is what left a restored session reporting itself saved.
    */
   const pristine = initial.join(',');
-  const isDirty = (): boolean => current().join(',') !== pristine || drifted.get();
+  const isDirty = (): boolean => {
+    // Read for the dependency alone: the comparison below is over the DOM,
+    // which nothing else here is subscribed to.
+    revision.get();
+    return submitted().join(',') !== pristine;
+  };
 
   const field: FormField = {
     ...composed,
     isDirty,
-    // The drift is a record this field keeps and nothing else can reach, and
-    // `reset` is what clears the records a field keeps.
+    // Clearing a record is not enough when the record is a value the form will
+    // still send: the mirrors are put back in step with the value, so that a
+    // field reporting itself clean is telling the truth about the submit.
     reset: () => {
-      drifted.set(false);
+      const list = initial;
+      for (const [mirror, index] of mirrorInputs()) {
+        const value = String(list[index] ?? min);
+        if (mirror.value !== value) mirror.value = value;
+      }
       composed.reset();
     },
     fieldProps: () => ({ ...composed.fieldProps(), 'data-dirty': isDirty() || undefined }),
@@ -659,8 +710,8 @@ export function createSlider(options: SliderOptions): Slider {
 
     const onReset = () => {
       // Every mirror is about to be put back to the `value` attribute this
-      // slider wrote, so whatever was written over them goes with it.
-      drifted.set(false);
+      // slider wrote, so whatever was written over them goes with it. The
+      // value is the half the platform knows nothing about.
       queueMicrotask(() => setValues(initial));
     };
     form.addEventListener('reset', onReset);
@@ -682,9 +733,9 @@ export function createSlider(options: SliderOptions): Slider {
   effect(() => {
     const values = current().join(',');
     untrack(() => {
-      // The mirrors have just been filled from this value, so anything written
-      // over them before it is gone.
-      drifted.set(readDrift());
+      // The mirrors have just been filled from this value, so this is the
+      // state the two of them agree on until one of them moves again.
+      agreed = readMirrors();
       // The first pass is the mount, which is not an edit: nothing has been
       // typed, and a validator that runs on input has nothing to run about.
       if (edited !== null && edited !== values) composed.markEdited();

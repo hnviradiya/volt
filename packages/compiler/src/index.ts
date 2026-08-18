@@ -48,6 +48,9 @@ export type {
   RootNode,
 };
 
+export { formatDiagnostic } from './a11y.js';
+export type { Diagnostic } from './a11y.js';
+
 export { CHILD_MARKER, clientMarkup, rootArity } from './markup.js';
 export type {
   AttributeHole,
@@ -74,6 +77,8 @@ export type {
 } from './ast.js';
 
 export {
+  ARIA_ATTRIBUTES,
+  ARIA_ROLES,
   KNOWN_EVENTS,
   HTML_TAGS,
   SVG_TAGS,
@@ -81,6 +86,7 @@ export {
   MUST_USE_ATTRIBUTE,
   isComponentTag,
 } from './dom-info.js';
+export type { AriaAttribute, AriaValueKind } from './dom-info.js';
 
 export { parseExpression, parseForExpression } from './expression/parser.js';
 export {

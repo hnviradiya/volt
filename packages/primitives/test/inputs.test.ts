@@ -1775,9 +1775,38 @@ describe('tags input', () => {
     expect(document.activeElement).not.toBe(document.body);
   });
 
+  it('hands focus to the tag now at the end when the one that goes was there', () => {
+    tagsOptions = { defaultValue: ['ada', 'grace', 'edsger'] };
+    const { chip, chips } = tagsInput();
+
+    chip(2).focus();
+    press(chip(2), 'Backspace');
+
+    // Nothing took its place — the row is shorter than the index that held
+    // focus — so the tag now at the end is the one nearest where the eye was.
+    // Falling through to the text box would step past the whole row.
+    expect(document.activeElement).toBe(chip(1));
+    expect(chips().map((el) => el.getAttribute('tabindex'))).toEqual(['-1', '0']);
+  });
+
+  it('rescues focus again when the tag it rescued to goes too', () => {
+    tagsOptions = { defaultValue: ['ada', 'grace', 'edsger'] };
+    const { chip } = tagsInput();
+
+    chip(1).focus();
+    press(chip(1), 'Backspace');
+    expect(document.activeElement).toBe(chip(1));
+
+    // The second removal in a row is what says whether the first left a record
+    // of where it put focus. A rescue that forgets its own answer has nothing
+    // to rescue from next time, and `<body>` is where that lands.
+    press(chip(1), 'Backspace');
+    expect(document.activeElement).toBe(chip(0));
+  });
+
   it('leaves focus somewhere useful when the remove control itself goes', () => {
     tagsOptions = { defaultValue: ['ada', 'grace'] };
-    const { instance, remove, input } = tagsInput();
+    const { instance, chip, remove } = tagsInput();
 
     // The pointer and screen-reader path: the control that was pressed is
     // inside the tag it removes, so it goes with it.
@@ -1785,10 +1814,11 @@ describe('tags input', () => {
     click(remove(0));
 
     expect(instance.tags.tags()).toEqual(['grace']);
-    // `<body>` is the top of the document, which is where the next Tab would
-    // start from — the field said it owns focus, so it has to.
-    expect(document.activeElement).not.toBe(document.body);
-    expect([...host.querySelectorAll('.tag'), input()]).toContain(document.activeElement);
+    // The tag that took its place, named rather than picked out of a list of
+    // acceptable answers: `<body>` and the text box are both wrong here, and
+    // only one of the two is obviously wrong.
+    expect(document.activeElement).toBe(chip(0));
+    expect(document.activeElement?.textContent).toContain('grace');
   });
 
   it('leaves focus where it is when the tag that goes was not holding it', () => {
@@ -1902,18 +1932,100 @@ describe('tags input', () => {
   });
 
   it('hands the tab stop back to the first tag after a clear', () => {
-    tagsOptions = { defaultValue: ['ada', 'grace'] };
-    const { instance, input, chip } = tagsInput();
+    tagsOptions = { defaultValue: ['ada', 'grace', 'edsger'] };
+    const { instance, input, chips } = tagsInput();
 
-    // The stop is on the last tag when the row is emptied, and an index that
-    // no longer exists is a row Tab cannot reach at all.
+    // The stop is on the last tag when the row is emptied. More than one tag
+    // has to come back for the answer to be visible: with one, every index the
+    // row could have remembered clamps to it, and the tags that come back are
+    // new ones the user has never been in.
     press(input(), 'ArrowLeft');
     instance.tags.clear();
     flushSync();
-    instance.tags.add('zoe');
+    for (const tag of ['x', 'y', 'z']) instance.tags.add(tag);
     flushSync();
 
-    expect(chip(0).getAttribute('tabindex')).toBe('0');
+    expect(chips().map((el) => el.getAttribute('tabindex'))).toEqual(['0', '-1', '-1']);
+  });
+
+  it('keeps the row reachable by Tab when the tag holding the stop is removed', () => {
+    tagsOptions = { defaultValue: ['ada', 'grace', 'edsger'] };
+    const { instance, input, chips } = tagsInput();
+
+    press(input(), 'ArrowLeft');
+    // Left the row again before the removal, so there is no focus to rescue —
+    // but the stop went with the tag, and the removal is not the one call site
+    // that thought to hand it on.
+    input().focus();
+    instance.tags.removeAt(2);
+    flushSync();
+
+    expect(chips().map((el) => el.getAttribute('tabindex'))).toEqual(['-1', '0']);
+  });
+
+  it('moves the stop to the tag the rescue put focus on', () => {
+    tagsOptions = { defaultValue: ['ada', 'grace', 'edsger'] };
+    const { chip, chips } = tagsInput();
+
+    chip(1).focus();
+    press(chip(1), 'Backspace');
+
+    // The other removal tests leave the row first, so none of them sees where
+    // the stop goes when focus is re-placed. A stop left on the tag that was
+    // holding it answers Tab with one tag and focus with another, which is the
+    // split this model exists to close.
+    expect(document.activeElement).toBe(chip(1));
+    expect(chips().map((el) => el.getAttribute('tabindex'))).toEqual(['-1', '0']);
+  });
+
+  it('keeps the stop inside a row a consumer write shortened', () => {
+    const value = new Signal.State<readonly string[]>(['ada', 'grace', 'edsger']);
+    tagsOptions = { value };
+    const { input, chips } = tagsInput();
+
+    press(input(), 'ArrowLeft');
+    input().focus();
+    // The site no guard can be put on: the row shrinks under the stop without
+    // the field being asked, so the stop has to be read back from the row.
+    value.set(['ada']);
+    flushSync();
+
+    expect(chips().map((el) => el.getAttribute('tabindex'))).toEqual(['0']);
+  });
+
+  it('hands focus to the row when the text box will not take it', () => {
+    const value = new Signal.State<readonly string[]>(['ada']);
+    tagsOptions = { value, disabled: () => true };
+    const { chip, list } = tagsInput();
+
+    chip(0).focus();
+    // A disabled field's box refuses focus, so the fallback falls through —
+    // and falling through to `<body>` puts the next Tab at the top of the
+    // document. The row itself is the last place inside the field.
+    value.set([]);
+    flushSync();
+
+    expect(document.activeElement).toBe(list());
+    // This environment focuses whatever it is asked to; a browser focuses only
+    // what can take it, so the attribute is the half that has to be asserted.
+    expect(list().getAttribute('tabindex')).toBe('-1');
+  });
+
+  it('holds focus given to the row itself without taking it off the tags', () => {
+    tagsOptions = { defaultValue: ['ada', 'grace'] };
+    const { instance, chips, list } = tagsInput();
+
+    // Focusable to be handed focus also means focusable by a click in the
+    // row's own padding, which is focus in the field but on no tag.
+    list().focus();
+    instance.tags.removeAt(0);
+    flushSync();
+
+    // Nothing to rescue, so nothing is pulled off the row; and the row is out
+    // of the tab order, so the tags keep the one stop between them.
+    expect(document.activeElement).toBe(list());
+    expect(list().getAttribute('tabindex')).toBe('-1');
+    expect(chips().map((el) => el.getAttribute('tabindex'))).toEqual(['0']);
   });
 
   it('leaves focus somewhere useful when a tag goes from the signal it was handed', () => {

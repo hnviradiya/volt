@@ -1621,8 +1621,14 @@ export type TagRejection = 'duplicate' | 'invalid' | 'full';
 export interface TagsInputOptions {
   /** The text input tags are typed into. */
   input: () => Element | null | undefined;
-  /** The element holding the tags, for moving focus between them. */
-  list?: () => Element | null | undefined;
+  /**
+   * The element holding the tags.
+   *
+   * Not optional: focus after a removal is placed from the row — which tag
+   * took the destroyed one's place, and whether one is left at all — and a
+   * field that cannot see its row has nowhere to put it back.
+   */
+  list: () => Element | null | undefined;
   label?: () => Element | null | undefined;
   description?: () => Element | null | undefined;
   errorMessage?: () => Element | null | undefined;
@@ -1801,9 +1807,18 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
     status.set(options.labels?.removed?.(tag) ?? `${tag} removed`);
   };
 
-  const tagCollection = createCollection(options.list ?? (() => null));
-  /** Which tag holds the list's single tab stop. */
+  const tagCollection = createCollection(options.list);
+  /** Which tag focus last reached, and so where the row's single stop belongs. */
   const activeTag = new Signal.State(0);
+
+  /**
+   * Which tag holds the row's single tab stop.
+   *
+   * Read back against the row rather than written at each removal: a row that
+   * shrinks under the stop would keep it on an index no tag has any more,
+   * leaving every tag at `tabindex="-1"` and the whole row unreachable by Tab.
+   */
+  const tabStop = (): number => Math.min(activeTag.get(), state.get().length - 1);
 
   const roving = createRovingFocus(
     tagCollection,
@@ -1815,9 +1830,36 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
     { orientation: 'horizontal', loop: false, typeahead: false },
   );
 
-  const focusInput = (): void => {
+  /** Returns whether the box took it, which a disabled field's will not. */
+  const focusInput = (): boolean => {
     const el = options.input();
-    if (isValueControl(el)) el.focus();
+    if (!isValueControl(el)) return false;
+    el.focus();
+    return el.ownerDocument.activeElement === el;
+  };
+
+  /**
+   * Where focus goes when the tag holding it has been destroyed.
+   *
+   * The tag that took its place, the row having closed up leftwards, so it is
+   * the one the eye is on already; the last tag when the row is now shorter
+   * than that; the text box when no tag is left; and the row itself when even
+   * the box refuses it, as a disabled field's does. `<body>` is the one answer
+   * never given: it is the top of the document, and the next Tab would start
+   * again from there.
+   */
+  const handOffFrom = (index: number): void => {
+    const tags = tagCollection.all();
+    const at = Math.min(index, tags.length - 1);
+    const next = tags[at];
+    if (next) {
+      activeTag.set(at);
+      next.focus();
+      return;
+    }
+    if (focusInput()) return;
+    const row = options.list();
+    if (row instanceof HTMLElement) row.focus();
   };
 
   /**
@@ -1834,7 +1876,7 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
   let focusedIndex = -1;
 
   effect(() => {
-    const list = options.list?.();
+    const list = options.list();
     if (!list) return;
 
     const onFocusIn = (event: Event): void => {
@@ -1849,10 +1891,10 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
     };
 
     // Released as soon as the user leaves the row, or a removal long afterwards
-    // would pull focus back into a field nobody is in. A tag that lost focus by
-    // being taken off the page is the one case that keeps its record — that is
-    // focus being dropped rather than leaving, and it is the loss this exists
-    // to undo. Engines differ on whether they announce it at all.
+    // would pull focus back into a field nobody is in. An element already off
+    // the page is not the user leaving, so its record stands — a guard against
+    // engines that announce a removed element's focus loss, which the one the
+    // tests run in does not, rather than a case any test drives.
     const onFocusOut = (event: Event): void => {
       const target = event.target;
       if (target instanceof Element && !target.isConnected) return;
@@ -1871,17 +1913,23 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
   });
 
   /**
-   * Put focus back on the row when the tag holding it has gone.
+   * Apply the rule to every removal there is.
    *
-   * The row is rendered from the value, so every removal arrives here as a
-   * change to it whatever caused one. An effect runs after the render effects
-   * that rebuild the row and before anything paints, so the tag that took the
-   * removed one's place is already on the page to receive focus, and a tag that
-   * only moved along the row is still on it and keeps the focus it had.
+   * The row is rendered from the value, so `removeAt`, `clear` and a write to a
+   * value signal the consumer owns all arrive here alike. An effect runs after
+   * the render effects that rebuild the row and before anything paints, so the
+   * tag that took the removed one's place is already on the page to receive
+   * focus, and a tag that only moved along the row is still on it and keeps the
+   * focus it had.
    */
   effect(() => {
-    state.get();
+    const empty = state.get().length === 0;
     untrack(() => {
+      // An emptied row spends what it remembered: the tags that come back are
+      // new ones, and a stop left where the row was last entered would put Tab
+      // into the middle of tags nobody has been in.
+      if (empty) activeTag.set(0);
+
       const held = focusedTag;
       if (!held) return;
 
@@ -1894,20 +1942,12 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
         return;
       }
 
-      const tags = tagCollection.all();
-      // The row closes up leftwards, so the tag that took its place is where
-      // the eye already is; the text input when this was the last one.
-      const at = Math.min(focusedIndex, tags.length - 1);
-      const next = tags[at] ?? null;
+      const at = focusedIndex;
+      // Let go of first, so that the focus the hand-off places is recorded as
+      // the one the row now holds rather than overwritten by what it replaced.
       focusedTag = null;
       focusedIndex = -1;
-
-      if (!next) {
-        focusInput();
-        return;
-      }
-      activeTag.set(at);
-      next.focus();
+      handOffFrom(at);
     });
   });
 
@@ -1960,9 +2000,6 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
     clear: () => {
       write([]);
       duplicate.set(null);
-      // The tab stop belongs to the first tag again, or the row would come
-      // back with its only stop on an index that no longer exists.
-      activeTag.set(0);
     },
     isFull,
     duplicateIndex: () => duplicate.get(),
@@ -2084,6 +2121,9 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
     listProps: () => ({
       role: 'list',
       'aria-label': label(options.labels?.list, 'tags', 'Tags'),
+      // Focusable only to be handed focus: out of the tab order, and the last
+      // place the rule has to put it when the text box will not take it.
+      tabindex: '-1',
     }),
 
     tagProps: (index: number) => {
@@ -2093,7 +2133,7 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
         [ITEM_ATTRIBUTE]: true,
         'data-label': tag,
         'data-duplicate': duplicate.get() === index || undefined,
-        tabindex: index === activeTag.get() ? '0' : '-1',
+        tabindex: index === tabStop() ? '0' : '-1',
       });
     },
 

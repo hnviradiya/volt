@@ -37,6 +37,7 @@ import {
   SYSTEM_MODIFIERS,
 } from './dom-info.js';
 import { validateContentModel } from './content-model.js';
+import { checkAccessibility, type Diagnostic } from './a11y.js';
 import {
   clientMarkup,
   MarkupBuilder,
@@ -151,6 +152,14 @@ export interface CodegenResult {
    * and puts each message in the chunk that uses it.
    */
   messageKeys: string[];
+  /**
+   * Accessibility findings that are usually rather than certainly wrong.
+   *
+   * The certain ones throw, like every other thing the compiler refuses, so
+   * anything reaching here is a judgement a caller is allowed to disagree
+   * with — and each one names what to write instead.
+   */
+  warnings: Diagnostic[];
 }
 
 export interface CompileStats {
@@ -221,7 +230,8 @@ export function generate(root: RootNode, options: CodegenOptions = {}): CodegenR
   // Before any path is computed, because every path below a node the HTML
   // parser relocates is resolved against a tree that will not exist.
   validateContentModel(root, options.filename);
-  return new Generator(options).run(root);
+  const warnings = checkAccessibility(root, options.filename);
+  return { ...new Generator(options).run(root), warnings };
 }
 
 class Generator {
@@ -274,7 +284,8 @@ class Generator {
     this.groupRowBindings = options.groupRowBindings ?? false;
   }
 
-  run(root: RootNode): CodegenResult {
+  /** Everything but the accessibility warnings, which `generate` adds. */
+  run(root: RootNode): Omit<CodegenResult, 'warnings'> {
     const ctx = createPrintContext(this.ctxName);
     const expression = this.genChildrenExpression(root.children, ctx);
 

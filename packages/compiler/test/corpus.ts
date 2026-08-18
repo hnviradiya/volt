@@ -28,7 +28,9 @@ export const CORPUS: CorpusEntry[] = [
   { name: 'static-deep', template: `<div class="card"><h2>Title</h2><p>Body</p></div>` },
   { name: 'attribute-quoting', template: `<div id=plain class="double" data-x='single'></div>` },
   { name: 'boolean-attribute', template: `<input type="checkbox" checked disabled>` },
-  { name: 'void-tags', template: `<div><br><hr /><img src="x.png"><input></div>` },
+  // The `alt=""` is not decoration in the test: an `<img>` with no `alt` at all
+  // is a compile error, so every corpus entry that carries one has to answer.
+  { name: 'void-tags', template: `<div><br><hr /><img src="x.png" alt=""><input></div>` },
   { name: 'entities', template: `<p>a &amp; b &lt; c &gt; d &nbsp;e</p>` },
   { name: 'bare-ampersand', template: `<p>Smith & Co, 5 < 6</p>` },
   { name: 'attribute-entities', template: `<a href="/a?x=1&y=2" title='He said "hi"'>go</a>` },

@@ -1192,6 +1192,52 @@ describe('slider: dirtiness', () => {
     expect(root.hasAttribute('data-dirty')).toBe(false);
   });
 
+  it('counts a value written straight to a mirror, with no event to announce it', () => {
+    const form = document.createElement('form');
+    host.append(form);
+    const { slider, mirrors } = build(SLIDER, { defaultValue: [20], name: 'price' }, form);
+
+    // A session restore, a page back from the bfcache and an autofill all write
+    // the control itself, and some of them fire nothing at all. The form
+    // submits what is there whether or not anything announced it, so what is
+    // there is what dirtiness is measured over — an answer that waits to be
+    // told leaves a restored form calling itself saved.
+    mirrors()[0]!.value = '77';
+
+    expect(new FormData(form).getAll('price')).toEqual(['77']);
+    expect(slider.field.isDirty()).toBe(true);
+    expect(slider.field.fieldProps()['data-dirty']).toBe(true);
+  });
+
+  it('counts a silent write to the mirror the field never validates', () => {
+    const form = document.createElement('form');
+    host.append(form);
+    const { slider, mirrors } = build(SLIDER, { defaultValue: [20, 80], name: 'price' }, form);
+
+    // The field validates the first thumb's mirror and no other, so the upper
+    // one is where a restore lands with nothing at all watching it.
+    mirrors()[1]!.value = '90';
+
+    expect(new FormData(form).getAll('price')).toEqual(['20', '90']);
+    expect(slider.field.isDirty()).toBe(true);
+    expect(slider.field.fieldProps()['data-dirty']).toBe(true);
+  });
+
+  it('puts a restored value on the page as soon as the restore announces itself', () => {
+    const form = document.createElement('form');
+    host.append(form);
+    const { root, mirrors } = build(SLIDER, { defaultValue: [20], name: 'price' }, form);
+
+    mirrors()[0]!.value = '77';
+    // Assigning to `value` invalidates nothing, so the rendered attribute can
+    // only follow the first thing that does. A page restored from the bfcache
+    // fires `pageshow` and nothing else — no input, no change, no navigation.
+    window.dispatchEvent(new Event('pageshow'));
+    flushSync();
+
+    expect(root.getAttribute('data-dirty')).toBe('');
+  });
+
   it('lets a form reset take back a mirror the slider never wrote', async () => {
     const form = document.createElement('form');
     host.append(form);
@@ -1224,11 +1270,14 @@ describe('slider: dirtiness', () => {
     flushSync();
     expect(slider.field.isDirty()).toBe(true);
 
-    // `reset` clears what the field has recorded, and this is a record of the
-    // field's: a form that was autofilled once could otherwise never be called
-    // saved again, since nothing else can reach it.
+    // `reset` clears what the field has recorded, and a form that was
+    // autofilled once could otherwise never be called saved again. Clearing a
+    // flag would not have been enough: the mirror is what a submit reads, so a
+    // field that says it is clean has to have put the mirror back first.
     slider.field.reset();
     flushSync();
+    expect(mirrors()[0]!.value).toBe('20');
+    expect(new FormData(form).getAll('price')).toEqual(['20']);
     expect(slider.field.isDirty()).toBe(false);
     expect(root.hasAttribute('data-dirty')).toBe(false);
   });

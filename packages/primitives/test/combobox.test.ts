@@ -884,7 +884,29 @@ describe('choosing with the pointer', () => {
     expect(ui.select.values()).toEqual(['ch']);
   });
 
-  it('refuses to change anything while read-only, but still opens', () => {
+  it('removes as well as adds on a widget that holds one value', () => {
+    selectOptions = { defaultValue: 'ap' };
+    const ui = selectDemo();
+
+    // Documented as "add or remove", and a caller asking for a removal is
+    // asking for one however many values the widget holds.
+    ui.select.toggleValue('ap');
+    flushSync();
+    expect(ui.select.values()).toEqual([]);
+
+    ui.select.toggleValue('ch');
+    flushSync();
+    expect(ui.select.values()).toEqual(['ch']);
+
+    press(ui.trigger());
+    press(ui.option('ch'));
+    // A press on the option a single select already holds is not a request to
+    // hold none — a native select answers it the same way — so the press route
+    // takes rather than toggles.
+    expect(ui.select.values()).toEqual(['ch']);
+  });
+
+  it('refuses to change anything while read-only, and leaves the list up to browse', () => {
     selectOptions = { readOnly: () => true, defaultValue: 'ap' };
     const ui = selectDemo();
     press(ui.trigger());
@@ -892,6 +914,14 @@ describe('choosing with the pointer', () => {
 
     press(ui.option('ch'));
     expect(ui.select.value()).toBe('ap');
+    // A press that changed nothing has not chosen anything, and `closeOnSelect`
+    // is about a selection. Collapsing the popup on every press leaves the
+    // values readable and the list they came from impossible to read at all.
+    expect(ui.select.isOpen()).toBe(true);
+
+    press(ui.option('da'));
+    expect(ui.select.value()).toBe('ap');
+    expect(ui.select.isOpen()).toBe(true);
   });
 });
 
@@ -996,19 +1026,28 @@ describe('the combobox textbox', () => {
     expect(ui.options()).toHaveLength(FRUITS.length);
   });
 
-  it('shows the value it starts with rather than an empty box over a filled form', () => {
+  it('holds a value nothing can name yet without putting the identifier in the box', () => {
     comboOptions = { name: 'fruit', defaultValue: 'ba' };
     const ui = comboDemo();
 
+    // Nothing on this page can say what `ba` is called: a combobox's native
+    // control is an `<input>` with no options in it, and the popup has never
+    // been opened. So the box says nothing, and everything that reports the
+    // value says `ba` — the field is holding it, not hiding it.
+    expect(ui.input().value).toBe('');
+    expect(ui.combo.inputValue()).toBe('');
+    expect(ui.combo.value()).toBe('ba');
+    expect(ui.combo.hasValue()).toBe(true);
     expect(new FormData(ui.form()).get('fruit')).toBe('ba');
-    // The component owns the textbox's value — it forbids a `:value` binding
-    // beside it — so an empty box here is the two halves of one control
-    // disagreeing about what has been chosen: the form would go on submitting
-    // `ba` under a field that reads as untouched. Nothing on this page can say
-    // what `ba` is called, so the identifier is what there is, and it is at
-    // least the thing the form holds. The tests below are the four ways a name
-    // reaches it instead.
-    expect(ui.input().value).toBe('ba');
+
+    // And it is not a question either. What is in a textbox is text somebody
+    // could have typed — it is filtered on, searched for, completed from, and
+    // read straight off `inputValue()` by a consumer narrowing the list in
+    // their own code — so an identifier there is this component answering for
+    // the user, and the list opening narrowed by a keystroke nobody made.
+    expect(ui.combo.isFiltering()).toBe(false);
+    press(ui.toggle());
+    expect(ui.labels()).toEqual(FRUITS.map((fruit) => fruit.label));
   });
 
   it('keeps the name the page was rendered with, over the identifier behind it', () => {
@@ -1044,12 +1083,10 @@ describe('the combobox textbox', () => {
     expect(new FormData(ui.form()).get('fruit')).toBe('ba');
   });
 
-  it('replaces that identifier with the label as soon as the list can supply one', () => {
+  it('fills the box in as soon as the list can name the value', () => {
     comboOptions = { name: 'fruit', defaultValue: 'ba' };
     const ui = comboDemo();
-    // With nothing to ask, the identifier is all there is — a poor label and a
-    // good clue.
-    expect(ui.input().value).toBe('ba');
+    expect(ui.input().value).toBe('');
 
     press(ui.toggle());
     // The first render of the list is the first moment anything on the page
@@ -1066,12 +1103,12 @@ describe('the combobox textbox', () => {
     const names = new Signal.State<Record<string, string>>({});
     comboOptions = { name: 'fruit', defaultValue: 'ba', labelFor: (value) => names.get()[value] };
     const ui = comboDemo();
-    expect(ui.input().value).toBe('ba');
+    expect(ui.input().value).toBe('');
 
     names.set({ ba: 'Banana' });
     await settle();
-    // Waiting for the list to be opened would leave the identifier in front of
-    // a user who never opens it, over a form that submits something else.
+    // Waiting for the list to be opened would leave the box empty in front of
+    // a user who never opens it, over a form that submits something.
     expect(ui.input().value).toBe('Banana');
     expect(ui.combo.value()).toBe('ba');
   });
@@ -1129,13 +1166,51 @@ describe('the combobox textbox', () => {
 
     type(input, 'b');
     type(input, 'ba');
-    // Once the observer has caught up, the box holds what the seed put there
-    // character for character, and the list has rendered Banana beneath it.
-    // Correcting it now would rewrite the query under the caret of the person
-    // typing it.
+    // Once the observer has caught up, the box holds what was typed character
+    // for character, and the list has rendered Banana beneath it. The value
+    // held is now nameable, and correcting the box to say so would rewrite the
+    // query under the caret of the person typing it.
     await settle();
     expect(input.value).toBe('ba');
     expect(ui.labels()).toEqual(['Banana']);
+  });
+
+  it('leaves text the user typed alone when a press puts the caret back in it', async () => {
+    comboOptions = { name: 'fruit', defaultValue: 'ba' };
+    const ui = comboDemo();
+    const input = ui.input();
+    input.focus();
+
+    // A question that happens to read like the value being held, so that a box
+    // corrected to say what is held would be visibly corrected.
+    type(input, 'ba');
+    key(input, 'Escape');
+    press(input);
+    await settle();
+
+    // The press reopens the list and says nothing else: it is not an answer to
+    // the question in the box, so the question stands and goes on narrowing.
+    expect(input.value).toBe('ba');
+    expect(ui.combo.inputValue()).toBe('ba');
+    expect(ui.combo.isFiltering()).toBe(true);
+    expect(ui.labels()).toEqual(['Banana']);
+  });
+
+  it('puts the name back when the option pressed is the one already held', () => {
+    comboOptions = { name: 'fruit', defaultValue: 'ch', labelFor: () => 'Cherry' };
+    const ui = comboDemo();
+    const input = ui.input();
+
+    type(input, 'che');
+    press(ui.option('ch'));
+
+    // Choosing the value already held changes nothing about the value and is
+    // still an answer to the question in the box. Watching the values cannot
+    // see it, and the pointer is the route that never passes through this
+    // component's own key handling.
+    expect(ui.combo.value()).toBe('ch');
+    expect(input.value).toBe('Cherry');
+    expect(ui.combo.isFiltering()).toBe(false);
   });
 
   it('keeps DOM focus in the textbox and points at the option instead', () => {
@@ -1631,6 +1706,39 @@ describe('a combobox that searches', () => {
     expect(ui.combo.isEmpty()).toBe(false);
   });
 
+  it('asks for the whole list up front even when it starts holding a value', async () => {
+    const asked: string[] = [];
+    const aborted: string[] = [];
+    fromSearch = true;
+    comboOptions = {
+      defaultValue: 'ba',
+      labelFor: () => 'Banana',
+      minLength: 0,
+      searchDebounce: 0,
+      search: (request) => {
+        asked.push(request.source);
+        request.signal.addEventListener('abort', () => aborted.push(request.source));
+        return Promise.resolve<readonly Fruit[]>(FRUITS);
+      },
+    };
+    const ui = comboDemo();
+    await settle();
+
+    // The box saying "Banana" is this component answering, not the user asking:
+    // the question is still the empty one a zero minimum length starts with.
+    // Reading the two as one string is what threw the preload away and left the
+    // popup announcing "No results" for a search that was cancelled.
+    expect(ui.input().value).toBe('Banana');
+    expect(asked).toEqual(['']);
+    expect(aborted).toEqual([]);
+
+    press(ui.toggle());
+    await settle();
+    expect(ui.labels()).toEqual(FRUITS.map((fruit) => fruit.label));
+    expect(ui.combo.isEmpty()).toBe(false);
+    expect(ui.empty()).toBeNull();
+  });
+
   it('keeps a search in flight when the popup is opened by hand', async () => {
     const aborted: string[] = [];
     const gate = deferred<readonly Fruit[]>();
@@ -1682,9 +1790,9 @@ describe('a combobox that searches', () => {
     // asked for, and `onInputValueChange` is for what they type.
     expect(asked).toEqual([]);
     expect(seen).toEqual([]);
-    // The box still shows what the form holds, by the only name anything on
-    // the page has for it yet.
-    expect(ui.input().value).toBe('ba');
+    // And nothing can name it yet, so there is nothing in the box to search for
+    // even if it were a question.
+    expect(ui.input().value).toBe('');
 
     names.set({ ba: 'Banana' });
     await settle();
@@ -1858,6 +1966,29 @@ describe('committing a value', () => {
     expect(input.value).toBe('Cherry');
   });
 
+  it('does not take a label typed back over the option it came from', () => {
+    comboOptions = { allowCustomValue: true, name: 'fruit' };
+    const ui = comboDemo();
+    const input = ui.input();
+
+    type(input, 'ch');
+    key(input, 'ArrowDown');
+    key(input, 'Enter');
+    expect(ui.combo.value()).toBe('ch');
+
+    // Selecting the box and typing its contents again is a question, and this
+    // combobox takes anything — but "Cherry" is the name of what is already
+    // held, so taking it would swap the option's id for its human text and the
+    // form would submit a different thing than the one the user pressed.
+    type(input, 'Cherry');
+    input.dispatchEvent(new FocusEvent('blur'));
+    flushSync();
+
+    expect(ui.combo.value()).toBe('ch');
+    expect(new FormData(ui.form()).get('fruit')).toBe('ch');
+    expect(input.value).toBe('Cherry');
+  });
+
   it('takes the highlighted option on Tab and carries on out', () => {
     const ui = comboDemo();
     const input = openCombo(ui);
@@ -1895,7 +2026,7 @@ describe('committing a value', () => {
     expect(new FormData(ui.form()).get('fruit')).toBe('');
   });
 
-  it('refuses to select while read-only, and still collapses the list', () => {
+  it('refuses to select while read-only, and leaves the list up to browse', () => {
     comboOptions = { name: 'fruit', readOnly: () => true, defaultValue: 'ch' };
     const ui = comboDemo();
     const input = openCombo(ui);
@@ -1904,19 +2035,18 @@ describe('committing a value', () => {
     key(input, 'ArrowDown');
     key(input, 'Enter');
     // Nothing was taken, so nothing about the widget may say otherwise: a box
-    // reading "Apple" over a form submitting `ch`, under a list still up
-    // waiting for a press that will never do anything, is three lies from one
-    // keystroke.
+    // reading "Apple" over a form submitting `ch` is one lie, and a list that
+    // collapses on the keystroke that took nothing is another — it says a
+    // choice was made, and leaves a read-only widget's options unreadable.
     expect(ui.combo.value()).toBe('ch');
     expect(input.value).toBe('Cherry');
-    expect(ui.combo.isOpen()).toBe(false);
+    expect(ui.combo.isOpen()).toBe(true);
 
-    press(ui.toggle());
     press(ui.option('ap'));
     // And the pointer answers it the same way, as it does everywhere else.
     expect(ui.combo.value()).toBe('ch');
     expect(input.value).toBe('Cherry');
-    expect(ui.combo.isOpen()).toBe(false);
+    expect(ui.combo.isOpen()).toBe(true);
 
     key(input, 'Escape');
     // Emptying the box is a change too, and one that would leave the widget
@@ -2084,6 +2214,34 @@ describe('choosing several, with chips', () => {
     expect(input.value).toBe('');
     // Chips go through Backspace and the chip buttons, not through Escape.
     expect(ui.combo.values()).toEqual(['ap']);
+  });
+
+  it('lets a name that arrives late reach the chips of a multiple', async () => {
+    const names = new Signal.State<Record<string, string>>({});
+    comboOptions = {
+      multiple: true,
+      name: 'fruit',
+      defaultValue: ['ba', 'ch'],
+      labelFor: (value) => names.get()[value],
+    };
+    const ui = comboDemo();
+
+    // Nothing can name either of them yet, and a multiple shows its values on
+    // the chips rather than in the box, so the chips are where the identifier
+    // shows through — the one place it is better than nothing, since a chip
+    // with no text is a chip nobody can aim the remove button at.
+    expect(ui.chipLabels()).toEqual(['ba', 'ch']);
+    expect(ui.input().value).toBe('');
+
+    names.set({ ba: 'Banana', ch: 'Cherry' });
+    await settle();
+    // One registry for every value, whether the widget holds one or several.
+    // The catalogue arriving names them all, and the `<select multiple>` behind
+    // the widget is rendered from those names rather than consulted for them —
+    // reading it back would only return what this component already said, and
+    // saying it back would make the identifier permanent.
+    expect(ui.chipLabels()).toEqual(['Banana', 'Cherry']);
+    expect(ui.removeButton('ba').getAttribute('aria-label')).toBe('Remove Banana');
   });
 
   it('says the popup allows more than one', () => {

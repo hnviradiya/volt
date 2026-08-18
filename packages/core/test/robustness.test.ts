@@ -35,14 +35,14 @@ describe('markup edge cases', () => {
   it('renders void and self-closing elements', () => {
     @Component({
       selector: 'v-void',
-      render: compileTemplate(`<div><br><hr /><img src="x.png"><input></div>`),
+      render: compileTemplate(`<div><br><hr /><img src="x.png" alt=""><input></div>`),
     })
     class Voids {}
 
     const html = render(Voids).html;
     expect(html).toContain('<br>');
     expect(html).toContain('<hr>');
-    expect(html).toContain('<img src="x.png">');
+    expect(html).toContain('<img src="x.png" alt="">');
   });
 
   it('accepts single-quoted, double-quoted, and unquoted attributes', () => {

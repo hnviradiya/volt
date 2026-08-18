@@ -246,3 +246,127 @@ export function isOneEditFrom(a: string, b: string): boolean {
   return false;
 }
 
+
+/**
+ * What an ARIA state or property accepts.
+ *
+ * Only two things are ever asked of an entry: whether the name exists at all,
+ * and whether an authored literal is one of the values. So an enumerated
+ * attribute carries its enum and everything else carries only the shape, which
+ * is enough to tell an id reference from free text.
+ */
+export type AriaValueKind =
+  /** Free text — nothing to check beyond the name. */
+  | 'string'
+  | 'integer'
+  | 'number'
+  /** One id, which some other element in the document must carry. */
+  | 'idref'
+  /** Space-separated ids, each of which must exist. */
+  | 'idrefs'
+  /** Exactly one of `values`. */
+  | 'token'
+  /** Any number of `values`, space-separated. */
+  | 'tokens';
+
+export interface AriaAttribute {
+  kind: AriaValueKind;
+  /** The enum, for `token` and `tokens`. */
+  values?: readonly string[];
+}
+
+/**
+ * Every ARIA state and property, with what it accepts.
+ *
+ * ARIA is a closed vocabulary — a name outside this table is read by nothing,
+ * which is what makes `aria-labeledby` worth a compile error rather than a
+ * lint someone gets round to. `aria-dropeffect` and `aria-grabbed` are
+ * deprecated rather than absent, and are listed so that writing one is not
+ * reported as a misspelling of something else.
+ */
+export const ARIA_ATTRIBUTES: Record<string, AriaAttribute> = {
+  'aria-activedescendant': { kind: 'idref' },
+  'aria-atomic': { kind: 'token', values: ['true', 'false'] },
+  'aria-autocomplete': { kind: 'token', values: ['inline', 'list', 'both', 'none'] },
+  'aria-braillelabel': { kind: 'string' },
+  'aria-brailleroledescription': { kind: 'string' },
+  'aria-busy': { kind: 'token', values: ['true', 'false'] },
+  'aria-checked': { kind: 'token', values: ['true', 'false', 'mixed', 'undefined'] },
+  'aria-colcount': { kind: 'integer' },
+  'aria-colindex': { kind: 'integer' },
+  'aria-colindextext': { kind: 'string' },
+  'aria-colspan': { kind: 'integer' },
+  'aria-controls': { kind: 'idrefs' },
+  'aria-current': {
+    kind: 'token',
+    values: ['page', 'step', 'location', 'date', 'time', 'true', 'false'],
+  },
+  'aria-describedby': { kind: 'idrefs' },
+  'aria-description': { kind: 'string' },
+  'aria-details': { kind: 'idrefs' },
+  'aria-disabled': { kind: 'token', values: ['true', 'false'] },
+  'aria-dropeffect': {
+    kind: 'tokens',
+    values: ['copy', 'execute', 'link', 'move', 'none', 'popup'],
+  },
+  'aria-errormessage': { kind: 'idrefs' },
+  'aria-expanded': { kind: 'token', values: ['true', 'false', 'undefined'] },
+  'aria-flowto': { kind: 'idrefs' },
+  'aria-grabbed': { kind: 'token', values: ['true', 'false', 'undefined'] },
+  'aria-haspopup': {
+    kind: 'token',
+    values: ['false', 'true', 'menu', 'listbox', 'tree', 'grid', 'dialog'],
+  },
+  'aria-hidden': { kind: 'token', values: ['true', 'false', 'undefined'] },
+  'aria-invalid': { kind: 'token', values: ['grammar', 'false', 'spelling', 'true'] },
+  'aria-keyshortcuts': { kind: 'string' },
+  'aria-label': { kind: 'string' },
+  'aria-labelledby': { kind: 'idrefs' },
+  'aria-level': { kind: 'integer' },
+  'aria-live': { kind: 'token', values: ['assertive', 'off', 'polite'] },
+  'aria-modal': { kind: 'token', values: ['true', 'false'] },
+  'aria-multiline': { kind: 'token', values: ['true', 'false'] },
+  'aria-multiselectable': { kind: 'token', values: ['true', 'false'] },
+  'aria-orientation': { kind: 'token', values: ['horizontal', 'vertical', 'undefined'] },
+  'aria-owns': { kind: 'idrefs' },
+  'aria-placeholder': { kind: 'string' },
+  'aria-posinset': { kind: 'integer' },
+  'aria-pressed': { kind: 'token', values: ['true', 'false', 'mixed', 'undefined'] },
+  'aria-readonly': { kind: 'token', values: ['true', 'false'] },
+  'aria-relevant': { kind: 'tokens', values: ['additions', 'all', 'removals', 'text'] },
+  'aria-required': { kind: 'token', values: ['true', 'false'] },
+  'aria-roledescription': { kind: 'string' },
+  'aria-rowcount': { kind: 'integer' },
+  'aria-rowindex': { kind: 'integer' },
+  'aria-rowindextext': { kind: 'string' },
+  'aria-rowspan': { kind: 'integer' },
+  'aria-selected': { kind: 'token', values: ['true', 'false', 'undefined'] },
+  'aria-setsize': { kind: 'integer' },
+  'aria-sort': { kind: 'token', values: ['ascending', 'descending', 'none', 'other'] },
+  'aria-valuemax': { kind: 'number' },
+  'aria-valuemin': { kind: 'number' },
+  'aria-valuenow': { kind: 'number' },
+  'aria-valuetext': { kind: 'string' },
+};
+
+/**
+ * Roles an author may write.
+ *
+ * The abstract roles — `widget`, `composite`, `input`, `landmark` and the
+ * rest — are deliberately absent: the specification forbids using them in
+ * markup, so one appearing here is the same mistake as a misspelling.
+ */
+export const ARIA_ROLES = new Set([
+  'alert', 'alertdialog', 'application', 'article', 'banner', 'blockquote', 'button',
+  'caption', 'cell', 'checkbox', 'code', 'columnheader', 'combobox', 'comment',
+  'complementary', 'contentinfo', 'definition', 'deletion', 'dialog', 'directory',
+  'document', 'emphasis', 'feed', 'figure', 'form', 'generic', 'grid', 'gridcell',
+  'group', 'heading', 'img', 'insertion', 'link', 'list', 'listbox', 'listitem', 'log',
+  'main', 'mark', 'marquee', 'math', 'menu', 'menubar', 'menuitem', 'menuitemcheckbox',
+  'menuitemradio', 'meter', 'navigation', 'none', 'note', 'option', 'paragraph',
+  'presentation', 'progressbar', 'radio', 'radiogroup', 'region', 'row', 'rowgroup',
+  'rowheader', 'scrollbar', 'search', 'searchbox', 'separator', 'slider', 'spinbutton',
+  'status', 'strong', 'subscript', 'suggestion', 'superscript', 'switch', 'tab', 'table',
+  'tablist', 'tabpanel', 'term', 'textbox', 'time', 'timer', 'toolbar', 'tooltip', 'tree',
+  'treegrid', 'treeitem',
+]);

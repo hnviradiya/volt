@@ -216,11 +216,18 @@ export interface ListboxSharedOptions {
    * `<option>` per value whether or not the popup has ever been opened. A
    * combobox has no such list: its native control is an `<input>`, and the
    * options only exist while the popup does. So a combobox handed a value this
-   * way — or through `value` — has two places left to find a name for it: the
-   * text the page was rendered with in the textbox, which is kept, and
-   * `labelFor`. With neither, the box shows the identifier the form submits
-   * until the user opens the list, because a box left empty over a value that
-   * is still submitted is the same field lying about what it holds.
+   * way — or through `value` — is holding something it cannot yet name, and its
+   * textbox stays empty until it can: from the text the page was rendered with,
+   * from `labelFor`, or from the first option that renders, whichever comes
+   * first, and it fills in by itself at that moment.
+   *
+   * Empty rather than the identifier, which is the one thing that must not go
+   * there. A textbox holds text somebody could have typed — it is filtered on,
+   * searched for, completed from and, with `allowCustomValue`, committed — so
+   * an internal token in it is not a label that reads oddly, it is this
+   * component claiming the user typed something they have never seen. The value
+   * is held, submitted and reported by `value()` the whole time; supply
+   * `labelFor` and there is nothing to leave empty.
    */
   defaultValue?: string | readonly string[];
 
@@ -233,11 +240,16 @@ export interface ListboxSharedOptions {
   /**
    * The text for a value nothing has rendered yet.
    *
-   * Labels come from the options on screen, from the native `<select>` behind
-   * them, and from the text the page was rendered with — and a combobox served
-   * by an empty client-rendered `<input>` has none of the three until its popup
-   * has been opened once. Supply this and every value has a name from the first
+   * Names come from the options on screen, from a select's native `<select>`,
+   * and from the text the page was rendered with — and a combobox served by an
+   * empty client-rendered `<input>` has none of the three until its popup has
+   * been opened once. Supply this and every value has a name from the first
    * paint, whoever handed it in; without it, see `defaultValue`.
+   *
+   * Read whenever a name is wanted, so a catalogue that arrives late names
+   * everything the moment it does. It is the lowest-ranked source: a value an
+   * option was really seen to carry keeps that text, because this is a promise
+   * about data and that was the page.
    */
   labelFor?: (value: string) => string | undefined;
 
@@ -301,6 +313,11 @@ const PAGE = 10;
 function createListboxCore(
   options: ListboxSharedOptions,
   control: () => Element | null | undefined,
+  /**
+   * What this component's own native control calls a value, when it is a
+   * control that knows — see `nameOf`.
+   */
+  nativeName?: (value: string) => string | undefined,
 ) {
   const locale = useLocale();
 
@@ -370,13 +387,57 @@ function createListboxCore(
   };
 
   /**
-   * The last text seen for a value.
+   * Every name anything on this page has given a value.
    *
-   * A chip has to keep its label after the popup that supplied it has gone,
-   * and a select has to show one before its popup has ever been opened. The
-   * native control answers the second case; this answers the first.
+   * One registry, because a name has to outlive whatever supplied it: a chip
+   * keeps the text its option had after the popup has gone, and a value handed
+   * in before any popup existed is named by whichever source turns up first.
+   * The counter beside it is what carries a name that has just been learned to
+   * the textbox, the trigger and the chips — nothing else about the page
+   * changes at the moment a value stops being anonymous, so nothing else can.
    */
-  const labelCache = new Map<string, string>();
+  const names = new Map<string, string>();
+  const namesLearned = new Signal.State(0);
+
+  /**
+   * Record what a value is called.
+   *
+   * Nothing is not a name. An option rendered before its text is a value whose
+   * label would otherwise be filed as the empty string and stay that way for
+   * as long as the component lives.
+   */
+  const nameValue = (value: string, text: string): void => {
+    if (text === '' || names.get(value) === text) return;
+    names.set(value, text);
+    namesLearned.set(untrack(() => namesLearned.get()) + 1);
+  };
+
+  /** Record what everything the popup is showing is called. */
+  const learnNames = (): void => {
+    for (const option of items.all()) {
+      const value = option.getAttribute('data-value');
+      if (value !== null) nameValue(value, textOf(option));
+    }
+  };
+
+  /**
+   * What a value is called, or undefined while nothing has said.
+   *
+   * Undefined rather than the value, because the value is an identifier and
+   * every caller has to decide for itself whether an identifier will do in the
+   * place it is about to put one. A chip has to say something; a textbox does
+   * not — see `defaultValue`.
+   *
+   * The native control answers first for the component that has a real one,
+   * because it is the consumer's own catalogue and it is always there, so it
+   * keeps up when the catalogue changes underneath. Then what was really on the
+   * page, which outranks what was merely promised: a `labelFor` written against
+   * data that has moved on cannot rewrite the text an option was seen to have.
+   */
+  const nameOf = (value: string): string | undefined => {
+    namesLearned.get();
+    return nativeName?.(value) ?? names.get(value) ?? options.labelFor?.(value);
+  };
 
   const message = (key: string, fallback: string, values?: MessageValues): string =>
     locale.has(key) ? locale.t(key, values) : fallback;
@@ -392,18 +453,13 @@ function createListboxCore(
   };
 
   const select = (value: string): void => {
-    if (disabled()) return;
-    if (!readOnly()) {
-      const current = valuesNow();
-      if (multiple) {
-        if (!current.includes(value)) setValues([...current, value]);
-      } else {
-        setValues([value]);
-      }
+    if (disabled() || readOnly()) return;
+    const current = valuesNow();
+    if (multiple) {
+      if (!current.includes(value)) setValues([...current, value]);
+    } else {
+      setValues([value]);
     }
-    // Closing answers the press rather than what it changed: a read-only
-    // widget that stayed open on the one gesture that collapses it everywhere
-    // else leaves the user holding a list nothing will take.
     if (closesOnSelect) setOpen(false);
   };
 
@@ -413,22 +469,35 @@ function createListboxCore(
   };
 
   /**
-   * Add or remove, which is what a press on an option in a multiple does.
+   * Add or remove, whichever the value is not — on one value or on several.
    *
-   * One decision for both routes — the pointer arrives through `onOptionClick`
-   * and the keyboard through the component's own Enter — and `closeOnSelect` is
-   * about the press rather than about which way it went: a list that closes
-   * when a press adds a value and stays up when the same press removes one
-   * answers one gesture two ways.
+   * `closeOnSelect` is about the press rather than about which way it went: a
+   * list that closes when a press adds a value and stays up when the same press
+   * removes one answers one gesture two ways.
    */
   const toggleValue = (value: string): void => {
-    if (disabled()) return;
-    if (!multiple || !valuesNow().includes(value)) {
+    if (disabled() || readOnly()) return;
+    if (!valuesNow().includes(value)) {
       select(value);
       return;
     }
     deselect(value);
     if (closesOnSelect) setOpen(false);
+  };
+
+  /**
+   * What a press or an Enter on an option does.
+   *
+   * A multiple toggles, because the same gesture is how a chip comes off
+   * again. A single takes: pressing the option a list of one already holds is
+   * not a request to hold none, and a native select does not answer it that
+   * way either. One decision for both routes — the pointer arrives through
+   * `onOptionClick` and the keyboard through each component's own Enter — so
+   * `toggleValue` is left saying exactly what its name says.
+   */
+  const choose = (value: string): void => {
+    if (multiple) toggleValue(value);
+    else select(value);
   };
 
   const clear = (): void => {
@@ -550,25 +619,6 @@ function createListboxCore(
     setActive(optionFor(valuesNow()[0] ?? null) ?? items.first());
   };
 
-  /** Cache the text of everything currently rendered, for chips and display. */
-  const rememberLabels = (): void => {
-    for (const option of items.all()) {
-      const value = option.getAttribute('data-value');
-      if (value !== null) labelCache.set(value, textOf(option));
-    }
-  };
-
-  /**
-   * Record a name for a value that came from somewhere other than an option.
-   *
-   * The text a server rendered into the control is the one name on a page that
-   * has not opened its popup yet, and it is a name something really used —
-   * which is what the cache is for. Nothing is a name, so nothing is recorded.
-   */
-  const rememberLabel = (value: string, text: string): void => {
-    if (text !== '') labelCache.set(value, text);
-  };
-
   // Everything that only applies while open lives in one effect, so it is set
   // up and torn down as a unit — and, because these register cleanups, in
   // exactly the reverse order on the way out.
@@ -602,10 +652,7 @@ function createListboxCore(
       },
     );
 
-    untrack(() => {
-      rememberLabels();
-      applyPendingFocus();
-    });
+    untrack(applyPendingFocus);
 
     onCleanup(() => {
       activeValue.set(null);
@@ -638,6 +685,11 @@ function createListboxCore(
     if (!popup) return;
 
     const measure = () => {
+      // Every rendered option is a name for its value, and the popup is the
+      // only place most of them are ever written down. Read where the list is
+      // watched rather than where it is opened, so an async answer and a
+      // consumer's own filter are read the same way the first render is.
+      learnNames();
       optionCount.set(items.enabled().length);
       listRevision.set(untrack(() => listRevision.get()) + 1);
       // `aria-activedescendant` names an element by id, so an option that
@@ -722,42 +774,16 @@ function createListboxCore(
 
   // --- labels and announcements -------------------------------------------
 
-  const labelOf = (value: string): string => {
-    const rendered = optionFor(value);
-    if (rendered) {
-      const text = textOf(rendered);
-      labelCache.set(value, text);
-      return text;
-    }
-
-    const native = options.native?.();
-    if (isSelectElement(native)) {
-      for (const option of native.options) {
-        if (option.value === value) {
-          const text = textOf(option);
-          labelCache.set(value, text);
-          return text;
-        }
-      }
-    }
-
-    // Text that was really on the page outranks text that was promised: a chip
-    // keeps what its option said after the popup has gone, and a `labelFor`
-    // written against data that has moved on cannot rewrite it.
-    const seen = labelCache.get(value);
-    if (seen !== undefined) return seen;
-
-    // Neither of the three exists before a popup has been opened once, which is
-    // where a value the caller handed in starts life — so this is the only
-    // answer there can be at that point, and without it the identifier ends up
-    // in front of the user.
-    const supplied = options.labelFor?.(value);
-    if (supplied !== undefined) return supplied;
-
-    // The value itself is a poor label and a good clue: it shows up as the
-    // identifier it is, rather than as a blank space nobody can explain.
-    return value;
-  };
+  /**
+   * A name to show for a value, falling back to the identifier.
+   *
+   * Every place that has to say something about a value it cannot name reads
+   * it here: a chip with no text is a chip nobody can find the remove button
+   * for, and the identifier is at least the thing the form holds. The textbox
+   * is the one surface that reads `nameOf` instead, because what is in a
+   * textbox is text somebody could have typed.
+   */
+  const labelOf = (value: string): string => nameOf(value) ?? value;
 
   const emptyMessage = (): string => options.labels?.empty ?? message('noResults', 'No results');
 
@@ -868,19 +894,20 @@ function createListboxCore(
   const controlAnchorProps = (): ComboboxProps =>
     options.anchor ? {} : (anchor.anchorProps() as ComboboxProps);
 
-  const onOptionClick = (event: MouseEvent): void => {
+  /** Returns the value the press chose, or null when it chose nothing. */
+  const onOptionClick = (event: MouseEvent): string | null => {
     const option = optionFrom(event.target);
-    if (!option) return;
+    if (!option) return null;
     if (isDisabled(option)) {
       // A disabled option still swallows the press: it is visibly there, and
       // an `<a>` used as an option would otherwise follow its href.
       event.preventDefault();
-      return;
+      return null;
     }
     const value = option.getAttribute('data-value');
-    if (value === null) return;
-    labelCache.set(value, textOf(option));
-    toggleValue(value);
+    if (value === null) return null;
+    choose(value);
+    return value;
   };
 
   const onOptionPointerMove = (event: PointerEvent): void => {
@@ -934,6 +961,7 @@ function createListboxCore(
     select,
     deselect,
     toggleValue,
+    choose,
     clear,
     setOpen,
     openListbox,
@@ -945,9 +973,9 @@ function createListboxCore(
     move,
     moveTo,
     typeaheadMove,
-    rememberLabels,
-    rememberLabel,
     recount,
+    nameValue,
+    nameOf,
     labelOf,
     emptyMessage,
     loadingMessage,
@@ -1012,7 +1040,7 @@ interface ListboxCommon {
   toggle(): void;
   select(value: string): void;
   deselect(value: string): void;
-  /** Add or remove, which is what a press on an option in a multiple does. */
+  /** Add or remove, whichever the value is not. */
   toggleValue(value: string): void;
   clear(): void;
   /** Move virtual focus, for a consumer driving it from elsewhere. */
@@ -1159,7 +1187,26 @@ export interface Select extends ListboxCommon {
  * while the popup is closed, so typing opens it and searches there instead.
  */
 export function createSelect(options: SelectOptions): Select {
-  const core = createListboxCore(options, options.trigger);
+  /**
+   * What the native `<select>` calls a value.
+   *
+   * It holds the consumer's own catalogue — an `<option>` per value, rendered
+   * whether or not the popup ever is — which is why a select can show the name
+   * of a value it was handed before anything else on the page existed. A
+   * combobox is handed no such thing: its native control is an `<input>`, or a
+   * `<select>` whose options are rendered from `labelOf`, and reading that back
+   * would only return what this component already said.
+   */
+  const nativeName = (value: string): string | undefined => {
+    const native = options.native?.();
+    if (!isSelectElement(native)) return undefined;
+    for (const option of native.options) {
+      if (option.value === value) return textOf(option) || undefined;
+    }
+    return undefined;
+  };
+
+  const core = createListboxCore(options, options.trigger, nativeName);
   const common = commonSurface(core);
 
   // The native control's own options, which exist whether or not the popup
@@ -1188,9 +1235,7 @@ export function createSelect(options: SelectOptions): Select {
 
   const chooseActive = (): void => {
     const value = core.activeValue.get();
-    if (value === null) return;
-    if (core.multiple) common.toggleValue(value);
-    else core.select(value);
+    if (value !== null) core.choose(value);
   };
 
   return {
@@ -1380,7 +1425,10 @@ export interface Combobox<T = unknown> extends ListboxCommon {
   /** The resource behind `search`, or null when there is none. */
   readonly search: Resource<readonly T[], string> | null;
 
-  /** What has been typed. The element's own value may be further along — see `autocomplete`. */
+  /**
+   * What is in the textbox: the question being asked, or the name of the value
+   * held. The element's own value may be further along — see `autocomplete`.
+   */
   inputValue(): string;
   /**
    * Put text in the box from outside — a query restored with the session, a
@@ -1388,7 +1436,10 @@ export interface Combobox<T = unknown> extends ListboxCommon {
    * does, so `search` is asked for it.
    */
   setInputValue(value: string): void;
-  /** Whether the list should be narrowed at all — false until something is typed. */
+  /**
+   * Whether there is a question in the box narrowing the list — false until
+   * something is typed, and false again once a choice has answered it.
+   */
   isFiltering(): boolean;
   /** Whether an option's text survives the current filter. */
   matches(text: string): boolean;
@@ -1450,29 +1501,30 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
   const autocomplete = options.autocomplete ?? 'list';
   const minLength = options.minLength ?? 1;
 
-  const query = new Signal.State('');
   /**
-   * Whether the list should be narrowed.
+   * What the user is asking, or null while the box is showing what is held.
    *
-   * False until something is typed, and false again after a choice, so that
-   * reopening a combobox holding "Belgium" shows every country rather than the
-   * one already chosen — which is the single most common way this pattern is
-   * got wrong.
+   * The textbox says one of exactly two things, and this is which: a question
+   * somebody entered — typed, or put there by the caller, which stands as a
+   * question the same way — or the name of the value the widget holds. Nothing
+   * else about the box is state. Whether the list is narrowed, whether there is
+   * a search to make, and what belongs in the element all read off this, so
+   * they cannot come apart from each other or from what is on the screen.
+   *
+   * A question is retired by being answered: choosing puts a value where the
+   * question was. Nothing else retires one — in particular, opening the popup
+   * does not, because a press to reposition the caret in half-typed text is not
+   * an answer to it.
    */
-  const filtering = new Signal.State(false);
+  const asked = new Signal.State<string | null>(null);
+
   /** Bumped by an insertion, so inline completion runs for typing and not for deletion. */
   const completions = new Signal.State(0);
 
-  /**
-   * Whether what is in the box is a question worth asking.
-   *
-   * Separate from `filtering`, which is about the list rather than about the
-   * text: opening the popup stops the list being narrowed, and a request
-   * already in flight for what the user typed is still a question they asked.
-   */
-  const searchable = new Signal.State(true);
+  /** What the list is being narrowed by, and what `search` is being asked. */
+  const query = (): string => asked.get() ?? '';
 
-  const searchEnabled = (): boolean => searchable.get() && query.get().length >= minLength;
+  const searchEnabled = (): boolean => query().length >= minLength;
 
   /**
    * The query the results in hand are the answer to.
@@ -1503,7 +1555,13 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
           }
         },
         {
-          source: () => query.get(),
+          // The question, never the box: text this component wrote to say what
+          // is held is an answer, and searching for it would mean a request at
+          // mount for a value nobody typed and another after every choice, for
+          // the label of the thing just chosen. An empty box with a caret in it
+          // is a question — it asks for everything — which is where a search
+          // with no minimum length starts and what it goes back to.
+          source: query,
           enabled: searchEnabled,
           debounce: options.searchDebounce ?? 250,
           retry: options.searchRetry ?? 0,
@@ -1516,40 +1574,11 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
 
   /** Whether the list is still catching up with what has been typed. */
   const searching = (): boolean =>
-    search !== null && searchEnabled() && (search.isLoading() || answered.get() !== query.get());
+    search !== null && searchEnabled() && (search.isLoading() || answered.get() !== query());
 
   const inputElement = (): HTMLInputElement | null => {
     const el = options.input();
     return el && 'value' in el && 'setSelectionRange' in el ? (el as HTMLInputElement) : null;
-  };
-
-  /**
-   * Put text in the box, saying whether it is a question for `search`.
-   *
-   * Text this component wrote to say what is held is an answer rather than a
-   * question, and asking it means a request at mount for a value nobody typed
-   * and another after every choice, for the label of the thing chosen. Text put
-   * there from anywhere else — a keystroke, or the caller's own `setInputValue`
-   * for a restored query or a "search for this" button — is the question it
-   * looks like, and a combobox that showed it without asking would render the
-   * empty state for a search nothing had made. The empty box is a question
-   * whoever emptied it: it asks for everything, which is where a search with no
-   * minimum length starts and what it goes back to when the box is cleared.
-   */
-  const showInputValue = (value: string, asked = false): void => {
-    if (untrack(() => query.get()) !== value) query.set(value);
-    searchable.set(asked || value === '');
-    const el = inputElement();
-    // Written straight to the element rather than bound in the template: this
-    // owns the textbox's value — it completes it, reverts it and clears it —
-    // and a `:value` binding beside that is two writers for one string.
-    if (el && el.value !== value) el.value = value;
-  };
-
-  const setInputValue = (value: string, asked = false): void => {
-    const changed = untrack(() => query.get()) !== value;
-    showInputValue(value, asked);
-    if (changed) options.onInputValueChange?.(value);
   };
 
   const fold = (text: string): string =>
@@ -1564,115 +1593,145 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
   const matches = (text: string): boolean => {
     // `none` means the popup is a plain list that typing does not narrow.
     if (autocomplete === 'none') return true;
-    if (!filtering.get()) return true;
-    const typed = query.get();
+    const typed = query();
     if (typed === '') return true;
     return (options.filter ?? defaultFilter)(text, typed);
   };
 
-  /** What the textbox should say when nothing is being typed into it. */
-  const settledText = (): string => {
-    if (core.multiple) return '';
-    const value = core.valuesNow()[0];
-    return value === undefined ? '' : core.labelOf(value);
+  /**
+   * The value the textbox is showing, when it is showing one.
+   *
+   * A single-value combobox shows the one value it holds. A multiple shows its
+   * values as chips and keeps the box for typing, so it shows none — which is
+   * the whole of the difference between them here, said once.
+   */
+  const shownValue = (values: readonly string[]): string | undefined =>
+    core.multiple ? undefined : values[0];
+
+  /**
+   * What the box says when it is not being asked anything.
+   *
+   * Empty when nothing on the page can name the value held. That is a value
+   * the form still submits and `value()` still reports, shown by a box with
+   * nothing in it — and the alternative is worse, because the identifier is
+   * not a name: it is text the widget would be claiming somebody typed, and
+   * every part of this that reads what is in the box would then read an
+   * internal token as a question. It fills in by itself the moment anything
+   * can say what the value is called; `labelFor` is how a caller says now.
+   */
+  const shownName = (values: readonly string[]): string => {
+    const value = shownValue(values);
+    return value === undefined ? '' : (core.nameOf(value) ?? '');
   };
 
+  /** What belongs in the textbox: the question in it, or the name of what is held. */
+  const boxText = (): string => asked.get() ?? shownName(core.valueState.get());
+
+  /**
+   * Take what is in the box as a value.
+   *
+   * Only a question can be committed, so the box showing "Cherry" over a chosen
+   * `ch` offers nothing: that is this component's own answer, and every blur
+   * after a successful pick would otherwise arrive here holding it out. Text
+   * naming a value already held is the same thing typed by hand and is refused
+   * for the same reason — either way, taking it replaces an option's id with
+   * its human text behind the form's back.
+   *
+   * What is taken is its own name, and the only one it will ever have: the
+   * value came from the user writing it down.
+   */
   const commitCustomValue = (): void => {
     if (options.allowCustomValue !== true) return;
-    const typed = untrack(() => query.get()).trim();
+    const typed = untrack(() => asked.get())?.trim() ?? '';
     if (typed === '') return;
 
     untrack(() => {
-      // The box holds the *label* of whatever was chosen, so every blur after
-      // a successful pick arrives here with "Cherry" typed and `ch` held —
-      // and committing that would replace the option's id with its human text
-      // behind the form's back. Compared against the values held rather than
-      // against the rendered options, because by the time this runs the popup
-      // has usually gone.
-      const held = core.valuesNow().some((value) => core.labelOf(value) === typed);
-      if (!held) core.select(typed);
-      filtering.set(false);
-      // Either way the box goes back to saying what is held: the custom value
-      // just taken, or the label that was already there.
-      setInputValue(settledText());
+      if (!core.valuesNow().some((value) => core.labelOf(value) === typed)) {
+        core.nameValue(typed, typed);
+        core.select(typed);
+      }
+      asked.set(null);
     });
   };
 
+  /** What a press or an Enter on an option leaves in the textbox. */
   const takeOption = (value: string): void => {
-    if (core.multiple) common.toggleValue(value);
-    else core.select(value);
-    // Nothing was taken, so nothing goes in the box: text for an option a
-    // read-only combobox will not hold is the widget claiming a value the form
-    // has never seen. Whether the popup collapses is the core's decision, and
-    // it has already made it.
+    core.choose(value);
+    // Nothing was taken, so the question stands: a read-only combobox that
+    // answered a press it refused would clear text the user is still typing.
     if (core.disabled() || core.readOnly()) return;
-    // The query has done its job; leaving it would filter the list down to the
-    // one option just taken — or, in a multiple, to the chip just added.
-    filtering.set(false);
-    setInputValue(core.multiple ? '' : core.labelOf(value));
+    // Retired here as well as by the value changing, because choosing the value
+    // already held changes nothing and is still an answer.
+    asked.set(null);
   };
 
   /**
-   * Choosing an option has to reach the textbox as well as the value, and a
-   * press on an option goes through the core rather than through `takeOption`.
-   * Watching the values covers both routes, and the pointer route is the one
-   * that would otherwise leave the old query sitting in the box.
+   * Adopt the text the page was rendered with as a name for the value it holds.
    *
-   * Nothing is remembered until the textbox exists, so the first pass writes
-   * as well as every later one: a `defaultValue` — or a controlled signal that
-   * starts full — is not a *change*, and nothing else would ever put it in the
-   * box, leaving an empty combobox over a form that holds a value. The element
-   * is read as a dependency rather than inside the untracked write below,
-   * because this first runs before the template has handed the textbox over.
+   * A form the server filled in, or one the browser restored, arrives with the
+   * label of the value in the box and the value itself in the control that
+   * submits — and on a page whose popup has never been opened that label is the
+   * only name for it anywhere. It is filed like any other, so from here on the
+   * chips, the announcements and a blur all have it too. Whether there is a
+   * value to name is `shownValue`'s answer and nobody else's: a multiple keeps
+   * its box for typing, so nothing it was rendered with names anything.
+   */
+  let adopted = false;
+  effect(() => {
+    const el = inputElement();
+    if (!el || adopted) return;
+    adopted = true;
+    const value = shownValue(untrack(() => core.valueState.get()));
+    if (value !== undefined) core.nameValue(value, el.value);
+  });
+
+  /**
+   * Keep the textbox on whichever of the two things it is saying.
    *
-   * That first value arrives before anything can say what it is called, so the
-   * settled text is read as a dependency too: `labelOf` has only the identifier
-   * to answer with until an option carrying the value has rendered or
-   * `labelFor` can name it, and whichever of those happens first re-runs this
-   * and replaces the identifier. Waiting for the popup to be opened would leave
-   * the box showing what the form submits to a user who never opens it. Only
-   * this component's own text is replaced that way — anything else in the box
-   * was typed since, and belongs to the person typing it.
+   * One writer, driven by the state rather than called from the places that
+   * change it — which is what makes the routes agree: a press on an option
+   * never passes through this component's key handling, a chip's remove button
+   * passes through neither, and a controlled `value` set from outside passes
+   * through nothing here at all. Each of those is a value changing, and a value
+   * changing is the whole of what this has to notice.
    *
-   * None of those writes is an edit. The caller handed the value in, and a name
-   * for it turning up afterwards changes what the box can say rather than what
-   * has been chosen, so neither goes out as an input value change or to
-   * `search`: both would be this component telling the caller what they have
-   * just told it. A value that really changes after setup is the one case that
-   * does — a press on an option, or a controlled signal set from outside — and
-   * it is reported through the same route the keyboard's own `takeOption` uses,
-   * so the pointer and the keyboard say the same thing.
+   * Only this effect's own writes are replaced. Inline completion puts more in
+   * the element than the box is holding, and the difference is a proposal with
+   * a caret in it; a name learned a moment later must not reach past it.
    */
   let lastValues: readonly string[] | null = null;
-  let shown: string | null = null;
+  let lastAsked: string | null = null;
+  let written: string | null = null;
   effect(() => {
     const values = core.valueState.get();
-    core.listRevision.get();
+    const question = asked.get();
+    const held = shownName(values);
     const el = inputElement();
     if (!el) return;
 
-    const setup = lastValues === null;
-    const changed = setup || !sameValues(values, lastValues ?? []);
-    lastValues = values;
-    // Text the page was rendered with is a name something really used: a form
-    // the server filled in, or one the browser restored, arrives with the label
-    // of the value it holds already in the box — the only name for it on a page
-    // whose popup has never been opened. Overwriting that with the identifier
-    // would throw away the one thing that knew better.
-    const held = values[0];
-    if (setup && !core.multiple && held !== undefined) core.rememberLabel(held, el.value);
-    const settled = settledText();
-    // A label that has only just become knowable replaces the identifier this
-    // had to write in its place — but only while the box is still holding that,
-    // and only while nothing is being typed into it.
-    const stale = untrack(() => !filtering.get() && query.get() === shown && settled !== shown);
-    if (!changed && !stale) return;
-    shown = settled;
-
     untrack(() => {
-      filtering.set(false);
-      if (changed && !setup) setInputValue(settled);
-      else showInputValue(settled);
+      const chosen = lastValues !== null && !sameValues(values, lastValues);
+      lastValues = values;
+      // A value arriving answers whatever was being asked, whichever route
+      // brought it.
+      if (chosen && question !== null) asked.set(null);
+      const text = chosen ? held : (question ?? held);
+
+      // A name turning up for a value nobody has touched is not somebody
+      // typing: what changed is what the page can call the value, not what has
+      // been chosen, and reporting it would be this component telling the
+      // caller what they have just told it.
+      const learned = !chosen && question === null && lastAsked === null;
+      lastAsked = chosen ? null : question;
+
+      if (text === written) return;
+      const first = written === null;
+      written = text;
+      // Written straight to the element rather than bound in the template: this
+      // owns the textbox's value — it completes it, reverts it and clears it —
+      // and a `:value` binding beside that is two writers for one string.
+      if (el.value !== text) el.value = text;
+      if (!first && !learned) options.onInputValueChange?.(text);
     });
   });
 
@@ -1706,12 +1765,12 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
   let completed = 0;
   effect(() => {
     if (autocomplete !== 'both') return;
-    const asked = completions.get();
+    const keystroke = completions.get();
     core.listRevision.get();
-    if (asked === completed) return;
+    if (keystroke === completed) return;
 
     untrack(() => {
-      const typed = query.get();
+      const typed = query();
       const el = inputElement();
       if (!el || typed === '') return;
 
@@ -1719,7 +1778,7 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
       // after the handler that opened it, and a search answers later still.
       if (!options.listbox() || searching()) return;
 
-      completed = asked;
+      completed = keystroke;
       const first = core.items.first();
       if (!first) return;
       const text = textOf(first);
@@ -1736,7 +1795,7 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
   // Keep the count honest for the two changes this component makes itself, so
   // the live region does not lag a keystroke behind the list.
   effect(() => {
-    query.get();
+    asked.get();
     search?.data();
     search?.status();
     untrack(() => core.recount());
@@ -1748,9 +1807,8 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
     // showing nothing over a value it still holds is the same disagreement a
     // press on an option would have caused.
     if (core.disabled() || core.readOnly()) return false;
-    if (untrack(() => query.get()) === '' && core.valuesNow().length === 0) return false;
-    filtering.set(false);
-    setInputValue('');
+    if (untrack(boxText) === '' && core.valuesNow().length === 0) return false;
+    asked.set(null);
     // A single-value combobox showing nothing holds nothing; a multiple keeps
     // its chips, which Backspace and the chip buttons remove.
     if (!core.multiple) core.clear();
@@ -1806,14 +1864,6 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
     return count === 0 ? core.emptyMessage() : core.resultsMessage(count);
   };
 
-  const openFiltered = (focus: ListboxOpenFocus): void => {
-    if (core.openState.get()) return;
-    // Opening by a means other than typing shows the whole list: the text in
-    // the box is a value that has been chosen, not a search in progress.
-    filtering.set(false);
-    core.openListbox(focus);
-  };
-
   return {
     ...common,
     search,
@@ -1826,9 +1876,9 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
     // window; the popup's empty state and `status()` both render from this.
     isEmpty: () => core.openState.get() && !searching() && core.optionCount.get() === 0,
 
-    inputValue: () => query.get(),
-    setInputValue: (value) => setInputValue(value, true),
-    isFiltering: () => filtering.get(),
+    inputValue: boxText,
+    setInputValue: (value) => asked.set(value),
+    isFiltering: () => asked.get() !== null,
     matches,
     items: () => search?.data() ?? [],
     isLoading: () => search?.isLoading() ?? false,
@@ -1837,14 +1887,13 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
     onInput(event: Event) {
       const target = event.target;
       const typed = target && 'value' in target ? String((target as { value: unknown }).value) : '';
-      const grew = typed.length > untrack(() => query.get()).length;
+      const grew = typed.length > untrack(boxText).length;
 
-      filtering.set(true);
       // Typing invalidates the highlight: the option it named may not survive
       // the filter, and `aria-activedescendant` must never point at an id that
       // has left the document.
       core.activeValue.set(null);
-      setInputValue(typed, true);
+      asked.set(typed);
       // Typing opens the popup — including a deletion back to empty, where the
       // list is simply unfiltered again.
       core.openListbox('none');
@@ -1852,14 +1901,15 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
     },
 
     onInputClick() {
-      // Opens, never closes. A press to reposition the caret in text already
-      // typed must not take the list away.
-      openFiltered('none');
+      // Opens, never closes, and says nothing about what is in the box: a press
+      // to reposition the caret in text already typed must not take the list
+      // away, nor answer the question the text is.
+      if (!core.openState.get()) core.openListbox('none');
     },
 
     onToggleClick() {
       if (core.openState.get()) core.close();
-      else openFiltered('selected');
+      else core.openListbox('selected');
     },
 
     onTogglePointerDown(event: PointerEvent) {
@@ -1874,16 +1924,20 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
       event.preventDefault();
     },
 
+    onOptionClick(event: MouseEvent) {
+      // The pointer route goes through the core, so the same answer has to be
+      // read off what it chose — a press that took nothing leaves the question
+      // standing, exactly as the keyboard's own Enter does.
+      const chosen = core.onOptionClick(event);
+      if (chosen !== null && !core.disabled() && !core.readOnly()) asked.set(null);
+    },
+
     onInputBlur() {
       core.field.markTouched();
-      if (options.allowCustomValue === true && !core.multiple) {
-        commitCustomValue();
-      } else {
-        // Whatever is in the box is not a value, so it goes back to being the
-        // value that is. Leaving it would show text the form does not hold.
-        filtering.set(false);
-        setInputValue(settledText());
-      }
+      if (options.allowCustomValue === true && !core.multiple) commitCustomValue();
+      // Whatever is left in the box is not a value, so the box goes back to
+      // saying which one is. Leaving it would show text the form does not hold.
+      asked.set(null);
       core.close();
     },
 
@@ -1895,12 +1949,12 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
 
       switch (event.key) {
         case 'ArrowDown':
-          if (!open) openFiltered(alt ? 'none' : 'first');
+          if (!open) core.openListbox(alt ? 'none' : 'first');
           else if (!alt) core.move(1);
           break;
 
         case 'ArrowUp':
-          if (!open) openFiltered(alt ? 'none' : 'last');
+          if (!open) core.openListbox(alt ? 'none' : 'last');
           else if (alt) core.close();
           else core.move(-1);
           break;
@@ -1926,7 +1980,7 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
             takeOption(value);
             break;
           }
-          if (options.allowCustomValue === true && query.get().trim() !== '') {
+          if (options.allowCustomValue === true && query().trim() !== '') {
             commitCustomValue();
             if (core.closesOnSelect) core.close();
             break;
@@ -1961,7 +2015,7 @@ export function createCombobox<T = unknown>(options: ComboboxOptions<T>): Combob
 
         case 'Backspace': {
           // Only on an empty box, so it never eats a character the user meant.
-          if (!core.multiple || query.get() !== '') return;
+          if (!core.multiple || boxText() !== '') return;
           const last = core.valuesNow().at(-1);
           if (last === undefined) return;
           core.deselect(last);
