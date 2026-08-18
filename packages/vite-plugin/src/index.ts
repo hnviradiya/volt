@@ -22,14 +22,21 @@
  *     `signals.ts`.
  */
 
-import { readdir, readFile } from 'node:fs/promises';
-import { dirname, resolve as resolvePath } from 'node:path';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { basename, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { transform as esbuildTransform } from 'esbuild';
 import MagicString from 'magic-string';
 import { compileStringAsync } from 'sass';
-import { compile, CompilerError, formatDiagnostic } from '@voltdev/compiler';
-import type { A11ySeverity } from '@voltdev/compiler';
+import {
+  compile,
+  CompilerError,
+  formatDiagnostic,
+  generateMessages,
+  scanMessageKeys,
+  unusedMessages,
+} from '@voltdev/compiler';
+import type { A11ySeverity, MessageCatalog } from '@voltdev/compiler';
 import type { Plugin } from 'vite';
 import { DecoratorError, planLowering } from './decorators.js';
 import { planSignalLowering } from './signals.js';
@@ -72,7 +79,48 @@ export interface VoltPluginOptions {
    * is switching all of them off. `off` skips the pass.
    */
   a11y?: A11ySeverity;
+  /**
+   * Compile an application's own messages instead of loading them.
+   *
+   * Given a catalogue, every literal `t('key')` the template compiler saw is
+   * checked against it, so a key that is not there fails the build with the
+   * template's file and line; and the catalogue is turned into a module of
+   * one function per message, which a bundler can take apart. Leaving this
+   * out changes nothing: the runtime catalogue on `createLocaleProvider` is
+   * still there, still the fallback, and still the whole story for a project
+   * with no build step.
+   */
+  messages?: VoltMessagesOptions;
 }
+
+export interface VoltMessagesOptions {
+  /** The catalogue, absolute or relative to the project root. */
+  catalog: string;
+  /**
+   * The BCP 47 tag it is written in, baked into the generated `Intl`
+   * instances. Defaults to the file's own name, which is how a catalogue is
+   * conventionally named: `messages/de-DE.json`.
+   */
+  locale?: string;
+  /** What the generated module answers to. Defaults to `virtual:volt-messages`. */
+  id?: string;
+  /**
+   * Where to write the declarations, if anywhere.
+   *
+   * Opt-in because it writes into somebody's repository. Point it at a file
+   * the project's tsconfig includes and `t('clsoe')` stops compiling.
+   */
+  typesFile?: string;
+  /**
+   * Whether a message nothing asks for is reported. `warn` is the default and
+   * only applies to a production build: a dev-server rebuild transforms the
+   * modules that changed, so the set of call sites it has seen is a fraction
+   * of the application's and every message would look unused.
+   */
+  unused?: 'warn' | 'off';
+}
+
+const DEFAULT_MESSAGES_ID = 'virtual:volt-messages';
 
 const DEFAULT_INCLUDE = /\.m?ts$/;
 const DEFAULT_EXCLUDE = /[\\/]node_modules[\\/]/;
@@ -92,6 +140,37 @@ export function volt(options: VoltPluginOptions = {}): Plugin[] {
     return include.test(clean) && !exclude.test(clean);
   };
 
+  const messages = options.messages;
+  const messagesId = messages?.id ?? DEFAULT_MESSAGES_ID;
+  /** Rollup's convention for a module no file backs. */
+  const resolvedMessagesId = `\0${messagesId}`;
+
+  /**
+   * Every message key anything in this build asked for.
+   *
+   * Templates contribute exactly what they ask for, because they are parsed.
+   * Ordinary modules contribute a lexical scan, which over-collects — and
+   * that is the safe direction, since the only thing this set decides is
+   * which messages to report as unused.
+   */
+  const used = new Set<string>();
+  let root = process.cwd();
+  let isBuild = false;
+
+  /**
+   * The catalogue, read once and kept.
+   *
+   * Held as a promise rather than a value so the template transform can await
+   * the same read `buildStart` began, instead of racing it or repeating it.
+   */
+  let catalog: Promise<LoadedCatalog> | null = null;
+
+  const loadCatalog = (): Promise<LoadedCatalog> | null => {
+    if (!messages) return null;
+    catalog ??= readCatalog(resolvePath(root, messages.catalog), messages.locale);
+    return catalog;
+  };
+
   const templatePlugin: Plugin = {
     name: 'volt:templates',
     // Must see the original source, before decorators are lowered away.
@@ -100,14 +179,19 @@ export function volt(options: VoltPluginOptions = {}): Plugin[] {
       if (!precompile || !shouldProcess(id)) return null;
       if (!code.includes('@Component')) return null;
 
+      const loaded = await loadCatalog();
+
       try {
         return await compileTemplates(code, id, {
           runtimeModule,
           debug: options.debug ?? false,
           groupRowBindings,
           a11y: options.a11y,
+          catalog: loaded?.catalog,
+          catalogFile: loaded?.file,
           watch: (file) => this.addWatchFile(file),
           warn: (message) => this.warn(message),
+          use: (key) => used.add(key),
         });
       } catch (err) {
         if (err instanceof CompilerError) {
@@ -146,7 +230,7 @@ export function volt(options: VoltPluginOptions = {}): Plugin[] {
       const s = new MagicString(code);
       for (const { start, end, text } of plan.rewrites) s.overwrite(start, end, text);
       const named = plan.imports.map((it) => `${it.exported} as ${it.local}`).join(', ');
-      s.prepend(`import { ${named} } from ${JSON.stringify(plan.importFrom)};\n`);
+      s.appendLeft(plan.importAt, `import { ${named} } from ${JSON.stringify(plan.importFrom)};\n`);
       return { code: s.toString(), map: s.generateMap({ hires: true, source: id }) };
     },
   };
@@ -212,12 +296,149 @@ export function volt(options: VoltPluginOptions = {}): Plugin[] {
           // left to the app, because forgetting it would mean either shipping
           // every diagnostic or crashing on an undefined identifier.
           __VOLT_DEV__: JSON.stringify(env.mode !== 'production'),
+          // Which side of the render this build is. Vite already knows —
+          // `vite build --ssr` sets it — and the answer decides behaviour, not
+          // just diagnostics: a client bundle drops the request scoping and
+          // the server's flushing, and a server bundle never queues `onMount`.
+          __VOLT_SERVER__: JSON.stringify(env.isSsrBuild === true),
         },
       };
     },
   };
 
-  return [envPlugin, templatePlugin, signalPlugin, decoratorPlugin];
+  /**
+   * The catalogue as a module of one function per message.
+   *
+   * Separate from the template plugin because it does a different job for a
+   * different half of the codebase: templates are checked, ordinary modules
+   * are only read for which keys they mention, and the report that needs both
+   * can only run once the whole graph has been walked.
+   */
+  const messagePlugin: Plugin = {
+    name: 'volt:messages',
+
+    configResolved(config) {
+      root = config.root;
+      isBuild = config.command === 'build';
+    },
+
+    async buildStart() {
+      if (!messages) return;
+      // Cleared per build so a watch-mode rebuild reports what this run saw
+      // rather than everything since the server started.
+      used.clear();
+      catalog = null;
+      const loaded = await loadCatalog();
+      if (!loaded) return;
+      this.addWatchFile(loaded.file);
+
+      if (messages.typesFile) {
+        const { types } = generateMessages(loaded.catalog, {
+          locale: loaded.locale,
+          catalogFile: loaded.file,
+          moduleId: messagesId,
+        });
+        await writeFile(resolvePath(root, messages.typesFile), types, 'utf8');
+      }
+    },
+
+    resolveId(id) {
+      if (messages && id === messagesId) return resolvedMessagesId;
+      return null;
+    },
+
+    async load(id) {
+      if (id !== resolvedMessagesId) return null;
+      const loaded = await loadCatalog();
+      if (!loaded) return null;
+      return generateMessages(loaded.catalog, {
+        locale: loaded.locale,
+        catalogFile: loaded.file,
+      }).code;
+    },
+
+    transform(code, id) {
+      // Not a template, so nothing here is checked — only noted, so that a
+      // message used from TypeScript is not reported as used by nobody.
+      // `shouldProcess` is the whole decision: the generated module answers to
+      // a `\0`-prefixed id, which matches no source-file pattern, so it never
+      // reaches here to be scanned as if it were somebody's source.
+      if (!messages || !shouldProcess(id)) return null;
+      scanMessageKeys(code, used);
+      return null;
+    },
+
+    async buildEnd(error) {
+      if (!messages || error || (messages.unused ?? 'warn') === 'off') return;
+      // A dev-server rebuild transforms the modules that changed and nothing
+      // else, so it has seen a fraction of the call sites. Reporting from
+      // there would mean warning about messages that are used — which is the
+      // finding that teaches a team to switch the warnings off.
+      if (!isBuild) return;
+
+      const loaded = await loadCatalog();
+      if (!loaded) return;
+      for (const finding of unusedMessages(loaded.catalog, used, {
+        filename: loaded.file,
+        source: loaded.source,
+      })) {
+        this.warn(formatDiagnostic(finding));
+      }
+    },
+  };
+
+  return [envPlugin, messagePlugin, templatePlugin, signalPlugin, decoratorPlugin];
+}
+
+interface LoadedCatalog {
+  file: string;
+  source: string;
+  catalog: MessageCatalog;
+  /** Settled here so a tag nobody can format fails the build, not a page. */
+  locale: string;
+}
+
+async function readCatalog(file: string, locale: string | undefined): Promise<LoadedCatalog> {
+  let source: string;
+  try {
+    source = await readFile(file, 'utf8');
+  } catch {
+    throw new Error(`[volt] messages catalogue "${file}" could not be read`);
+  }
+
+  let catalog: MessageCatalog;
+  try {
+    catalog = JSON.parse(source) as MessageCatalog;
+  } catch (err) {
+    throw new Error(`[volt] messages catalogue "${file}" is not valid JSON:\n${(err as Error).message}`);
+  }
+  return { file, source, catalog, locale: locale ?? localeFromPath(file) };
+}
+
+/**
+ * `messages/de-DE.json` is written in `de-DE`, which is the whole convention.
+ *
+ * A name that is not a language tag is refused rather than guessed at.
+ * `messages.json` would otherwise derive the tag `messages`, which is a
+ * structurally legal subtag `Intl` accepts and silently formats nothing the
+ * way the catalogue intends — a page in the wrong locale with nothing to
+ * show for it. Two letters, or three, or say it outright.
+ */
+function localeFromPath(file: string): string {
+  const derived = basename(file).replace(/\.[^.]+$/, '');
+  let canonical = false;
+  try {
+    canonical = /^[A-Za-z]{2,3}(-|$)/.test(derived) && Intl.getCanonicalLocales(derived).length > 0;
+  } catch {
+    canonical = false;
+  }
+  if (!canonical) {
+    throw new Error(
+      `[volt] cannot tell what locale "${file}" is written in. Name it after its ` +
+        'language tag — `messages/de-DE.json` — or set `messages.locale`.',
+    );
+  }
+  return derived;
 }
 
 export default volt;
@@ -247,10 +468,14 @@ interface TemplateBuild {
   debug: boolean;
   groupRowBindings: boolean;
   a11y: A11ySeverity | undefined;
+  catalog: MessageCatalog | undefined;
+  catalogFile: string | undefined;
   /** Registering a file makes an edit to it re-run this transform. */
   watch: (file: string) => void;
   /** Where a finding the compiler is not certain enough about to throw goes. */
   warn: (message: string) => void;
+  /** A message key this template asked for, for the unused-message report. */
+  use: (key: string) => void;
 }
 
 /**
@@ -266,7 +491,8 @@ async function compileTemplates(
   id: string,
   build: TemplateBuild,
 ): Promise<{ code: string; map: null } | null> {
-  const { runtimeModule, debug, groupRowBindings, a11y, watch, warn } = build;
+  const { runtimeModule, debug, groupRowBindings, a11y, catalog, catalogFile, watch, warn, use } =
+    build;
   const templates = findTemplateSites(code);
   const styles = findStyleSites(code);
   if (templates.length === 0 && styles.length === 0) return null;
@@ -304,7 +530,11 @@ async function compileTemplates(
       runtimeModule,
       groupRowBindings,
       a11y,
+      catalog,
+      catalogFile,
     });
+
+    for (const site of result.messageSites) use(site.key);
 
     // The half of the accessibility pass that does not refuse the build. It
     // reaches a person here or nowhere: nothing else in a real build reads it,

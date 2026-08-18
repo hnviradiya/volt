@@ -27,6 +27,10 @@ export default defineConfig({
         runtime: r('src/runtime.ts'),
         jit: r('src/jit.ts'),
         signals: r('src/signals.ts'),
+        // An entry so the bundle keeps it as its own chunk: the component
+        // layer reaches it only from inside `if (__VOLT_DEV__)`, and an
+        // application's production build drops the chunk with the branch.
+        devtools: r('src/devtools.ts'),
       },
       formats: ['es'],
     },

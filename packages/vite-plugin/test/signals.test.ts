@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { transform } from 'esbuild';
 import { Signal } from '@voltdev/reactivity';
 import * as lowered from '@voltdev/reactivity/signals';
 import { volt } from '../src/index.js';
@@ -92,6 +93,85 @@ describe('lowering the namespace', () => {
   });
 });
 
+describe('where the import goes', () => {
+  it('stays behind a shebang, which means nothing on line two', () => {
+    const output = run(
+      `#!/usr/bin/env node\nimport { Signal } from '@voltdev/core';\nexport const a = new Signal.State(0);\n`,
+      '/app/src/cli.mts',
+    )!;
+    // Prepended at offset 0 this is not a slow file, it is an unparseable one:
+    // `#!` is only a comment on the first line.
+    expect(output.split('\n')[0]).toBe('#!/usr/bin/env node');
+    expect(output).toContain('new __volt_Signal_State(0)');
+  });
+
+  it('stays behind a directive prologue, which is positional too', () => {
+    const output = run(
+      `'use client';\nimport { Signal } from '@voltdev/core';\nexport const a = new Signal.State(0);\n`,
+    )!;
+    // One statement in front of it and `'use client'` is an expression whose
+    // value nobody reads — silently, and in a build, which is where a wrong
+    // answer about which half of an app this is costs the most.
+    expect(output.split('\n')[0]).toBe(`'use client';`);
+    expect(output).toContain('new __volt_Signal_State(0)');
+  });
+
+  it('clears a shebang, several directives and the comments between them', () => {
+    const code = [
+      '#!/usr/bin/env node',
+      `"use strict";`,
+      '// what this file is',
+      `'use client'`,
+      `import { Signal } from '@voltdev/core';`,
+      'export const a = new Signal.State(0);',
+      '',
+    ].join('\n');
+    const output = run(code, '/app/src/cli.mts')!;
+    expect(output.slice(0, code.indexOf(`import`))).toBe(code.slice(0, code.indexOf(`import`)));
+  });
+
+  it('emits a file esbuild will still parse', async () => {
+    // The shebang case does not degrade, it stops compiling: `#!` on line two
+    // is a syntax error, and nothing else in this file would notice.
+    const output = run(
+      `#!/usr/bin/env node\nimport { Signal } from '@voltdev/core';\nexport const a = new Signal.State(0);\n`,
+      '/app/src/cli.mts',
+    )!;
+    await expect(transform(output, { loader: 'ts' })).resolves.toBeTruthy();
+  });
+
+  it('puts the import before the code that uses it, prologue or no prologue', () => {
+    // All one line: there is no next line to move to that is not already past
+    // the rewrite.
+    const output = run(
+      `'use client'; import { Signal } from '@voltdev/core'; export const a = new Signal.State(0);\n`,
+    )!;
+    expect(output.indexOf('@voltdev/core/signals')).toBeLessThan(
+      output.indexOf('new __volt_Signal_State'),
+    );
+  });
+
+  /** A file opening with a string that is an expression, not a directive. */
+  const notDirectives: Record<string, string> = {
+    'on one line': `'volt'.length;`,
+    // The line break is not the end of the statement, because what follows it
+    // cannot start one. Treating this as a directive and inserting after the
+    // first line splits the expression in half.
+    'across two': `'volt'\n  .length;`,
+  };
+
+  for (const [shape, head] of Object.entries(notDirectives)) {
+    it(`does not take a leading expression ${shape} for a directive`, async () => {
+      const output = run(
+        `${head}\nimport { Signal } from '@voltdev/core';\nexport const a = new Signal.State(0);\n`,
+      )!;
+      expect(output).toContain(head);
+      expect(output.indexOf('@voltdev/core/signals')).toBeLessThan(output.indexOf(`'volt'`));
+      await expect(transform(output, { loader: 'ts' })).resolves.toBeTruthy();
+    });
+  }
+});
+
 describe('declining rather than mis-rewriting', () => {
   /** Each of these needs the namespace as an object; none can be lowered. */
   const aliased: Record<string, string> = {
@@ -105,7 +185,12 @@ describe('declining rather than mis-rewriting', () => {
 
   for (const [what, body] of Object.entries(aliased)) {
     it(`declines the file when the namespace is ${what}`, () => {
-      const code = `import { Signal } from '@voltdev/core';\n${body}\n`;
+      // The lowerable use above the alias is what makes the row mean anything.
+      // Without it the plan is declined for having nothing to rewrite at all,
+      // and every one of these passes with the bail-out taken out.
+      const code =
+        `import { Signal } from '@voltdev/core';\n` +
+        `export const ok = new Signal.State(0);\n${body}\n`;
       expect(run(code)).toBeNull();
       expect(planSignalLowering(code).kind).toBe('declined');
     });

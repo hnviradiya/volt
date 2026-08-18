@@ -43,7 +43,7 @@
  * id, which stays with the element the label points at.
  */
 
-import { Signal, effect, onCleanup } from '@voltdev/core';
+import { Signal, effect, flushSync, measureEffect, onCleanup, renderEffect } from '@voltdev/core';
 import {
   createFormField,
   type FormField,
@@ -419,32 +419,70 @@ export function createTextarea(options: TextareaOptions = { input: () => null })
       return;
     }
 
-    const measure = () => {
-      // A textarea that is not being rendered reports a `scrollHeight` of 0,
-      // and writing that back collapses the box the moment it is shown again.
-      if (!el.checkVisibility()) return;
+    // Measuring here is write, then read, then write — the box has to go back
+    // to its natural height before `scrollHeight` means anything. All three in
+    // one effect is what makes every autosizing textarea on a page force a
+    // layout of its own, so they are spread across the phases that exist for
+    // them: render resets, measure reads, render applies. Nested, so the
+    // strategy above is chosen once per element rather than once per keystroke.
+    let ticket = 0;
+    const request = new Signal.State(0);
+    const askAgain = () => request.set(++ticket);
 
-      // Reset first: without it the box can only ever grow, because
-      // `scrollHeight` never reports less than the height already set.
+    // The last reading, and a revision to publish it under. A counter rather
+    // than the reading itself, because an unchanged height must still re-run
+    // the pass that applies it: until it does, the box is sitting at `auto`.
+    let measured: { height: number; overflow: string } | null = null;
+    const revision = new Signal.State(0);
+    let published = 0;
+
+    renderEffect(() => {
+      base.value();
+      request.get();
+      // Without the reset the box can only ever grow: `scrollHeight` never
+      // reports less than the height already set.
       el.style.height = 'auto';
-      const cap = capHeight(el, options.maxRows);
-      const height = Math.min(el.scrollHeight, cap);
-      if (height > 0) el.style.height = `${height}px`;
-      // Only once capped, so a growing box never shows a scrollbar it does not
-      // need and a capped one always can.
-      el.style.overflowY = el.scrollHeight > cap ? 'auto' : 'hidden';
-    };
-
-    remeasure = measure;
-    onCleanup(() => {
-      remeasure = null;
     });
 
-    // Re-measure when the value changes, in a nested effect so the strategy
-    // above is chosen once per element rather than once per keystroke.
-    effect(() => {
+    measureEffect(() => {
       base.value();
-      measure();
+      request.get();
+      // A textarea that is not being rendered reports a `scrollHeight` of 0,
+      // and writing that back collapses the box the moment it is shown again.
+      // The last good reading is republished instead, which is what puts the
+      // box back after the reset above.
+      if (el.checkVisibility()) {
+        const cap = capHeight(el, options.maxRows);
+        const natural = el.scrollHeight;
+        // One read where there were two. With the height clamped to `cap`,
+        // asking the box again whether it overflows is asking whether
+        // `natural` did — and the second read came after a write, so it cost
+        // a layout of its own.
+        measured = {
+          height: Math.min(natural, cap),
+          // Only once capped, so a growing box never shows a scrollbar it does
+          // not need and a capped one always can.
+          overflow: natural > cap ? 'auto' : 'hidden',
+        };
+      }
+      revision.set(++published);
+    });
+
+    renderEffect(() => {
+      revision.get();
+      if (!measured) return;
+      if (measured.height > 0) el.style.height = `${measured.height}px`;
+      el.style.overflowY = measured.overflow;
+    });
+
+    remeasure = () => {
+      askAgain();
+      // `resize()` says "now", and a caller who has just changed a layout
+      // nothing else can see is not inside a flush.
+      flushSync();
+    };
+    onCleanup(() => {
+      remeasure = null;
     });
 
     let width = -1;
@@ -454,7 +492,7 @@ export function createTextarea(options: TextareaOptions = { input: () => null })
       // be a measuring loop that never settles.
       if (next === width) return;
       width = next;
-      measure();
+      askAgain();
     });
     observer.observe(el);
     onCleanup(() => observer.disconnect());

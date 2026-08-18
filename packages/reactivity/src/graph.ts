@@ -15,6 +15,8 @@
  * half-updated graph.
  */
 
+import { devListener } from './dev.js';
+
 const CLEAN = 0;
 const CHECK = 1;
 const DIRTY = 2;
@@ -240,6 +242,11 @@ function propagate(node: Producer, direct: boolean, pending: Set<WatcherNode>): 
       continue;
     }
 
+    // Before the colour is looked at, not after: an effect already dirty from
+    // an earlier write in the same turn is not walked again, and it is exactly
+    // then that "which write woke this" has more than one answer to record.
+    if (__VOLT_DEV__ && sink.isEffect) devListener?.wake(sink);
+
     const next: NodeState = direct ? DIRTY : CHECK;
     if (sink.state === CLEAN) {
       sink.state = next;
@@ -285,6 +292,8 @@ export class StateSignal<T> {
       throw new Error('[volt] A Signal.Computed must not write to a Signal.State.');
     }
     if (this.equals(this.value, value)) return;
+
+    if (__VOLT_DEV__) devListener?.write(this as Producer, this.value, value);
 
     this.value = value;
     this.version++;

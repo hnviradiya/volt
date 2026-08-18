@@ -13,7 +13,10 @@
  *
  * The identity assertions are the point of all of them: a row that survives a
  * change must be the same element afterwards, since that is what carries
- * focus, scroll position and a running transition across the update.
+ * focus, scroll position and a running transition across the update. The one
+ * claim here that no assertion on DOM can reach is the marks handing their
+ * room back, which is watched through the allocation instead; the rest of what
+ * the reuse costs in bytes is measured in `each-memory.test.ts`.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { compileTemplate } from '@voltdev/core/jit';
@@ -132,6 +135,32 @@ describe('a list that spikes and shrinks', () => {
     expect(stamps().slice(0, 3)).toEqual(['0', '1', null]);
   });
 
+  // The size the buffer reuse was designed against, and the slowest test in
+  // the package: happy-dom charges a scan of the parent's children for every
+  // node removed, so dropping 99,950 of them takes seconds that a browser
+  // would not.
+  it('shrinks from 100,000 rows to 50 and grows back', { timeout: 60_000 }, () => {
+    // happy-dom also caps `querySelectorAll` at 65,536 results, so this counts
+    // through `children` instead. Both are limits of the environment.
+    const rows = (): HTMLCollection => host.querySelector('ul')!.children;
+
+    const set = list(labels(100_000));
+    expect(rows()).toHaveLength(100_000);
+
+    set(labels(50));
+    expect(rows()).toHaveLength(50);
+    expect(host.textContent).toBe(labels(50).join(''));
+
+    const survivor = rows()[7]!;
+    set(labels(100_000));
+
+    expect(rows()).toHaveLength(100_000);
+    // The 50 that were never dropped are still the same elements, and the
+    // 99,950 rebuilt around them are in the right order.
+    expect(rows()[7]).toBe(survivor);
+    expect(rows()[99_999]!.textContent).toBe('r99999');
+  });
+
   it('empties between two large lists', () => {
     const set = list(labels(500));
     set([]);
@@ -151,6 +180,32 @@ describe('a list that spikes and shrinks', () => {
     }
   });
 });
+
+/**
+ * The lengths of the `Int32Array`s allocated while `fn` runs.
+ *
+ * How much room the marks keep is not on `ReuseMarks`' surface — the point of
+ * the design is that a caller cannot tell — so the only honest way to see a
+ * buffer being handed back is to watch it being replaced.
+ */
+function stampBufferSizes(fn: () => void): number[] {
+  const sizes: number[] = [];
+  const real = globalThis.Int32Array;
+
+  globalThis.Int32Array = new Proxy(real, {
+    construct(target, args: [number]) {
+      if (typeof args[0] === 'number') sizes.push(args[0]);
+      return Reflect.construct(target, args) as Int32Array;
+    },
+  });
+  try {
+    fn();
+  } finally {
+    globalThis.Int32Array = real;
+  }
+
+  return sizes;
+}
 
 describe('reuse marks', () => {
   it('forgets the previous pass without being cleared', () => {
@@ -184,7 +239,13 @@ describe('reuse marks', () => {
     marks.claim(1999);
     expect(marks.claimed(1999)).toBe(true);
 
-    marks.begin(3);
+    // The reclaim is the cost this design was accepted with: a spike that is
+    // well past has to be handed back, not held for as long as the list is on
+    // screen. Without it the assertions below still pass on the stale buffer.
+    const shrunk = stampBufferSizes(() => marks.begin(3));
+    expect(shrunk).toHaveLength(1);
+    expect(shrunk[0]).toBeLessThan(2000);
+
     marks.claim(2);
     expect(marks.claimed(2)).toBe(true);
 

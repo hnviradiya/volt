@@ -63,7 +63,7 @@
  *     purpose: it means "the answer is known now", so it abandons the request.
  */
 
-import { Signal, batch, effect, onCleanup } from '@voltdev/core';
+import { Signal, batch, currentRequest, dataEffect, onCleanup, trackRequestData } from '@voltdev/core';
 
 // The proposal's own name for reading without subscribing; Volt adds no second
 // spelling for it.
@@ -502,7 +502,11 @@ export function createResource<T, S = undefined>(
   const runQueued = (): void => {
     const next = queued;
     queued = null;
-    if (next) void execute(next.source);
+    // Handed to the request rather than dropped: a server render has to wait
+    // for what it started before it can write the answer into the markup. A
+    // client build compiles that away and the promise goes unobserved, as it
+    // always did — the resource writes its own state when it lands.
+    if (next) trackRequestData(execute(next.source));
   };
 
   /**
@@ -516,7 +520,11 @@ export function createResource<T, S = undefined>(
     if (timer !== null) clearTimeout(timer);
 
     const sinceLast = throttle > 0 ? throttle - (Date.now() - lastStart) : 0;
-    const delay = Math.max(debounce, sinceLast);
+    // Both are the client's: they exist to coalesce keystrokes, and a server
+    // has none. A wait there is worse than useless — the request tracks the
+    // fetches it started, and a fetch that has not started yet is one the
+    // render finishes without, so the page ships with the data missing.
+    const delay = currentRequest() ? 0 : Math.max(debounce, sinceLast);
 
     if (delay <= 0) {
       timer = null;
@@ -555,7 +563,11 @@ export function createResource<T, S = undefined>(
    */
   let wasEnabled = untrack(() => (options.enabled ? options.enabled() : true));
 
-  effect(() => {
+  // The data lane, not the user lane. The first run still has to be deferred —
+  // a resource in a class field must see the props assigned after construction
+  // — but a server drains data and never drains user work, so a resource
+  // triggered from an `effect` would simply never fetch there.
+  dataEffect(() => {
     const enabled = options.enabled ? options.enabled() : true;
     const source = readSource();
 

@@ -1,20 +1,11 @@
 /**
  * Unique ids for wiring ARIA relationships.
  *
- * `aria-labelledby` and friends refer to elements by id, so a component that
- * renders twice on a page needs two distinct ids without the author supplying
- * them. A counter is enough: these never leave the document they are created
- * in, and are not expected to be stable across a reload.
+ * The implementation moved to `@voltdev/core`, and with it the definition of
+ * unique: an id is now derived from the component's position in the tree
+ * rather than from a process-wide counter, because a counter numbers two
+ * concurrent server renders out of the same sequence. Re-exported here
+ * because every primitive that needs one asks a primitive for it.
  */
 
-let counter = 0;
-
-export function createId(prefix = 'volt'): string {
-  counter += 1;
-  return `${prefix}-${counter}`;
-}
-
-/** Test seam: make ids predictable within a test. */
-export function resetIdCounter(): void {
-  counter = 0;
-}
+export { createId, resetIds } from '@voltdev/core';

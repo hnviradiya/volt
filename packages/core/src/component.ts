@@ -25,11 +25,13 @@
 
 import {
   createRoot,
+  currentRequest,
   flushSync,
   getScope,
   isWritableSignal,
   onCleanup,
   renderEffect,
+  requestState,
   runWithScope,
   type Dispose,
   type Scope,
@@ -37,7 +39,15 @@ import {
 // See `dom.ts` for why the framework's own modules take the lowered spelling.
 import { State as StateSignal } from '@voltdev/reactivity/signals';
 
+import {
+  attachComponent,
+  enterComponent,
+  exitComponent,
+  install as installDevtools,
+  removeComponent,
+} from './devtools.js';
 import { insert } from './dom.js';
+import { enterPosition, exitPosition } from './ids.js';
 
 // `Symbol.metadata` is stage-3 and missing from current engines. Without it
 // the decorator transform quietly skips attaching metadata to the class, so it
@@ -365,22 +375,49 @@ function getRenderFn(component: ComponentType<unknown>, resolved: ResolvedConfig
   return render;
 }
 
+const REQUEST_STYLES = Symbol('volt.styles');
+
+/**
+ * The styles this request has collected, by selector, in the order they were
+ * first asked for.
+ *
+ * A server cannot use the process-global "already injected" mark a browser
+ * uses: the first request would take every component's styles and every
+ * request after it would be sent a page with none. Collecting rather than
+ * injecting is also the only thing available — there is no `document` to
+ * append to, and the markup these belong in has not been written yet.
+ */
+export function requestStyles(): ReadonlyMap<string, string> {
+  return requestState(REQUEST_STYLES, () => new Map<string, string>());
+}
+
 function injectStyles(resolved: ResolvedConfig): void {
-  if (resolved.stylesInjected) return;
-  const { styles } = resolved.config;
-  if (!styles) {
-    resolved.stylesInjected = true;
+  const request = currentRequest();
+  if (request) {
+    const text = styleText(resolved);
+    // A Map keyed by selector is its own record of what has been seen, so a
+    // request needs no second flag to dedupe against.
+    if (text) (requestStyles() as Map<string, string>).set(resolved.config.selector, text);
     return;
   }
 
-  const text = Array.isArray(styles) ? styles.join('\n') : styles;
-  if (text.trim() && typeof document !== 'undefined') {
+  if (resolved.stylesInjected) return;
+  resolved.stylesInjected = true;
+
+  const text = styleText(resolved);
+  if (text && typeof document !== 'undefined') {
     const el = document.createElement('style');
     el.setAttribute('data-volt', resolved.config.selector);
     el.textContent = text;
     document.head.appendChild(el);
   }
-  resolved.stylesInjected = true;
+}
+
+function styleText(resolved: ResolvedConfig): string {
+  const { styles } = resolved.config;
+  if (!styles) return '';
+  const text = Array.isArray(styles) ? styles.join('\n') : styles;
+  return text.trim() ? text : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -489,23 +526,52 @@ function instantiate(
 
   injectStyles(resolved);
 
-  const instance = new component() as Record<string, unknown> & LifecycleHooks;
-  SLOTS.set(instance, options.slots ?? null);
+  // Everything this component mints an id from belongs to its own position in
+  // the tree — including the ids its field initializers ask for, which is why
+  // the frame opens before construction rather than around the render.
+  const previousPosition = enterPosition();
+  // Open before construction for the same reason: a field initializer's
+  // effects belong to the class that declares them, not to its parent.
+  const handle = __VOLT_DEV__
+    ? enterComponent(
+        component.name,
+        resolved.config.selector,
+        resolved.propsByAlias.values(),
+        getScope(),
+      )
+    : null;
+  try {
+    const instance = new component() as Record<string, unknown> & LifecycleHooks;
+    SLOTS.set(instance, options.slots ?? null);
 
-  applyProps(instance, options.props ?? null, resolved);
+    if (__VOLT_DEV__ && handle) {
+      attachComponent(handle, instance);
+      // The scope that owns the instance is the one that disposes it, so the
+      // tools hear that it is gone from the same place the runtime does.
+      if (getScope()) onCleanup(() => removeComponent(handle));
+    }
 
-  const render = getRenderFn(component, resolved);
-  const dom = render(instance);
+    applyProps(instance, options.props ?? null, resolved);
 
-  if (instance.onMount) {
-    // Deferred so the node is in the document by the time this runs.
-    queueMicrotask(() => instance.onMount!());
+    const render = getRenderFn(component, resolved);
+    const dom = render(instance);
+
+    // Not queued at all on a server, rather than queued and then ignored: a
+    // microtask fires at the first `await`, and the render awaits its data, so
+    // declining to wait for this one would not stop it running.
+    if (!__VOLT_SERVER__ && instance.onMount) {
+      // Deferred so the node is in the document by the time this runs.
+      queueMicrotask(() => instance.onMount!());
+    }
+
+    const ref = options.props?.['__ref'];
+    if (typeof ref === 'function') (ref as (value: unknown) => void)(instance);
+
+    return dom;
+  } finally {
+    if (__VOLT_DEV__ && handle) exitComponent(handle);
+    exitPosition(previousPosition);
   }
-
-  const ref = options.props?.['__ref'];
-  if (typeof ref === 'function') (ref as (value: unknown) => void)(instance);
-
-  return dom;
 }
 
 // ---------------------------------------------------------------------------
@@ -799,3 +865,10 @@ export function mount(
 }
 
 export { getScope, runWithScope, type Scope };
+
+// Installed from here rather than from the package entry so that the tools are
+// already listening whichever module an application reached first —
+// `@voltdev/core` and `@voltdev/core/runtime` both pass through this one. The
+// whole statement, and everything it would install, is gone from a production
+// build.
+if (__VOLT_DEV__) installDevtools();

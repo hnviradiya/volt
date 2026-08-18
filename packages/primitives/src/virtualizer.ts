@@ -42,7 +42,7 @@
  * handler instead.
  */
 
-import { Signal, effect, onCleanup } from '@voltdev/core';
+import { Signal, effect, measureEffect, onCleanup } from '@voltdev/core';
 
 // The proposal's own name for reading without subscribing; Volt adds no second
 // spelling for it.
@@ -608,7 +608,7 @@ export function createVirtualizer(options: VirtualizerOptions): Virtualizer {
 
   // --- Wiring --------------------------------------------------------------
 
-  effect(() => {
+  measureEffect(() => {
     const scroller = options.scroller();
     if (!scroller) return;
 

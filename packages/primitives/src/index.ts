@@ -23,7 +23,7 @@ export {
   focusableWithin,
   type FocusScopeOptions,
 } from './focus-scope.js';
-export { createId, resetIdCounter } from './id.js';
+export { createId, resetIds } from './id.js';
 export {
   createCollection,
   ITEM_ATTRIBUTE,

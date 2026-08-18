@@ -814,6 +814,50 @@ matters: the runtime shape is the one applications would otherwise standardise
 on, and moving them off it afterwards is a breaking change to every message in
 every one of them.
 
+### What is built
+
+`packages/compiler/src/messages.ts`, wired up by `@voltdev/vite-plugin` when a
+project points it at a catalogue. The runtime catalogue is untouched.
+
+- [x] Each message compiles to its own exported function, so a bundler drops
+      what nobody imported. The module imports nothing and builds its two
+      `Intl` instances lazily.
+- [x] A `Messages` interface generated beside it, with parameters read out of
+      the message — `'page {n} of {m}'` types as `(params: { n; m }) => string`
+      — and a `t` typed against `keyof Messages`.
+- [x] A missing key is a build error naming the template file and line, from
+      the `messageKeys` the compiler already collected. Every call site now
+      carries a location, and the `:for` iterable is no longer the one
+      expression the collection missed.
+- [x] A missing parameter is the same error, in markup as well as in
+      TypeScript, because `t('pageOf', { n })` is a literal the template
+      compiler can read.
+- [x] An unused message is a warning, through the same `this.warn` the
+      accessibility rules use. Keys the component library speaks for itself
+      are never reported, and neither is anything on a dev-server rebuild,
+      which has only seen the modules that changed.
+
+Not yet, and the reason:
+
+- [ ] **Messages follow the code split.** `deferrable` and `messageSites` are
+      both on the compile result, so the analysis is there; nothing yet turns
+      the pair into per-chunk catalogues.
+- [ ] A key must be a plain identifier. Nested and dotted catalogues are
+      refused with a suggestion rather than silently renamed, because an
+      export is a function name and there is no second way to spell one.
+- [ ] `t` from the generated module names every message, so importing it links
+      the catalogue whole. That is the dynamic-key path, and the per-message
+      functions are the one to reach for.
+- [ ] **A template links the runtime `t`, not the compiled function.** Only the
+      checking half of "the compiler reads the call sites" has landed:
+      `{ t('close') }` is held against the catalogue and then emitted as the
+      `useLocale().t` call it always was, with no import of the generated
+      module. So tree-shaking serves a hand-written
+      `import { close } from 'virtual:volt-messages'` and nothing a template
+      writes. Rewriting the call site to that import is what would make the
+      two halves one pass — and is the prerequisite for the chunk attribution
+      above.
+
 ## Editor support
 
 Today a template is a plain `.html` file, so an editor gives it HTML
@@ -878,15 +922,26 @@ in the first place — so the index is the right cost to pay.
 A browser extension plus the hooks in core it needs, all behind `__VOLT_DEV__`
 so none of it reaches production.
 
-- [ ] **Component tree** — instances, their props, and their scopes
-- [ ] **Signal graph** — nodes, edges, and what is currently live. Volt already
+The hooks are built: `@voltdev/core/devtools`, documented at
+[docs/reference/devtools.md](docs/reference/devtools.md), reachable from an
+extension as `globalThis.__VOLT_DEVTOOLS__`. A production build carries none of
+them, which `packages/core/test/devtools.test.ts` asserts against built bytes.
+What is left in this section is the extension itself and the two features that
+need one.
+
+- [x] **Component tree** — instances, their props, and their scopes
+- [x] **Signal graph** — nodes, edges, and what is currently live. Volt already
       exposes exactly what this needs: `Signal.subtle.introspectSources`,
       `introspectSinks`, `hasSinks` and `hasSources` are the graph-walking API
       a inspector is built on. They were measured at ~100 B gzipped and nearly
       cut for it; this is what they are for.
-- [ ] **Why did this update** — which write woke which effect, which is the
-      question fine-grained reactivity makes answerable and virtual DOM does not
-- [ ] **Performance** — effect run counts and durations, flush timings, and
+- [x] **Why did this update** — which write woke which effect, which is the
+      question fine-grained reactivity makes answerable and virtual DOM does
+      not. Collected whether or not a session is recording, because the same
+      fact is what an effect that throws puts in its message and what a
+      production error report needs — one mechanism, as the observability entry
+      below asks for.
+- [x] **Performance** — effect run counts and durations, flush timings, and
       which bindings are re-running most
 - [ ] **Time travel** — signal history, step back and forth
 - [ ] Highlight the DOM a binding owns, on hover
@@ -1107,7 +1162,13 @@ and of how the leanest and fastest of them achieve it. Ordered by value.
 
 **Buys:** The single defence against the stall that actually defines how a component library feels. `flushSync` (packages/reactivity/src/effect.ts:235) drains render effects to fixed point then user effects, all in one microtask; the moment any user effect reads geometry (popover positioning, scroll sync, overflow measurement, autosize) it forces a synchronous layout over everything just written, and with N such components the flush becomes write→layout→write→layout N times. A measure phase collapses all reads in a flush to one forced layout. It is ~20 lines next to the existing two-watcher loop now, and unretrofittable once twenty components each own a measuring effect. Pair it with a tracked forced-layout-per-flush metric.
 
-**Costs:** A third phase is public API surface and another ordering rule to document and test. A measure callback that writes silently reinstates the thrash, so it needs a `__VOLT_DEV__` guard that traps write paths during the measure drain. Code that measures runs one phase later than naive expectation.
+**Built, and the metric it was paired with counted the opposite thing.** The lane is `measureEffect`, drained between render and user in `flushSync` (packages/reactivity/src/effect.ts), with a development guard over the drain: a MutationObserver for anything that reaches the tree, plus wrapped `scrollTop`/`scrollLeft`/`scrollIntoView`, which move a scroller without changing a node and so are invisible to it. Past those the guard is blind by construction — `input.value`, `el.focus()`, a detached subtree — and `packages/reactivity/test/measure.test.ts` pins that boundary from both sides.
+
+The paired "forced-layout-per-flush metric" was `forcedLayouts`, counted from the phase transitions. It counts *use* of the lane, not thrash: a read from `effect()` never enters a measure drain, so a page that measures entirely from the wrong phase reports zero rather than a climbing peak — the opposite of what the docs claimed for it. `getFlushMetrics()` now also reports `strayReads`, geometry read from a render or user effect, which is the number that actually detects the failure. It is instrumented rather than derived, so unlike `forcedLayouts` it is a development number and reads zero in a production build.
+
+Adoption is what makes any of it real, and the warning above about unretrofittability was accurate: the lane shipped with none. Four primitives now read from it — the disclosure panel's `scrollHeight`, the scroll area's six-property geometry, the code block's overflow probe and the virtualizer's scroller wiring — plus the textarea autosize, which had to be split across render → measure → render because it writes before it can read. What is left in `effect()` is left deliberately: the breadcrumb trail measures by unhiding every crumb and putting them back, which is a write, and drag-drop, the slider and the scrollbar tracks all read from pointer handlers, which are not in a flush and have no phase to belong to.
+
+**Costs:** A third phase is public API surface and another ordering rule to document and test. A measure callback that writes silently reinstates the thrash, so it needs a `__VOLT_DEV__` guard that traps write paths during the measure drain. Code that measures runs one phase later than naive expectation. The `strayReads` half of the accounting wraps a dozen DOM accessors on first flush, which is a development-only cost but a global one.
 
 ### 3. Grid: one painter effect per row, no per-cell signals, and cell renderers flyweighted per column
 
@@ -1135,9 +1196,9 @@ and of how the leanest and fastest of them achieve it. Ordered by value.
 
 ### 7. Lower the `Signal` TypeScript namespace to direct imports at build time
 
-**Buys:** The highest-confidence kB win available, and it compounds across every app, because `export namespace` compiles to a runtime object and `introspectSources`, `introspectSinks`, `hasSinks`, `hasSources`, `unwatched`, `Watcher` and `untrack` all stay reachable through it. The vite-plugin already rewrites `@Component`/`@Prop`, so the machinery exists.
+**Buys:** The highest-confidence kB win available, and it compounds across every app, because `export namespace` compiles to a runtime object and `currentComputed`, `introspectSources`, `introspectSinks`, `hasSinks` and `hasSources` all stay reachable through it. `Watcher` and `untrack` were on this list and should not have been: `effect.ts` imports both straight from `graph.js` and `graph.ts` tests `sink instanceof WatcherNode`, so nothing done to the namespace can drop either. The vite-plugin already rewrites `@Component`/`@Prop`, so the machinery exists.
 
-**Built, and the number above was wrong.** The 562 B figure does not reproduce: no import spelling reaches 1,395 B. Importing `StateSignal` straight out of `graph.ts`, bypassing every barrel, measures 1,665 B gzip on a Vite production build — exactly what the lowering produces, so 1,665 B is the floor rather than an intermediate step. Against a 1,898 B namespace baseline the real win is **233 B gzip (-12.3%)** for an app using only `Signal.State`, **192 B (-6.7%)** once it also uses `effect`, and **196 B (-3.7%)** for the counter example. Half of that had to be bought a second time inside the framework: `dom.ts` reached `Signal.subtle.untrack` and constructed through `Signal.State`, so until the DOM runtime took the lowered spelling too, a compiled component app saved 6 B. Every package outside core still reaches through the namespace — `presence.ts`, `slider-upload.ts`, `i18n.ts`, `query.ts`, `infinite.ts` — and each one gives the whole win back to any app that imports it.
+**Built, and every number above was wrong, including the correction.** The 562 B figure does not reproduce, and neither did the 233/192/196 B that replaced it. What the rewrite is worth turned out not to depend on the rewrite at all: `export namespace Signal` compiles to a top-level call, and while it was declared in `reactivity/src/index.ts` beside `effect` and `batch`, every application that used any of them retained it — so the pass rewrote the call sites correctly and the object stayed anyway, buying **73 B** on the counter example with the whole introspection surface still in the bundle. Giving the namespace a module and a chunk of its own (`reactivity/src/namespace.ts`) is what makes it droppable, and is where 96% of the win was. Measured on Vite 8 production builds, gzipped: an app using only `Signal.State` **1,649 → 1,452 B (-197 B, -11.9%)**, one that also uses `effect` **2,576 → 2,404 B (-172 B, -6.7%)**, and `examples/counter` **9,050 → 8,871 B (-179 B, -2.0%)**. What leaves is the object, `currentComputed` and the four introspection functions, plus `untrack` for an app with no effect; `packages/vite-plugin/test/bundle.test.ts` builds an app both ways and holds all of it, byte count included. Annotating the namespace IIFE `@__PURE__` reaches the same bytes in one line and is a trap: it empties the object out for builds where the lowering did not fire, and `new Signal.State(0)` then runs against `{}`. Half of that had to be bought a second time inside the framework: `dom.ts` reached `Signal.subtle.untrack` and constructed through `Signal.State`, so until the DOM runtime took the lowered spelling too, a compiled component app saved 6 B. Every package outside core still reaches through the namespace — `presence.ts`, `slider-upload.ts`, `i18n.ts`, `query.ts`, `infinite.ts` — and each one gives the whole win back to any app that imports it.
 
 **Costs:** The public API is the TC39 spelling, so the namespace must remain valid at runtime for JIT mode, tests and the REPL — a build-time path and a runtime path that must stay behaviourally identical. `const S = Signal; new S.State()` defeats the lowering, so the transform must bail out rather than mis-rewrite.
 
@@ -1180,6 +1241,10 @@ and of how the leanest and fastest of them achieve it. Ordered by value.
 ### 14. Remove `each`'s per-reconcile allocations: reuse the keys/rows/nodes buffers and drop the bucket-array-per-key
 
 **Buys:** A no-op reconcile of 10,000 rows costs 2.38 ms and ~2.1 MB of transient garbage — ~210 B per row per pass — from `keys`, `rows`, a `reused` Set, a fresh `nodes` array, and an `available` Map that allocates a single-element bucket array for every distinct key. A grid re-deriving its row array on sort, filter or scroll at 60fps produces ~126 MB/s of garbage from bookkeeping alone. Storing the first index directly in the Map and promoting to an array only when a duplicate key is actually seen means unique-keyed lists allocate zero buckets; hoisting the buffers into the `each` closure and replacing `reused` with a generation-stamped Int32Array removes the rest. Contained change to one function that benefits every list, not only the grid.
+
+**Built, and the baseline above is wrong in both directions.** Measured on the case the item names — a 10,000-row no-op reconcile, with the pre-change `each` spliced back into HEAD so that nothing else differs, sampled by the inspector's heap profiler over 100 passes — the cost before this work was **3.03 MB of garbage per pass, 317 B per row**, not the ~2.1 MB and ~210 B claimed above, at 6.4-7.5 ms per pass. The 2.38 ms is nearer what the work bought than what it started from. After: **1.1-1.4 MB, 116-143 B per row, 2.6-5.7 ms** — allocation down 55-64%, time roughly halved. (happy-dom on Node 24, on a machine shared with other work: the before figure repeats to 0.1% and the after to the sampler's own ~10%; read the times as a ratio rather than as absolutes.)
+
+What is left is almost entirely the `available` map, which this item never asked to remove and which is unchanged at 896 KB per pass — 78% of the remainder now that the per-key buckets are gone. Removing it is not free the way the buckets were: it is what makes finding a previous row by key O(1). The costs named below were paid rather than deferred. The reuse marks are a generation-stamped `Int32Array` (`packages/core/src/reuse-marks.ts`) that clears once at the top of the range rather than per pass, and drops the array when a list settles well under its high-water mark; the four buffers are trimmed to the live count on the pass that shrinks, so a list that spikes to 100k and settles at 50 hands the space back then rather than on a later reconcile it may never get. `packages/core/test/each-buffers.test.ts` holds the reconcile — duplicate keys, the generation wrap, 100k → 50 → 100k — and `packages/core/test/each-memory.test.ts` holds what exists only as bytes: the space the shrinking pass returns, a spent slot letting go of a disposed row's DOM, and a budget of 130 B per row on a no-op pass against the 92 B it measures driving `each` directly.
 
 **Costs:** Reused buffers size to the high-water mark, so a list that spikes to 100k and settles at 50 retains the large arrays unless shrunk. Generation stamping needs an overflow story. The duplicate-key promotion adds a branch to the hot loop and a second path that needs its own tests — `each` handles duplicate keys correctly today and must not regress.
 

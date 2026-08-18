@@ -22,7 +22,16 @@ export default defineConfig({
     // Volt targets current engines; nothing here is downlevelled.
     target: 'esnext',
     lib: {
-      entry: { index: r('src/index.ts'), signals: r('src/signals.ts') },
+      // `namespace.ts` is an entry only so that the bundle keeps it as its own
+      // chunk: inlined into `index.js` its top-level call is retained by any
+      // app that touches the module at all, which is the whole reason it was
+      // split out. Nothing imports it by that path — `exports` does not name
+      // it, and `index.js` reaches it relatively.
+      entry: {
+        index: r('src/index.ts'),
+        signals: r('src/signals.ts'),
+        namespace: r('src/namespace.ts'),
+      },
       formats: ['es'],
     },
     rollupOptions: {

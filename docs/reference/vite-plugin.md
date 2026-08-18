@@ -105,6 +105,13 @@ interface VoltPluginOptions {
   lowerSignals?: boolean;        // default: true
   runtimeModule?: string;        // default: '@voltdev/core/runtime'
   debug?: boolean;               // default: false
+  messages?: {                   // default: off, see Messages below
+    catalog: string;
+    locale?: string;             // default: the catalogue file's own name
+    id?: string;                 // default: 'virtual:volt-messages'
+    typesFile?: string;          // default: none
+    unused?: 'warn' | 'off';     // default: 'warn'
+  };
 }
 ```
 
@@ -113,6 +120,89 @@ interface VoltPluginOptions {
 ```
 [volt] src/counter.ts: 2 template(s), 3 effect(s), 4 binding(s) folded, 1 markup dedupe(s)
 ```
+
+## Messages
+
+Opt-in, and off by default. Point the plugin at a catalogue and it compiles
+that catalogue instead of loading it:
+
+```ts
+volt({ messages: { catalog: 'messages/en.json', typesFile: 'src/messages.d.ts' } })
+```
+
+```json
+{
+  "close": "Close",
+  "pageOf": "Page {n} of {m}",
+  "filesSelected": { "one": "{n} file selected", "other": "{n} files selected" }
+}
+```
+
+Two things happen. The catalogue becomes a module — `virtual:volt-messages` —
+holding one exported function per message and importing nothing, so a bundler
+drops every message the application never named:
+
+```ts
+import { pageOf } from 'virtual:volt-messages';
+
+pageOf({ n: 2, m: 10 }); // 'Page 2 of 10'
+```
+
+Parameters are read out of the message itself, so `'Page {n} of {m}'` takes two
+and nobody declares them twice. A message with plural forms takes `n` and
+selects its form through `Intl.PluralRules` for the catalogue's own locale;
+numbers in a placeholder are formatted with `Intl.NumberFormat` for that same
+locale. Both are built lazily, on the first call that needs one.
+
+The other half is that **every `t('key')` in a template is checked**, because
+the template compiler already parses it. A key the catalogue does not have
+fails the build with the template's file and line — not the `.ts` file that
+declared the component — and suggests the key you probably meant:
+
+```
+[volt:compiler] `t('clsoe')` — no such message in messages/en.json.
+  Did you mean `t('close')`? (src/toolbar.html:3:11)
+```
+
+So does a call that leaves out a parameter the message needs, since
+`'Page {n} of {m}'` says what it wants and `t('pageOf', { n })` does not supply
+it. A call the template cannot read — `t(key)`, `t('pageOf', values)`, a
+spread — is left alone rather than guessed at.
+
+A message nothing asks for is a **warning**, never a refusal: a key added today
+for a screen landing next week is not a mistake. The report names the line in
+the catalogue to delete. It runs on production builds only — a dev-server
+rebuild has seen only the modules that changed, so every message would look
+unused — and `unused: 'off'` turns it off. The strings the component library
+speaks for itself (`close`, `noResults`, `pageOf` and the rest of
+`DEFAULT_MESSAGES`) are never reported, because an application translating them
+is translating what a Dialog says, not what its own templates ask for.
+
+`typesFile` writes the declarations somewhere your tsconfig includes:
+
+```ts
+declare module 'virtual:volt-messages' {
+  export interface Messages {
+    close: () => string;
+    pageOf: (params: { n: string | number; m: string | number }) => string;
+    filesSelected: (params: { n: number }) => string;
+  }
+  // ...
+}
+```
+
+With that in the project, `t('clsoe')` stops compiling in TypeScript too, and
+so does `t('pageOf', { n: 1 })`.
+
+A key has to be a plain identifier, because a compiled message is an exported
+function and there is no second way to spell a function name. A nested or
+dotted catalogue is refused with a suggestion rather than silently renamed.
+
+None of this replaces `createLocaleProvider`. Its runtime `MessageCatalog` is
+still there, still the fallback, and still the whole story for a project with
+no build step — and a template's `t('close')` still calls it. The compiled
+module is the form to import from TypeScript when the catalogue is large enough
+that shipping it whole costs something.
 
 ## What it will not touch
 

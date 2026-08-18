@@ -47,7 +47,14 @@ export default defineConfig({
   // Tests assert on the developer diagnostics, so they run with them on. In a
   // production build @voltdev/vite-plugin defines this as false and the
   // minifier removes every guarded block.
-  define: { __VOLT_DEV__: 'true' },
+  //
+  // Server mode is a live read of a global rather than a constant, because a
+  // real build picks one side and a test has to render both: the same source
+  // has to be a server build in one case and a client build in the next.
+  define: {
+    __VOLT_DEV__: 'true',
+    __VOLT_SERVER__: 'globalThis.__VOLT_SERVER__ === true',
+  },
   resolve: {
     alias: {
       '@voltdev/reactivity/signals': resolve(root, 'packages/reactivity/src/signals.ts'),
@@ -61,6 +68,7 @@ export default defineConfig({
       '@voltdev/core/runtime': resolve(root, 'packages/core/src/runtime.ts'),
       '@voltdev/core/jit': resolve(root, 'packages/core/src/jit.ts'),
       '@voltdev/core/signals': resolve(root, 'packages/core/src/signals.ts'),
+      '@voltdev/core/devtools': resolve(root, 'packages/core/src/devtools.ts'),
       '@voltdev/core': resolve(root, 'packages/core/src/index.ts'),
     },
   },

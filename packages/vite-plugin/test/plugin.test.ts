@@ -346,3 +346,26 @@ describe('paths must match the file on disk exactly', () => {
     ).resolves.not.toBeNull();
   });
 });
+
+describe('the build flags', () => {
+  /** What the env plugin would hand Vite for a given build. */
+  function defines(env: { mode: string; command: 'build'; isSsrBuild?: boolean }) {
+    const plugin = volt().find((p) => p.name === 'volt:env')!;
+    const hook = plugin.config as (config: object, env: object) => { define: Record<string, string> };
+    return hook.call(plugin, {}, env).define;
+  }
+
+  it('marks an SSR build as one', () => {
+    expect(defines({ mode: 'production', command: 'build', isSsrBuild: true }).__VOLT_SERVER__).toBe(
+      'true',
+    );
+  });
+
+  it('marks every other build as a client build', () => {
+    // Left undefined rather than false by Vite itself, which is why the check
+    // is for `true` and not for absence: a client bundle must not be left with
+    // the server's flushing and lifecycle gating live in it.
+    expect(defines({ mode: 'production', command: 'build' }).__VOLT_SERVER__).toBe('false');
+    expect(defines({ mode: 'development', command: 'build' }).__VOLT_DEV__).toBe('true');
+  });
+});

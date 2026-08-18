@@ -176,7 +176,15 @@ measureEffect(() => {
 Measuring is read-only. Set a signal with what you measured, as above, and the
 render effect that consumes it patches the DOM on the next pass — still before
 any user effect runs. Writing to the DOM from a measure callback puts the
-thrash straight back, so in development Volt reports it.
+thrash straight back, so in development Volt reports it: anything that changes
+a node, and the scroll properties, which change none.
+
+Whether any of this is actually happening is a number. `getFlushMetrics()`
+reports `forcedLayouts` — what the lane cost, one per flush being healthy —
+and `strayReads`, geometry read from a render or user effect. The second is
+the one that catches the mistake: a read from the wrong phase never reaches
+the measure lane, so it leaves `forcedLayouts` at zero and shows up only
+there.
 
 ## Ownership and disposal
 

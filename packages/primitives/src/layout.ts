@@ -26,7 +26,7 @@
  * `visuallyHidden` lives in `display.ts`; it is not repeated here.
  */
 
-import { Signal, effect, onCleanup } from '@voltdev/core';
+import { Signal, effect, measureEffect, onCleanup } from '@voltdev/core';
 import { createId } from './id.js';
 
 // The proposal's own name for reading without subscribing; Volt adds no second
@@ -640,7 +640,10 @@ export function createScrollArea(options: ScrollAreaOptions): ScrollArea {
     }
   };
 
-  effect(() => {
+  // Six geometry reads in one go, so the phase that pays for the layout is
+  // the one that gets them. Every later measurement comes from a scroll or a
+  // resize, which is outside any flush and has no phase to belong to.
+  measureEffect(() => {
     const el = options.viewport();
     if (!el) return;
 

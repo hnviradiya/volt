@@ -375,9 +375,11 @@ export function each(
   const scope = getScope();
 
   // The bookkeeping belongs to the list, not to the pass. Every buffer here is
-  // written in place and handed back and forth between passes, so reconciling
-  // a list that has not changed allocates nothing at all — no keys, no rows,
-  // no node list, and no per-row reuse marks.
+  // written in place and handed back and forth between passes, so a reconcile
+  // allocates no keys, no rows, no node list and no per-row reuse marks. What
+  // it does still allocate is the `available` map below, rebuilt from scratch
+  // every pass and now nearly the whole cost of a no-op one: 92 B per row,
+  // against 323 B before any of this.
   let prevKeys: unknown[] = [];
   let prevRows: (Row | undefined)[] = [];
   let keys: unknown[] = [];

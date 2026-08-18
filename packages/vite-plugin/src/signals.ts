@@ -4,9 +4,9 @@
  * The public API is the TC39 spelling, `new Signal.State(0)`, and
  * `export namespace Signal` compiles to a runtime object. An object is opaque
  * to a bundler — reaching one property retains all of them — so an app that
- * only ever constructs state signals still ships the watcher, `untrack` and
- * the six introspection functions, with no line of the application able to
- * reach any of them.
+ * only ever constructs state signals still ships `currentComputed` and the
+ * four introspection functions, with no line of the application able to reach
+ * any of them.
  *
  * Each package exposes the same members individually under a `/signals`
  * subpath, so this pass rewrites
@@ -20,10 +20,24 @@
  *   import { Signal } from '@voltdev/core';
  *   const count = new __volt_Signal_State(0);
  *
- * and the namespace object, along with everything it was holding alive, falls
- * out of the bundle. The original import is deliberately left in place: it is
- * unused afterwards, so a bundler drops it, and leaving it means a usage this
- * pass declined to rewrite still resolves.
+ * after which nothing in the file names the namespace and a bundler can leave
+ * it out. It can only do that because the namespace has a module to itself:
+ * while it was declared beside `effect` in `@voltdev/reactivity`'s entry every
+ * app retained it whatever this pass did, and the rewrite bought 73 B of a
+ * possible 522 B on `examples/counter`. See `reactivity/src/namespace.ts`.
+ *
+ * What leaves with the object is what only it reached: `currentComputed`,
+ * `introspectSources`, `introspectSinks`, `hasSinks`, `hasSources`, and
+ * `untrack` unless an effect holds it. The watcher never leaves, and neither
+ * does `untrack` for an app with an effect — `graph.ts` asks
+ * `sink instanceof WatcherNode` on every notification and `effect.ts` imports
+ * both straight from the graph, so no lowering of the namespace can reach
+ * them. Measured on `examples/counter`: 522 B off the bundle, 179 B of it
+ * after gzip.
+ *
+ * The original import is deliberately left in place: it is unused afterwards,
+ * so a bundler drops it, and leaving it means a usage this pass declined to
+ * rewrite still resolves.
  *
  * Nothing about how you write a component changes, and nothing about the
  * namespace changes — it is the same bindings under both spellings, so JIT
@@ -34,6 +48,15 @@
  * else the name is used for — `const S = Signal`, `Signal[key]`, passing the
  * namespace to a function, assigning to a member — means the object is needed
  * as an object, so the whole file is declined rather than half-rewritten.
+ *
+ * And it only ever sees an application's own source. The default include is
+ * `.ts`/`.mts` outside node_modules, and Volt's own packages build without
+ * this plugin, so every framework module reaching through the namespace ships
+ * as pre-built `.js` and hands the object straight back: `@voltdev/primitives`
+ * carries 217 `Signal.` reads on its own, one of them
+ * `const { untrack } = Signal.subtle`, which this pass would decline even if
+ * it could see it. An app importing a primitive, `@voltdev/query` or
+ * `@voltdev/router` keeps the namespace whatever its own source says.
  */
 
 import {
@@ -80,8 +103,10 @@ export type SignalPlan =
       kind: 'lowered';
       /** Ranges to overwrite, in source order. */
       rewrites: { start: number; end: number; text: string }[];
-      /** The import to prepend. */
+      /** The import to add. */
       importFrom: string;
+      /** Where it can go: after a shebang and any directive prologue. */
+      importAt: number;
       /** Lowered name → local alias, in emission order. */
       imports: { exported: string; local: string }[];
     };
@@ -129,8 +154,61 @@ export function planSignalLowering(code: string): SignalPlan {
     kind: 'lowered',
     rewrites,
     importFrom: [...targets][0]!,
+    importAt: importOffset(code),
     imports: [...used].map(([local, exported]) => ({ exported, local })),
   };
+}
+
+/**
+ * Where an added import may go: past a shebang and the directive prologue.
+ *
+ * Both are positional. `#!` is a comment on line one and a syntax error on
+ * line two, so an import in front of it does not slow a file down, it stops it
+ * parsing; and `'use client'` one statement in is an expression statement
+ * whose value nobody reads, which fails by doing nothing at all.
+ */
+function importOffset(code: string): number {
+  let at = 0;
+  if (code.startsWith('#!')) {
+    const line = code.indexOf('\n');
+    if (line === -1) return code.length;
+    at = line + 1;
+  }
+
+  for (;;) {
+    const start = skipTrivia(code, at);
+    const quote = code[start];
+    if (quote !== '"' && quote !== "'") return at;
+    const end = skipQuoted(code, start, quote);
+
+    const next = skipTrivia(code, end);
+    if (code[next] === ';') {
+      at = startOfNextLine(code, next + 1);
+      continue;
+    }
+    // No semicolon: a directive only if the string ends the statement, which
+    // it does when a line break separates it from something that cannot
+    // continue the expression. `'volt'.length` is not a prologue.
+    if (next < code.length && !STATEMENT_HEAD.test(code[next]!)) return at;
+    if (!code.slice(end, next).includes('\n')) return at;
+    at = startOfNextLine(code, end);
+  }
+}
+
+/** What a statement after a semicolon-less directive can begin with. */
+const STATEMENT_HEAD = /["'@]|[A-Za-z_$]/;
+
+/**
+ * The start of the next line, when nothing but trivia stands in the way.
+ *
+ * Landing on the line the directive ended would leave the import wedged onto
+ * the end of it; stepping over live code would put it somewhere the rewrites
+ * have already claimed.
+ */
+function startOfNextLine(code: string, from: number): number {
+  const line = code.indexOf('\n', from);
+  if (line === -1) return from;
+  return skipTrivia(code, from) > line ? line + 1 : from;
 }
 
 interface Binding {
@@ -234,7 +312,9 @@ function findNamespaceImports(code: string): Binding[] {
   for (const at of findKeyword(code, 'import')) {
     let i = skipTrivia(code, at + 'import'.length);
     // `import type { ... }` binds nothing at runtime, and `import(` is a
-    // dynamic import, not a declaration.
+    // dynamic import, not a declaration. `import Volt, { Signal }` is missed
+    // rather than declined, which is silent — but neither package this pass
+    // knows has a default export, so the form cannot occur.
     if (code[i] !== '{') continue;
 
     const names: { imported: string; local: string }[] = [];
@@ -341,7 +421,9 @@ function* findKeyword(code: string, keyword: string): Generator<number> {
  *
  * A name after `.` or `#` is somebody else's property, so it is passed over
  * rather than declined — `volt.Signal.State` off a namespace import is a
- * different expression, and lowering it is not this pass's job.
+ * different expression, and lowering it is not this pass's job. The `.` of a
+ * spread is not one of those: `{ ...Signal }` reads the whole object, and
+ * skipping it would leave the file half-rewritten instead of declined.
  */
 function* findIdentifiers(
   code: string,
@@ -381,9 +463,9 @@ function* findIdentifiers(
       if (names.has(word)) {
         let before = i - 1;
         while (before >= 0 && /\s/.test(code[before]!)) before--;
-        if (code[before] !== '.' && code[before] !== '#') {
-          yield { start: i, end: i + word.length };
-        }
+        const property =
+          (code[before] === '.' && code[before - 1] !== '.') || code[before] === '#';
+        if (!property) yield { start: i, end: i + word.length };
       }
       i += word.length;
       continue;

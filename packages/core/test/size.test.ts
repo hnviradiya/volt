@@ -35,12 +35,28 @@ function measured(relative: string): number | null {
  * The compiler is excluded — it runs at build time and never ships.
  */
 const BUDGETS: Record<string, number> = {
-  'packages/reactivity/dist/index.js': 3_000,
+  // Raised from 3000 by the request scope and the data lane: a server keeps
+  // one render's queues, styles, ids and locale apart from another's, and the
+  // published bundle carries that with the defines still open, so the guarded
+  // server paths are measured here even though an application's own build
+  // removes them. ~254 B of the raise is the devtools seam, which is here for
+  // the same reason: the graph and the scheduler are the only places that know
+  // which write woke which effect and what a flush cost.
+  'packages/reactivity/dist/index.js': 3_350,
+  // The `Signal` namespace, which ships as its own chunk so that an app whose
+  // build lowered it away can drop the whole file. Budgeted separately for the
+  // same reason it was split out: bytes that leave `index.js` for a file
+  // nothing measures have not left anything.
+  'packages/reactivity/dist/namespace.js': 300,
   // Raised from 750 when lazy/preload moved to the runtime entry, which is
   // where generated code reaches them now that splitting is the build's
   // decision rather than something an application writes.
   'packages/core/dist/runtime.js': 800,
-  'packages/core/dist/index.js': 400,
+  // Raised from 400 when ids moved here from @voltdev/primitives, which is
+  // where they have to be minted: an id is now a component's position in the
+  // tree rather than a number from a counter, and only the component runtime
+  // knows the position.
+  'packages/core/dist/index.js': 550,
 };
 
 describe('bundle budgets', () => {

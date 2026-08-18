@@ -3,10 +3,11 @@
  *
  * `export namespace Signal` compiles to a runtime object, and an object
  * literal is opaque to a bundler: reaching `Signal.State` retains every other
- * property, so an app that only ever constructs state signals still ships the
- * watcher and the whole introspection surface. Measured on a bundle using
- * nothing but `Signal.State`, that is a few hundred bytes of code no line of
- * the application can reach.
+ * property, so an app that only ever constructs state signals still ships
+ * `currentComputed`, the four introspection functions and `untrack`. Measured
+ * on a bundle using nothing but `Signal.State`: 197 B gzipped of the 1,649,
+ * all of it code no line of the application can reach. The watcher
+ * is not part of that — `graph.ts` reaches it directly, whatever the app does.
  *
  * These are the same bindings the namespace holds — not copies, not wrappers.
  * `@voltdev/vite-plugin` rewrites `Signal.State` to `State` from here at build

@@ -125,11 +125,41 @@ const stop = effect(() => {
 | `flushSync()` | Drain pending effects now |
 | `tick()` | Promise resolving once the DOM reflects all pending changes |
 | `batch(fn)` | Group writes so nothing flushes until `fn` returns |
-| `getFlushMetrics()` | Flushes run, forced layouts in the last one, worst so far |
+| `getFlushMetrics()` | Flushes run, and what the last one cost |
 | `resetFlushMetrics()` | Zero those counters |
 
-One forced layout per flush is the healthy number, and `getFlushMetrics()` is
-how a test proves it stayed there.
+`getFlushMetrics()` returns a copy of five counters, not the live object:
+
+| Field | Counts |
+|---|---|
+| `flushes` | Flushes that ran at least one effect, since the last reset |
+| `forcedLayouts` | Measure drains in the last flush that followed a write |
+| `peakForcedLayouts` | The worst any single flush has cost since the reset |
+| `strayReads` | Geometry read outside the measure lane, in the last flush |
+| `peakStrayReads` | The worst any single flush has read since the reset |
+
+The two are opposite measurements and a test needs both. `forcedLayouts` is
+what the lane costs when it is used — one per flush is the healthy number —
+and it is counted from the phase transitions, so it is an upper bound and
+costs nothing to keep in a production build. It cannot see the failure the
+lane exists to prevent: a component that reads geometry from `effect` or
+`renderEffect` never enters a measure drain at all, so measuring entirely from
+the wrong phase drives `forcedLayouts` to **zero**, not up. A test asserting
+`forcedLayouts` alone passes for a codebase that has never used the lane.
+
+`strayReads` is that failure, counted directly by wrapping the accessors that
+force layout. It is a development number: a production build installs no
+wrappers and it stays at zero there. Assert on both.
+
+```ts
+resetFlushMetrics();
+label.set('a considerably longer label');
+flushSync();
+
+const { forcedLayouts, strayReads } = getFlushMetrics();
+expect(forcedLayouts).toBe(1); // the write and every read shared one layout
+expect(strayReads).toBe(0);    // and nothing measured from the wrong phase
+```
 
 Updates coalesce onto a microtask by default.
 

@@ -39,7 +39,7 @@
  * of state and the keyboard the pattern asks for between the headers.
  */
 
-import { Signal, createRoot, effect, onCleanup } from '@voltdev/core';
+import { Signal, createRoot, effect, measureEffect, onCleanup } from '@voltdev/core';
 import { createCollection } from './collection.js';
 import { createId } from './id.js';
 import { createPresence, type PresenceState } from './presence.js';
@@ -119,11 +119,11 @@ function createPanel(options: PanelOptions): Panel {
    */
   const measure = (el: Element) => height.set(el.scrollHeight);
 
-  effect(() => {
+  measureEffect(() => {
     // Reading presence first is what makes this run again when the panel is
     // added to the page: the element may be reached by a DOM lookup rather
     // than a signal, and Volt has already flushed the render effects that
-    // inserted it by the time a user effect runs.
+    // inserted it by the time this runs.
     if (!presence.isPresent()) return;
     const el = options.content();
     if (!el) return;

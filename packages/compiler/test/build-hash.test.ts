@@ -104,7 +104,10 @@ describe('every option the compiler reads is covered', () => {
     // this identifies a build. `a11y` too, for its own reason — it decides
     // whether a template compiles at all, never what it compiles to, so two
     // builds that disagree about it still print identical markup and must
-    // still hydrate each other's. Everything else the compiler consults can
+    // still hydrate each other's. `catalog` and `catalogFile` are excused on
+    // exactly that second ground: a catalogue turns an unknown message key
+    // into a build error, and a template that compiles compiles the same
+    // bytes with it or without it. Everything else the compiler consults can
     // move bytes, so it belongs in the hash whether or not it does so today.
     //
     // Driven over the whole corpus rather than one list: an option read on one
@@ -112,7 +115,7 @@ describe('every option the compiler reads is covered', () => {
     // invisible to a single template, and invisible is exactly how it would
     // stay out of the hash while moving bytes.
     expect(optionsRead(CORPUS.map((entry) => entry.template))).toEqual(
-      [...Object.keys(DEFAULTS), 'filename', 'a11y'].sort(),
+      [...Object.keys(DEFAULTS), 'filename', 'a11y', 'catalog', 'catalogFile'].sort(),
     );
   });
 });

@@ -47,11 +47,13 @@
 
 import {
   Signal,
+  clearRequestState,
   createContext,
   effect,
   isWritableSignal,
   onCleanup,
   provideContext,
+  requestState,
   useContext,
 } from '@voltdev/core';
 
@@ -812,10 +814,17 @@ export function createLocaleProvider(options: LocaleOptions = {}): LocaleProvide
  * ever speaks one language needs no provider at all.
  */
 export function useLocale(): Locale {
-  return useContext(LocaleContext) ?? (ambient ??= createLocale());
+  return useContext(LocaleContext) ?? requestState(AMBIENT, () => createLocale());
 }
 
-let ambient: Locale | null = null;
+/**
+ * The fallback locale is per request, not per process.
+ *
+ * It is also the path taken whenever nothing provides a locale, which makes it
+ * the likeliest thing on a server to be wrong: the first request to ask would
+ * otherwise decide what language every request after it is formatted in.
+ */
+const AMBIENT = Symbol('volt.locale');
 
 /**
  * The tag to fall back on: what the document says, then what the browser does.
@@ -842,7 +851,7 @@ function ambientLocaleCode(): string {
 
 /** Test seam: forget the ambient locale and every cached Intl instance. */
 export function resetLocaleCaches(): void {
-  ambient = null;
+  clearRequestState(AMBIENT);
   instances.clear();
   scriptDirections.clear();
 }

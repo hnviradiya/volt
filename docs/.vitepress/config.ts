@@ -43,6 +43,7 @@ export default defineConfig({
           { text: 'Reactivity API', link: '/reference/reactivity' },
           { text: 'Component API', link: '/reference/component' },
           { text: 'Vite plugin', link: '/reference/vite-plugin' },
+          { text: 'Developer tools', link: '/reference/devtools' },
         ],
       },
       {

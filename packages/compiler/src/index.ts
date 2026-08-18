@@ -51,6 +51,29 @@ export type {
 export { formatDiagnostic } from './a11y.js';
 export type { A11ySeverity, Diagnostic } from './a11y.js';
 
+export {
+  LIBRARY_MESSAGE_KEYS,
+  checkMessageSites,
+  collectTranslateCalls,
+  generateMessages,
+  messageShape,
+  scanMessageKeys,
+  unusedMessages,
+} from './messages.js';
+export type {
+  CatalogMessage,
+  GenerateOptions,
+  GeneratedMessages,
+  MessageCatalog,
+  MessageCheckOptions,
+  MessageParam,
+  MessageShape,
+  MessageSite,
+  PluralForms,
+  TranslateCall,
+  UnusedOptions,
+} from './messages.js';
+
 export { CHILD_MARKER, clientMarkup, rootArity } from './markup.js';
 export type {
   AttributeHole,

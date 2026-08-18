@@ -2,14 +2,23 @@
  * Volt's effect system, layered on `Signal.subtle.Watcher`.
  *
  * The Signals proposal deliberately ships no `effect`, because scheduling is a
- * framework concern. Volt schedules in three phases:
+ * framework concern. Volt schedules in four phases:
  *
  *   - `renderEffect` — DOM patching. Runs immediately on creation so a
  *     template builds synchronously, and flushes before everything else.
+ *   - `dataEffect` — asking for data. Deferred like a user effect, but drained
+ *     ahead of one, because it is the only lane besides render that a server
+ *     runs: the server has to start the fetches and wait for them, and it must
+ *     do that without running user work that expects a live document.
  *   - `measureEffect` — reading geometry, once the DOM has settled and before
  *     anything writes again, so every read in a flush shares one layout.
  *   - `effect` — user work. Its first run is deferred along with the rest, so
  *     it always observes a settled tree.
+ *
+ * Data sits before measure rather than after it because a data effect that
+ * writes a signal — a status turning `loading` — sends the flush back to the
+ * render lane. Drained after measure, that write would dirty the layout the
+ * measure phase had just paid for and force a second one.
  *
  * Updates are coalesced onto a microtask, which means a burst of `.set()`
  * calls repaints once. `flushSync()` drains the queues immediately when you
@@ -20,6 +29,7 @@
  * tears down its effects and their cleanups in one call.
  */
 
+import { devListener, type EffectPhase } from './dev.js';
 import {
   ComputedSignal,
   WatcherNode,
@@ -208,21 +218,63 @@ let scheduled = false;
 let flushing = false;
 let batchDepth = 0;
 
-const renderWatcher = new WatcherNode(function () {
-  schedule();
-});
+/**
+ * The queues one flush drains, in the order it drains them.
+ *
+ * Held together in one object rather than as four module variables because a
+ * server render swaps the whole set: an effect created for one request must
+ * not be drained by another request's flush, and giving each request its own
+ * queues is the only arrangement where that is structural instead of a check
+ * paid on every effect that ever runs.
+ */
+export interface Lanes {
+  readonly render: WatcherNode;
+  readonly data: WatcherNode;
+  readonly measure: WatcherNode;
+  readonly user: WatcherNode;
+}
 
-const measureWatcher = new WatcherNode(function () {
+function notifyScheduler(this: WatcherNode): void {
   schedule();
-});
+}
 
-const effectWatcher = new WatcherNode(function () {
-  schedule();
-});
+/** @internal Used by the request scope; not part of the public surface. */
+export function createLanes(): Lanes {
+  return {
+    render: new WatcherNode(notifyScheduler),
+    data: new WatcherNode(notifyScheduler),
+    measure: new WatcherNode(notifyScheduler),
+    user: new WatcherNode(notifyScheduler),
+  };
+}
+
+const globalLanes = createLanes();
+
+/**
+ * The queues effects are filed into and flushes drain.
+ *
+ * Read at every use rather than captured, so entering a request redirects both
+ * at once — an effect created inside a request belongs to it for as long as it
+ * lives, because `createEffect` keeps the watcher it was filed into.
+ */
+let lanes = globalLanes;
+
+/** @internal Enter a request's queues. Returns the ones it displaced. */
+export function useLanes(next: Lanes): Lanes {
+  const previous = lanes;
+  lanes = next;
+  return previous;
+}
 
 let pendingResolvers: (() => void)[] = [];
 
 function schedule(): void {
+  // Nothing self-flushes on a server. A queued microtask fires at the first
+  // `await`, under whatever request happens to be current by then, which is
+  // exactly how one render's effects end up in another's output. A server
+  // render flushes explicitly instead, inside its own request, before it
+  // awaits anything.
+  if (__VOLT_SERVER__) return;
   if (scheduled || flushing || batchDepth > 0) return;
   scheduled = true;
   queueMicrotask(() => {
@@ -233,6 +285,17 @@ function schedule(): void {
 
 const MAX_FLUSH_PASSES = 100;
 
+/**
+ * The lane being drained, for the tools.
+ *
+ * A module variable rather than an argument to `runEffectComputed`, because
+ * every read of it is inside a dropped branch in a production build — which
+ * leaves a declaration nothing references, and that goes too. Threading the
+ * phase through the call would survive as four string literals on the hot
+ * path instead.
+ */
+let devPhase: EffectPhase = 'user';
+
 export interface FlushMetrics {
   /** Flushes that ran at least one effect, since the last reset. */
   flushes: number;
@@ -240,23 +303,43 @@ export interface FlushMetrics {
   forcedLayouts: number;
   /** The worst any single flush has cost since the last reset. */
   peakForcedLayouts: number;
+  /** Geometry read outside the measure lane, in the most recent flush. */
+  strayReads: number;
+  /** The worst any single flush has read since the last reset. */
+  peakStrayReads: number;
 }
 
-const metrics: FlushMetrics = { flushes: 0, forcedLayouts: 0, peakForcedLayouts: 0 };
+const metrics: FlushMetrics = {
+  flushes: 0,
+  forcedLayouts: 0,
+  peakForcedLayouts: 0,
+  strayReads: 0,
+  peakStrayReads: 0,
+};
 
 /**
  * A snapshot of what the scheduler cost.
  *
- * Layout thrash is invisible until something counts it, and the count is the
- * only way to know the measure lane is still doing its job: one forced layout
- * per flush is healthy, and a component that reads geometry from the wrong
- * phase shows up here as a peak that climbs with the number of components on
- * screen. Tracked in production too — a metric that disappears from the build
- * where performance matters defends nothing.
+ * Two numbers, because they answer opposite questions.
  *
- * Counted from the phase transitions rather than by instrumenting reads, so a
- * measure drain that follows writes is charged one layout whether or not a
- * callback asked for geometry: an upper bound, and the cheap one.
+ * `forcedLayouts` is what the lane costs when it is used: measure drains that
+ * followed a write, counted from the phase transitions rather than by
+ * instrumenting reads, so a drain is charged one layout whether or not a
+ * callback asked for geometry. An upper bound, and the cheap one. Tracked in
+ * production too — a metric that disappears from the build where performance
+ * matters defends nothing. One per flush is the healthy shape; it climbs when
+ * a measure writes a signal that sends the flush back through the render lane.
+ *
+ * `strayReads` is the failure the lane exists to prevent, and it is a
+ * different number precisely because `forcedLayouts` cannot show it: geometry
+ * read from a render or user effect never enters a measure drain at all, so a
+ * page that measures entirely from the wrong phase drives `forcedLayouts` to
+ * zero rather than up. Counting it means instrumenting the reads, which is
+ * done by wrapping the accessors that force layout — a development price. A
+ * production build installs no wrappers and this stays at zero there.
+ *
+ * The returned object is a copy: holding on to one and reading it after
+ * another flush would otherwise report that flush instead of the measured one.
  */
 export function getFlushMetrics(): FlushMetrics {
   return { ...metrics };
@@ -266,6 +349,8 @@ export function resetFlushMetrics(): void {
   metrics.flushes = 0;
   metrics.forcedLayouts = 0;
   metrics.peakForcedLayouts = 0;
+  metrics.strayReads = 0;
+  metrics.peakStrayReads = 0;
 }
 
 function settleError(phase: string): Error {
@@ -282,9 +367,15 @@ function settleError(phase: string): Error {
 
 /**
  * Drain the queues now, in phase order: render effects settle completely,
- * then measure effects read, then user effects run. Every pass starts again
- * from the top, so a user effect that writes still gets its DOM patched — and
- * anything measuring it re-read — before this returns.
+ * then data effects ask, then measure effects read, then user effects run.
+ * Every pass starts again from the top, so a user effect that writes still
+ * gets its DOM patched — and anything measuring it re-read — before this
+ * returns.
+ *
+ * A server build stops after the data lane. Measurement needs a layout engine
+ * and a user effect is written against a document that is in a browser, so
+ * neither has anything to do before the bytes are written; and the lanes below
+ * data are precisely the ones the roadmap says must not run on a server.
  */
 export function flushSync(): void {
   // An open batch wins: nothing is allowed to observe a half-applied group,
@@ -292,6 +383,10 @@ export function flushSync(): void {
   if (flushing || batchDepth > 0) return;
   flushing = true;
   scheduled = false;
+  if (__VOLT_DEV__) {
+    if (!probed) installProbes();
+    devListener?.flushStarted();
+  }
 
   // Whether a read would have to wait for layout. It starts true because
   // whatever caused this flush — an event handler, a bare `.set()` — has
@@ -302,16 +397,32 @@ export function flushSync(): void {
 
   try {
     for (;;) {
-      const renderPending = renderWatcher.getPending();
+      const renderPending = lanes.render.getPending();
       if (renderPending.length > 0) {
+        if (__VOLT_DEV__) devPhase = 'render';
         for (const node of renderPending) runEffectComputed(node);
-        renderWatcher.watch();
+        lanes.render.watch();
         layoutStale = true;
         if (++passes > MAX_FLUSH_PASSES) throw settleError('Render');
         continue;
       }
 
-      const measurePending = measureWatcher.getPending();
+      const dataPending = lanes.data.getPending();
+      if (dataPending.length > 0) {
+        // `layoutStale` is deliberately left alone: asking for data writes no
+        // DOM, and anything it does write to a signal comes back through the
+        // render lane above, which sets it.
+        if (__VOLT_DEV__) devPhase = 'data';
+        for (const node of dataPending) runEffectComputed(node);
+        lanes.data.watch();
+        if (++passes > MAX_FLUSH_PASSES) throw settleError('Data');
+        continue;
+      }
+
+
+      if (__VOLT_SERVER__) break;
+
+      const measurePending = lanes.measure.getPending();
       if (measurePending.length > 0) {
         // The whole point of the lane: the first read pays for layout and
         // every other read in the drain is then free.
@@ -319,17 +430,19 @@ export function flushSync(): void {
           forcedLayouts++;
           layoutStale = false;
         }
+        if (__VOLT_DEV__) devPhase = 'measure';
         drainMeasure(measurePending);
-        measureWatcher.watch();
+        lanes.measure.watch();
         if (++passes > MAX_FLUSH_PASSES) throw settleError('Measure');
         continue;
       }
 
-      const effectPending = effectWatcher.getPending();
+      const effectPending = lanes.user.getPending();
       if (effectPending.length === 0) break;
 
+      if (__VOLT_DEV__) devPhase = 'user';
       for (const node of effectPending) runEffectComputed(node);
-      effectWatcher.watch();
+      lanes.user.watch();
       layoutStale = true;
       if (++passes > MAX_FLUSH_PASSES) throw settleError('User');
     }
@@ -341,6 +454,16 @@ export function flushSync(): void {
       metrics.flushes++;
       metrics.forcedLayouts = forcedLayouts;
       if (forcedLayouts > metrics.peakForcedLayouts) metrics.peakForcedLayouts = forcedLayouts;
+    }
+    if (__VOLT_DEV__) {
+      if (passes > 0) {
+        metrics.strayReads = strayReads;
+        if (strayReads > metrics.peakStrayReads) metrics.peakStrayReads = strayReads;
+      }
+      // Zeroed on the way out rather than on the way in, so a read made
+      // between two flushes is charged to neither.
+      strayReads = 0;
+      devListener?.flushEnded(passes, forcedLayouts);
     }
     const resolvers = pendingResolvers;
     pendingResolvers = [];
@@ -354,12 +477,21 @@ export function flushSync(): void {
  * The phase is read-only by contract: a write in the middle of it invalidates
  * the layout the drain just paid for, so the next read forces another one and
  * the thrash the lane exists to remove is back, silently, visible only under
- * a profiler. A MutationObserver catches every write path — including
- * `style.top = ...`, which patching individual DOM methods would miss — and
- * costs nothing outside the drain.
+ * a profiler.
  *
- * It is written inline rather than as helpers so the whole diagnostic sits in
- * one `__VOLT_DEV__` branch and a production build drops all of it.
+ * Two mechanisms, because neither sees what the other does. A MutationObserver
+ * catches anything that lands in the tree — attributes, children, text —
+ * whichever API made it, including `style.top = ...`, which patching
+ * individual DOM methods would miss. It cannot see a write that changes no
+ * node, so the scroll properties are wrapped as well: `scrollTop` is named in
+ * `measureEffect`'s own contract as geometry, and reading it and writing it
+ * back is the round trip this phase most specifically forbids.
+ *
+ * Past those two the guard is blind by construction. A property write that
+ * touches no node and moves no scroller — `input.value`, `el.focus()`,
+ * `element.animate()` — is not reported, and neither is a write to a subtree
+ * that is not in the document. That boundary is pinned by test rather than
+ * left to be discovered by whoever widens it.
  */
 function drainMeasure(pending: ComputedSignal<unknown>[]): void {
   if (!__VOLT_DEV__) {
@@ -381,23 +513,24 @@ function drainMeasure(pending: ComputedSignal<unknown>[]): void {
     attributes: true,
     characterData: true,
   });
+  const written: string[] = [];
+  measureWrites = written;
 
   try {
     for (const node of pending) runEffectComputed(node);
   } finally {
-    const records = measureObserver?.takeRecords();
+    collectMutations();
+    measureWrites = null;
     measureObserver?.disconnect();
-    const record = records?.[0];
-    if (record && typeof console !== 'undefined') {
-      const tag = (record.target as Partial<Element>).nodeName?.toLowerCase() ?? 'node';
-      const what =
-        record.type === 'attributes'
-          ? `${record.attributeName} on <${tag}>`
-          : `${record.type} on <${tag}>`;
+    if (written.length > 0 && typeof console !== 'undefined') {
+      // All of them, not the first one: a measure that patched twenty
+      // attributes reported one and left the other nineteen to be found one
+      // re-run at a time.
+      const rest = written.length > 1 ? ` and ${written.length - 1} more` : '';
       console.error(
-        `[volt] A measure effect wrote to the DOM (${what}). The measure phase is ` +
-          'read-only: a write there dirties the layout the phase just forced, so the ' +
-          'next read forces another one. Set a signal instead and let a render ' +
+        `[volt] A measure effect wrote to the DOM (${written[0]}${rest}). The measure ` +
+          'phase is read-only: a write there dirties the layout the phase just forced, ' +
+          'so the next read forces another one. Set a signal instead and let a render ' +
           'effect apply it, or move the write to effect().',
       );
     }
@@ -406,11 +539,162 @@ function drainMeasure(pending: ComputedSignal<unknown>[]): void {
 
 let measureObserver: MutationObserver | null | undefined;
 
+/** Writes seen during the measure drain in progress; null outside one. */
+let measureWrites: string[] | null = null;
+
+/** Geometry reads charged to the flush in progress. */
+let strayReads = 0;
+
+let probed = false;
+
+/** Move what the observer has seen so far into the drain's list of writes. */
+function collectMutations(): void {
+  const records = measureObserver?.takeRecords();
+  if (!records || measureWrites === null) return;
+  for (const record of records) {
+    measureWrites.push(
+      record.type === 'attributes'
+        ? `${record.attributeName} on <${tagOf(record.target)}>`
+        : `${record.type} on <${tagOf(record.target)}>`,
+    );
+  }
+}
+
+/**
+ * Stop charging DOM writes to the measure that is draining, until the mark
+ * this returns is handed back.
+ *
+ * A render effect created inside a measure runs immediately, by design, so the
+ * DOM it patches lands in the middle of the drain. Charging it to the measure
+ * printed "set a signal instead and let a render effect apply it" at code that
+ * had done precisely that.
+ */
+function beginForeignWrites(): number {
+  if (measureWrites === null) return 0;
+  collectMutations();
+  return measureWrites.length;
+}
+
+function endForeignWrites(mark: number): void {
+  if (measureWrites === null) return;
+  measureObserver?.takeRecords();
+  measureWrites.length = mark;
+}
+
+/**
+ * Properties and methods the engine cannot answer without laying out first.
+ *
+ * Wrapping them is what makes `strayReads` possible: a read from a render or
+ * user effect never reaches a measure drain, so the phase transitions
+ * `forcedLayouts` is counted from cannot see it. `scrollTop` and `scrollLeft`
+ * carry the write half of the guard as well — they move a scroller without
+ * changing a node, which is why the MutationObserver never sees them.
+ */
+const GEOMETRY_ACCESSORS = [
+  'offsetWidth',
+  'offsetHeight',
+  'offsetTop',
+  'offsetLeft',
+  'clientWidth',
+  'clientHeight',
+  'clientTop',
+  'clientLeft',
+  'scrollWidth',
+  'scrollHeight',
+  'scrollTop',
+  'scrollLeft',
+];
+
+const GEOMETRY_METHODS = ['getBoundingClientRect', 'getClientRects'];
+
+/** Methods that move a scroller, changing no attribute, child or text. */
+const SCROLL_METHODS = ['scrollIntoView', 'scroll', 'scrollTo', 'scrollBy'];
+
+function installProbes(): void {
+  probed = true;
+  if (typeof HTMLElement !== 'function') return;
+  for (const name of GEOMETRY_ACCESSORS) probeAccessor(name);
+  for (const name of GEOMETRY_METHODS) probeMethod(name, false);
+  for (const name of SCROLL_METHODS) probeMethod(name, true);
+}
+
+/**
+ * Where a DOM property is really defined, walking up from `HTMLElement`:
+ * `scrollTop` belongs to `Element` and `offsetWidth` to `HTMLElement`, and
+ * redefining one on the wrong prototype would shadow it for that subtree only.
+ */
+function ownerOf(name: string): [object, PropertyDescriptor] | null {
+  let proto: object | null = HTMLElement.prototype;
+  while (proto) {
+    const descriptor = Object.getOwnPropertyDescriptor(proto, name);
+    if (descriptor) return descriptor.configurable === true ? [proto, descriptor] : null;
+    proto = Object.getPrototypeOf(proto) as object | null;
+  }
+  return null;
+}
+
+function probeAccessor(name: string): void {
+  const found = ownerOf(name);
+  const read = found?.[1].get;
+  if (!found || !read) return;
+  const write = found[1].set;
+  Object.defineProperty(found[0], name, {
+    configurable: true,
+    enumerable: found[1].enumerable,
+    get(this: Element): unknown {
+      countRead();
+      return read.call(this);
+    },
+    set: write
+      ? function (this: Element, value: unknown): void {
+          noteWrite(name, this);
+          write.call(this, value);
+        }
+      : undefined,
+  });
+}
+
+function probeMethod(name: string, writes: boolean): void {
+  const found = ownerOf(name);
+  const original = found?.[1].value as ((...args: unknown[]) => unknown) | undefined;
+  if (!found || typeof original !== 'function') return;
+  Object.defineProperty(found[0], name, {
+    ...found[1],
+    value(this: Element, ...args: unknown[]): unknown {
+      if (writes) noteWrite(name, this);
+      else countRead();
+      return original.apply(this, args);
+    },
+  });
+}
+
+/**
+ * Only inside a flush, and only outside the measure drain: a read from an
+ * event handler or an animation frame is not the scheduler's to account for,
+ * and the drain is where reads are supposed to happen.
+ */
+function countRead(): void {
+  if (flushing && devPhase !== 'measure') strayReads++;
+}
+
+function noteWrite(name: string, target: Element): void {
+  measureWrites?.push(`${name} on <${tagOf(target)}>`);
+}
+
+function tagOf(node: Node): string {
+  return (node as Partial<Element>).nodeName?.toLowerCase() ?? 'node';
+}
+
 function runEffectComputed(node: ComputedSignal<unknown>): void {
+  if (__VOLT_DEV__) devListener?.runStarted(node, devPhase);
   try {
     node.get();
   } catch (err) {
-    reportError(err);
+    // Which write woke this effect is the first thing anyone debugging it
+    // asks, and it is known here and nowhere downstream of here.
+    reportError(err, __VOLT_DEV__ ? devListener?.explain(node) : null);
+  } finally {
+    if (__VOLT_DEV__) devListener?.runEnded(node);
   }
 }
 
@@ -444,8 +728,10 @@ export function batch<T>(fn: () => T): T {
   }
 }
 
-function reportError(err: unknown): void {
-  if (typeof console !== 'undefined') console.error('[volt] Uncaught error in effect:', err);
+function reportError(err: unknown, cause?: string | null): void {
+  if (typeof console !== 'undefined') {
+    console.error('[volt] Uncaught error in effect' + (cause ? ' — ' + cause : '') + ':', err);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -470,8 +756,17 @@ class EffectNode extends ComputedSignal<void> implements Scope {
   disposed = false;
 }
 
+/** Which lane a watcher is, for the tools. Never called in a shipped build. */
+function phaseOf(watcher: WatcherNode): EffectPhase {
+  if (watcher === lanes.render) return 'render';
+  if (watcher === lanes.data) return 'data';
+  if (watcher === lanes.measure) return 'measure';
+  return 'user';
+}
+
 function createEffect(fn: EffectFn, watcher: WatcherNode, immediate: boolean): Dispose {
   const parent = currentScope;
+  const phase: EffectPhase = __VOLT_DEV__ ? phaseOf(watcher) : 'user';
   let cleanup: CleanupFn | null = null;
   let disposed = false;
 
@@ -508,16 +803,25 @@ function createEffect(fn: EffectFn, watcher: WatcherNode, immediate: boolean): D
 
   markEffectComputed(computed as unknown as ComputedSignal<unknown>);
 
+  if (__VOLT_DEV__) devListener?.effectCreated(computed, phase);
+
   watcher.watch(computed as unknown as ComputedSignal<unknown>);
 
   if (immediate) {
     // Untracked so that creating an effect inside another effect does not make
     // the outer one depend on the inner.
     untrack(() => {
+      const mark = __VOLT_DEV__ ? beginForeignWrites() : 0;
+      if (__VOLT_DEV__) devListener?.runStarted(computed, phase);
       try {
         computed.get();
       } catch (err) {
-        reportError(err);
+        reportError(err, __VOLT_DEV__ ? devListener?.explain(computed) : null);
+      } finally {
+        if (__VOLT_DEV__) {
+          devListener?.runEnded(computed);
+          endForeignWrites(mark);
+        }
       }
     });
   } else {
@@ -537,6 +841,7 @@ function createEffect(fn: EffectFn, watcher: WatcherNode, immediate: boolean): D
     // Unwatching stops it being scheduled; this detaches it from its sources
     // so they stop retaining and re-marking it.
     disposeComputed(computed as unknown as ComputedSignal<unknown>);
+    if (__VOLT_DEV__) devListener?.effectDisposed(computed);
     if (cleanup) {
       try {
         cleanup();
@@ -561,7 +866,24 @@ function createEffect(fn: EffectFn, watcher: WatcherNode, immediate: boolean): D
  * assigned to the instance after construction.
  */
 export function effect(fn: EffectFn): Dispose {
-  return createEffect(fn, effectWatcher, false);
+  return createEffect(fn, lanes.user, false);
+}
+
+/**
+ * An effect that asks for data.
+ *
+ * Deferred exactly like a user effect, so a resource declared in a class field
+ * still observes the props assigned after construction — but drained before
+ * one, because this is the lane a server runs. `createResource` starts its
+ * first request from here, which is what makes "the server awaits the data"
+ * and "no user effects on the server" able to hold at the same time: without
+ * a lane of its own, the fetch either never starts or drags every user effect
+ * onto the server with it.
+ *
+ * Nothing here may touch the DOM. On a server there is none.
+ */
+export function dataEffect(fn: EffectFn): Dispose {
+  return createEffect(fn, lanes.data, false);
 }
 
 /**
@@ -569,7 +891,7 @@ export function effect(fn: EffectFn): Dispose {
  * has to produce its nodes before anything can insert them.
  */
 export function renderEffect(fn: EffectFn): Dispose {
-  return createEffect(fn, renderWatcher, true);
+  return createEffect(fn, lanes.render, true);
 }
 
 /**
@@ -590,5 +912,5 @@ export function renderEffect(fn: EffectFn): Dispose {
  * development the drain reports it.
  */
 export function measureEffect(fn: EffectFn): Dispose {
-  return createEffect(fn, measureWatcher, false);
+  return createEffect(fn, lanes.measure, false);
 }

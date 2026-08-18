@@ -13,48 +13,11 @@
  * `Signal.subtle.Watcher`.
  */
 
-import {
-  ComputedSignal,
-  StateSignal,
-  WatcherNode,
-  currentComputed as _currentComputed,
-  hasSinks as _hasSinks,
-  hasSources as _hasSources,
-  introspectSinks as _introspectSinks,
-  introspectSources as _introspectSources,
-  untrack as _untrack,
-  unwatched as _unwatched,
-  watched as _watched,
-} from './graph.js';
-
-export namespace Signal {
-  /** A mutable reactive value. */
-  export const State = StateSignal;
-  export type State<T> = StateSignal<T>;
-
-  /** A cached derivation. Re-evaluated lazily, only when actually read. */
-  export const Computed = ComputedSignal;
-  export type Computed<T = unknown> = ComputedSignal<T>;
-
-  /**
-   * Lower-level APIs. `subtle` marks operations that are easy to misuse —
-   * they expose graph internals or bypass tracking.
-   */
-  export namespace subtle {
-    export const Watcher = WatcherNode;
-    export type Watcher = WatcherNode;
-
-    export const untrack = _untrack;
-    export const currentComputed = _currentComputed;
-    export const introspectSources = _introspectSources;
-    export const introspectSinks = _introspectSinks;
-    export const hasSinks = _hasSinks;
-    export const hasSources = _hasSources;
-
-    export const watched = _watched;
-    export const unwatched = _unwatched;
-  }
-}
+/**
+ * The namespace lives in its own module so that a bundler can leave it out of
+ * an app that never names it; see `namespace.ts`.
+ */
+export { Signal } from './namespace.js';
 
 /** Any readable signal — `Signal.State` or `Signal.Computed`. */
 export type ReadableSignal<T> = { get(): T };
@@ -68,6 +31,7 @@ export {
   effect,
   renderEffect,
   measureEffect,
+  dataEffect,
   batch,
   flushSync,
   tick,
@@ -84,3 +48,30 @@ export {
 } from './effect.js';
 
 export type { Scope, Context, Dispose, CleanupFn, EffectFn, FlushMetrics } from './effect.js';
+
+// --- What a server keeps apart, one request from the next -----------------
+
+export {
+  createRequestScope,
+  currentRequest,
+  runInRequest,
+  requestState,
+  clearRequestState,
+  trackRequestData,
+  settleRequest,
+} from './request.js';
+
+export type { RequestScope } from './request.js';
+
+// --- What the developer tools attach to ------------------------------------
+
+/**
+ * Instrumentation, not application API. `@voltdev/core/devtools` is the thing
+ * to import; this is the socket it plugs into, exported because the graph and
+ * the scheduler are the only places that know what the tools want to show.
+ * Every call into a listener is guarded by `__VOLT_DEV__`, so a production
+ * build removes the calls and then this module along with them.
+ */
+export { setDevListener } from './dev.js';
+
+export type { DevListener, EffectPhase } from './dev.js';

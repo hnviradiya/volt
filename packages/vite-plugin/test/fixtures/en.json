@@ -1,0 +1,6 @@
+{
+  "close": "Close",
+  "pageOf": "Page {n} of {m}",
+  "checkoutTotal": "Total: {amount}",
+  "abandoned": "Nothing asks for this"
+}

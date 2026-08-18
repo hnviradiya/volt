@@ -20,8 +20,11 @@ export {
   getComponentConfig,
   isComponent,
   createComponent,
+  requestStyles,
   slot,
 } from './component.js';
+
+export { createId, resetIds } from './ids.js';
 
 export type {
   ComponentConfig,
@@ -41,6 +44,7 @@ export {
   effect,
   renderEffect,
   measureEffect,
+  dataEffect,
   flushSync,
   tick,
   getFlushMetrics,
@@ -52,6 +56,13 @@ export {
   provideContext,
   isSignal,
   isWritableSignal,
+  createRequestScope,
+  currentRequest,
+  runInRequest,
+  requestState,
+  clearRequestState,
+  trackRequestData,
+  settleRequest,
 } from '@voltdev/reactivity';
 
 export type {
@@ -61,6 +72,7 @@ export type {
   EffectFn,
   FlushMetrics,
   ReadableSignal,
+  RequestScope,
   Scope,
   SignalOptions,
 } from '@voltdev/reactivity';

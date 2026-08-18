@@ -16,7 +16,7 @@
  * without every timestamp on the page owning a timer to do it.
  */
 
-import { Signal, effect, onCleanup } from '@voltdev/core';
+import { Signal, effect, measureEffect, onCleanup } from '@voltdev/core';
 import { createCollection, ITEM_ATTRIBUTE } from './collection.js';
 
 // The proposal's own name for reading without subscribing; Volt adds no second
@@ -990,7 +990,7 @@ export function createCode(options: CodeOptions = {}): Code {
   const language = (): string => options.language?.()?.trim() ?? '';
   const blockLabel = options.labels?.block ?? ((lang) => (lang ? `${lang} code` : 'Code'));
 
-  effect(() => {
+  measureEffect(() => {
     if (!block) return;
     const el = options.pre?.();
     if (!el) return;
