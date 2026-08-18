@@ -71,8 +71,27 @@ to remove on a single-value widget, the seeding effect rewriting typed text, and
 takes rather than toggles when only one value is held, which is the neighbour
 that fix would otherwise have broken.
 
-Not exported yet. What it is waiting on is a round of adversarial review that
-finds nothing, rather than a named defect.
+That review has now run, and it reproduced no defect in behaviour. What it
+found was ten pieces of correct code that nothing held: three of the four
+`readOnly` guards, `deselect` — which the chip buttons reach and every other
+route refuses before — the writer effect's own-last-write guard and both
+branches a value arriving from outside turns on, `commitCustomValue` naming
+what it takes, the adopt effect's `multiple` guard and its once-only flag, and
+Enter on the option already held. Each has a test now, and each test reddens
+when the line it is about is deleted. The one test that read as covering the
+read-only story drove none of it: it never typed, so the question those guards
+exist to protect was never in the box. It types now.
+
+The commit that landed the redesign called all three files growing "the
+opposite of the signal a real redesign gives", and held the work back for it.
+That reading was wrong here, and measurably: 2161 → 2215 lines in total, of
+which 1102 → 1085 are code. The file grew by 54 lines of prose and shed 17 of
+code, and `labelCache`, `rememberLabels`, `rememberLabel`, `showInputValue`,
+`settledText`, `openFiltered` and `searchable` appear nowhere in it — the one
+hit left for `filtering` is the word inside a comment.
+
+Not exported yet. What it is waiting on is the next round finding nothing,
+rather than a named defect.
 
 ## inputs
 
@@ -85,38 +104,66 @@ than a guard at each call site.
 The rule: when the tag holding focus is destroyed, focus goes to the tag that
 took its place — the row closes up leftwards, so that is the one the eye is
 already on — to the last tag when the row is now shorter than that, to the text
-box when no tag is left, and to the row itself when even the box refuses it, as
-a disabled field's does. `<body>` is the one answer never given, because it is
-the top of the document and the next Tab would start again from there.
+box when no tag is left, to the row itself when even the box refuses it, as a
+disabled field's does, and to the field's own root when the row has gone as
+well. `<body>` is the one answer never given, because it is the top of the
+document and the next Tab would start again from there.
+
+The end of that chain is what the round before this one got wrong. A row
+rendered only while there are tags leaves with the last one, and a disabled
+field's box refuses focus; each had a test of its own, neither had one with the
+other, and together they ran off the end of the chain and landed on `<body>` —
+the one answer the rule says it never gives. The root is the terminal because
+it is the part of the field certain to still be there, and it is why `root` is
+required now, as `list` already was: focus is placed from the row and, when
+there is no row left, on the field itself.
 
 It is applied where every removal meets. The row is rendered from the value, so
 `removeAt`, `clear()` and a write to a value signal the consumer owns all
 arrive as a change to it; a guard on the two methods answers for the two of
-them alone, and the third has no call site to put one on. `list` is required
-now for the same reason: focus is placed from the row, and a field that cannot
-see its row has nowhere to put it back.
+them alone, and the third has no call site to put one on. Which tag to hand off
+to is measured against the row and not against the value, because what is being
+chosen is an element to focus: a row can show fewer tags than the value holds,
+and an index clamped to the value would point past the end of the row and give
+up on a row that still has tags in it.
+
+Where focus is is recorded in one place, the row's own `focusin`. A click is
+focus arriving too, and it is the only arrival no key handler sees: the arrows
+used to keep a record of their own, so a clicked tag held focus while Tab still
+came back to the tag the keys had last been on. Everything that moves focus now
+only moves it, and the row hears where it went.
 
 The row's single tab stop is the same question asked about the *next* Tab, so
-it follows the same rule. It is read back clamped to the row rather than
-written at each removal — `clear()` used to hand it back to the first tag and
-`removeAt` did not, so a removal that shortened the row under the stop left
-every tag at `tabindex="-1"` and the whole row unreachable by Tab.
+it follows the same rule. Two mechanisms carry it rather than one: it is read
+back clamped to the row, so a row that shrinks under the stop cannot leave every
+tag at `tabindex="-1"` and the whole row unreachable by Tab; and an emptied row
+hands it back to the first tag, because the tags that come back are new ones and
+a stop left where the row was last entered would drop Tab into the middle of
+them. Both are load-bearing, and each has a test that fails without it.
 
-Covered by tests that fail without the model: the stop after `removeAt` takes
-the tag holding it, and after a consumer write shortens the row; and the
-hand-off landing on the row when a disabled field's box will not take focus.
-The three the rule exists for — `removeAt` on the focused tag, `clear()` while
-one holds focus, and the last tag going — were already covered and still are.
+Covered by tests that fail without the part they name: the hand-off landing on
+the row when a disabled field's box refuses focus, and on the field itself when
+the row has gone too; the stop after `removeAt`, after a click, and after a
+consumer write shortens the row; the hand-off measured against a row showing
+fewer tags than the value holds; the record kept when a tag off the page
+announces the focus it lost, which is what the engines that announce it send;
+and the record let go of when the tag holding focus has left the row. The three
+the rule exists for — `removeAt` on the focused tag, `clear()` while one holds
+focus, and the last tag going — were already covered and still are.
 
-Two things found while redesigning it, neither about where focus goes, and both
-left as found:
+Two things found while redesigning it, neither about where focus goes. Both are
+as they were, and both are pinned now, so that closing either is a decision
+somebody makes rather than a change nobody notices:
 
 - `clear()` removes while `disabled` or `readOnly`, where `removeAt` refuses.
-  That is a question about whether a removal is allowed at all. Focus is placed
-  either way now, so nothing lands on `<body>` because of it.
+  `removeAt` backs a control this field describes and Backspace on a tag, which
+  a disabled field answers for; `clear()` is the consumer's own call, the same
+  write they could make through the value signal beside it, which no guard here
+  could refuse anyway.
 - `clear()` writes nothing to the live region, where `removeAt` announces
   "ada removed". Emptying the row is the largest change the field makes and the
-  only one it makes silently.
+  only one it makes silently. Saying it needs a label the field has not got, so
+  the test pins what it does rather than what it should.
 
 ## slider-upload
 
@@ -131,31 +178,52 @@ false and `data-dirty` was absent.
 It now compares two states and asks nothing about their authors: what a submit
 would send, against what a reset would restore. The value a submit would send
 is read from the mirrors on every call, because assigning to `value` announces
-nothing and a sampled answer never sees it. The one record kept is the state
-the value and the mirrors last agreed on, which is what says which of the two
-moved: a mirror still holding it is a render behind and the value is newer,
-and a mirror holding anything else was written from outside. That record is
-what the same-tick tests are about — an `onValueChange` handler must not be
-told the slider is back at its default while the form is not — and removing it
-reddens seven of them.
+nothing and a sampled answer never sees it. The one record kept is the value
+the mirrors were last filled from, which is what says which of the two moved:
+a mirror still holding it is a render behind and the value is newer, and a
+mirror holding anything else was written from outside. That record is what the
+same-tick tests are about — an `onValueChange` handler must not be told the
+slider is back at its default while the form is not — and comparing against
+the live value instead of the record reddens eight tests, five of them
+same-tick.
 
 Covered by tests that fail without the model: a keyboard change and the way
 back to the default; a value written straight to a mirror with no event at
-all, on the first thumb and on the one the field never validates; every thumb
-of a range; and `field.reset()`, which now puts the mirrors back in step
-rather than clearing a flag over a value the form would still send.
+all, on the first thumb and on the one the field never validates; a write
+announced by `input` and a write announced by `change` alone, both on the
+mirror the field is not listening to, so each delegated listener is driven by
+the test that names it; a second `pageshow`, so the counter the rendered
+attribute hangs off cannot answer once and then stop; every thumb of a range,
+on both of the prop objects the field publishes dirtiness on; and
+`field.reset()`, which now puts the value and the mirrors back together rather
+than clearing a flag over a value the form would still send.
+
+What it cost is worth stating, because the round was meant to leave fewer
+moving parts and left more. A boolean and the function that filled it became a
+per-thumb mirror lookup, the record of what the mirrors were last filled from,
+the submitted-value read, a counter with three listeners behind it, and a
+`reset` that writes both halves: three mechanisms became five, and the region
+is longer than what it replaced. What was bought is a model that can be checked
+against the DOM the form is actually read from, instead of one that had to be
+told who wrote what — but the count went the wrong way, and that is a cost
+rather than a saving.
 
 Two honest limits, neither of them the defect above:
 
 - A silent write makes the slider dirty but does not move the thumb. `values()`
   is still the slider's own state, so a restored form reports itself unsaved
-  while showing a value it will not submit. Adopting the mirror is the next
-  question to settle, and it is a question about what the value *is*, not about
-  what dirty means.
+  while showing a value it will not submit. Sharpest when the restore writes
+  the *default* over a slider the user has moved: the thumb reads 21, the form
+  would send 20, and `isDirty()` is false because a reset would change nothing
+  about the submit. That answer is pinned by a test rather than left to fall
+  out of the arithmetic. Adopting the mirror is the next question to settle,
+  and it is a question about what the value *is*, not about what dirty means.
 - A rendered `data-dirty` can only follow something that invalidates. `input`,
-  `change` and `pageshow` cover autofill, session restore and the bfcache; a
-  script that assigns `value` and fires nothing shows up on the next render for
-  any reason. `isDirty()` itself is right the moment it is asked.
+  `change` and `pageshow` each have a test of their own — autofill and a
+  session restore, which announce themselves with one or the other, and the
+  bfcache, which announces itself with neither; a script that assigns `value`
+  and fires nothing shows up on the next render for any reason. `isDirty()`
+  itself is right the moment it is asked.
 
 ## query — the write that did not land, resolved
 

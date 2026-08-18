@@ -37,7 +37,7 @@ import {
   SYSTEM_MODIFIERS,
 } from './dom-info.js';
 import { validateContentModel } from './content-model.js';
-import { checkAccessibility, type Diagnostic } from './a11y.js';
+import { checkAccessibility, type A11ySeverity, type Diagnostic } from './a11y.js';
 import {
   clientMarkup,
   MarkupBuilder,
@@ -77,6 +77,12 @@ export interface CodegenOptions {
    * Off by default while the two shapes are being measured against each other.
    */
   groupRowBindings?: boolean;
+  /**
+   * What the accessibility rules are allowed to do: `error` (the default)
+   * refuses the template, `warn` reports everything and compiles it anyway,
+   * `off` skips the pass. See `checkAccessibility`.
+   */
+  a11y?: A11ySeverity;
 }
 
 export interface CodegenResult {
@@ -230,7 +236,7 @@ export function generate(root: RootNode, options: CodegenOptions = {}): CodegenR
   // Before any path is computed, because every path below a node the HTML
   // parser relocates is resolved against a tree that will not exist.
   validateContentModel(root, options.filename);
-  const warnings = checkAccessibility(root, options.filename);
+  const warnings = checkAccessibility(root, options);
   return { ...new Generator(options).run(root), warnings };
 }
 

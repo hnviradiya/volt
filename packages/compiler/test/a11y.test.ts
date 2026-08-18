@@ -16,11 +16,36 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { compile, formatDiagnostic } from '@voltdev/compiler';
+import {
+  ARIA_ATTRIBUTES,
+  CompilerError,
+  compile,
+  formatDiagnostic,
+  type AriaAttribute,
+  type CompileOptions,
+} from '@voltdev/compiler';
 
 /** The messages this template warns with, in source order. */
-function warnings(template: string): string[] {
-  return compile(template).warnings.map((w) => w.message);
+function warnings(template: string, options?: CompileOptions): string[] {
+  return compile(template, options).warnings.map((w) => w.message);
+}
+
+/** A value of the kind an attribute takes, for the tests that drive the table. */
+function sample(spec: AriaAttribute): string {
+  switch (spec.kind) {
+    case 'token':
+    case 'tokens':
+      return spec.values![0]!;
+    case 'integer':
+      return '2';
+    case 'number':
+      return '1.5';
+    case 'idref':
+    case 'idrefs':
+      return 'target';
+    default:
+      return 'text';
+  }
 }
 
 describe('an interactive listener on something no keyboard reaches', () => {
@@ -61,6 +86,12 @@ describe('an interactive listener on something no keyboard reaches', () => {
   it('stays quiet when the role is bound rather than written', () => {
     expect(warnings(`<div :attr-role="role.get()" :click="select()">Pick</div>`)).toEqual([]);
   });
+
+  it('stays quiet on an element the browser has already made editable', () => {
+    // A contenteditable region takes focus and handles its own keys; the
+    // listener is not what a keyboard needs in order to reach it.
+    expect(warnings(`<div contenteditable="true" :click="edit()">Notes</div>`)).toEqual([]);
+  });
 });
 
 describe('an <img> that says nothing about itself', () => {
@@ -82,8 +113,17 @@ describe('an <img> that says nothing about itself', () => {
     expect(warnings(`<img src="/ada.png" alt="Ada Lovelace">`)).toEqual([]);
     expect(warnings(`<img src="/ada.png" :alt="person.name">`)).toEqual([]);
     expect(warnings(`<img src="/ada.png" aria-label="Ada Lovelace">`)).toEqual([]);
+    expect(warnings(`<h2 id="who">Ada</h2><img src="/ada.png" aria-labelledby="who">`)).toEqual([]);
     expect(warnings(`<img src="/rule.png" aria-hidden="true">`)).toEqual([]);
     expect(warnings(`<img src="/rule.png" role="presentation">`)).toEqual([]);
+  });
+
+  it('rejects an image whose aria-hidden does not hide it', () => {
+    // `aria-hidden="false"` is not the attribute being absent: the image is in
+    // the tree, announced, and still has nothing to say.
+    expect(() => compile(`<img src="/ada.png" aria-hidden="false">`)).toThrow(
+      /`<img>` with no `alt`/,
+    );
   });
 
   it('accepts an image whose attributes arrive as a spread', () => {
@@ -130,6 +170,20 @@ describe('a <label> pointing at nothing', () => {
     expect(warnings(`<label for="email">Email</label><input :attr-id="fieldId.get()">`))
       .toEqual([]);
   });
+
+  it('still names a near miss where a spread may be carrying ids', () => {
+    // A `:spread` is how every primitive is consumed, so a template-wide
+    // silence for one is most of this rule's reach. A computed id is built
+    // from a counter or a field name and is never one edit from an id somebody
+    // typed, so a near miss is a typo whatever the spread turns out to carry.
+    expect(
+      warnings(`<label for="emial">Email</label><input id="email"><img :spread="p()">`)[0],
+    ).toContain('one edit from the `email` this template writes');
+  });
+
+  it('says nothing about a miss no near one explains, once a spread may carry an id', () => {
+    expect(warnings(`<label for="email">Email</label><img :spread="p()">`)).toEqual([]);
+  });
 });
 
 describe('aria-* the vocabulary does not contain', () => {
@@ -158,6 +212,22 @@ describe('aria-* the vocabulary does not contain', () => {
 
   it('accepts the whole real vocabulary, including the deprecated members', () => {
     expect(warnings(`<div aria-roledescription="slide" aria-grabbed="false">a</div>`)).toEqual([]);
+    // Driven over the table rather than a sample of it: a name dropped from
+    // the vocabulary is a template that stops compiling, and two entries out
+    // of fifty is a coin toss about which name that would be.
+    for (const [name, spec] of Object.entries(ARIA_ATTRIBUTES)) {
+      expect(
+        warnings(`<div ${name}="${sample(spec)}"><span id="target">T</span></div>`),
+        name,
+      ).toEqual([]);
+    }
+  });
+
+  it('leaves aria-* on a component tag alone, because it is a prop and not an attribute', () => {
+    // Whether the component forwards it to the DOM at all is the component's
+    // decision, so a name this vocabulary does not have may still be a prop
+    // that one does. The rule is about markup, and this is not markup yet.
+    expect(warnings(`<v-thing aria-lable="Close"></v-thing>`)).toEqual([]);
   });
 });
 
@@ -193,6 +263,24 @@ describe('an aria-* value outside its enumeration', () => {
     expect(warnings(`<div aria-relevant="additions text">a</div>`)).toEqual([]);
     expect(warnings(`<div role="heading" aria-level="2">T</div>`)).toEqual([]);
     expect(warnings(`<div role="slider" aria-valuenow="0.5" tabindex="0">a</div>`)).toEqual([]);
+    // Every member of every enum, because a value dropped from one is a
+    // correct template that stops compiling and nothing else would say so.
+    for (const [name, spec] of Object.entries(ARIA_ATTRIBUTES)) {
+      for (const value of spec.values ?? []) {
+        expect(warnings(`<div ${name}="${value}">a</div>`), `${name}="${value}"`).toEqual([]);
+      }
+    }
+  });
+
+  it('lists an enum as `a`, `b` or `c`, which every enum in the table is long enough for', () => {
+    expect(() => compile(`<div aria-live="loud">a</div>`)).toThrow(
+      /Write `assertive`, `off` or `polite`/,
+    );
+    // The message has no one-value form, so the table may not grow an enum
+    // that would need one.
+    for (const [name, spec] of Object.entries(ARIA_ATTRIBUTES)) {
+      if (spec.values) expect(spec.values.length, name).toBeGreaterThan(1);
+    }
   });
 
   it('leaves a bound value alone, since only the runtime knows it', () => {
@@ -228,6 +316,13 @@ describe('a reference to an id no template defines', () => {
       warnings(`<div aria-labelledby="row-3">x</div><p :for="r in rows.get()" :key="r.id" :attr-id="'row-' + r.id">{ r.label }</p>`),
     ).toEqual([]);
   });
+
+  it('still names a near miss where a spread may be carrying ids', () => {
+    expect(
+      warnings(`<h2 id="title">T</h2><div aria-labelledby="titel">a</div><img :spread="p()">`)[0],
+    ).toContain('Did you mean `title`?');
+    expect(warnings(`<div aria-labelledby="nowhere">a</div><img :spread="p()">`)).toEqual([]);
+  });
 });
 
 describe('a role that is not one', () => {
@@ -246,8 +341,25 @@ describe('a role that is not one', () => {
     expect(warnings(`<svg role="graphics-document"></svg>`)).toEqual([]);
   });
 
-  it('accepts a fallback chain, which is read left to right', () => {
+  it('accepts a module role on the element the module puts it on', () => {
+    // DPUB's own idioms, on the tags the override table judges: doc-backlink
+    // and doc-biblioref have `link` as a superclass and doc-toc has
+    // `navigation`, so nothing is lost — and the superclass table is in a
+    // vocabulary this compiler does not carry, so it cannot claim otherwise.
+    expect(warnings(`<a href="/refs" role="doc-backlink">Back</a>`)).toEqual([]);
+    expect(warnings(`<a href="/refs" role="doc-biblioref">[1]</a>`)).toEqual([]);
+    expect(warnings(`<nav role="doc-toc"><a href="/a">A</a></nav>`)).toEqual([]);
+    expect(warnings(`<main role="doc-chapter">a</main>`)).toEqual([]);
+    expect(warnings(`<h2 role="doc-subtitle">A history</h2>`)).toEqual([]);
+  });
+
+  it('accepts a fallback chain, and reads every role in it', () => {
     expect(warnings(`<div role="doc-subtitle heading" aria-level="2">T</div>`)).toEqual([]);
+    // A browser that does not know the first role falls through to the second,
+    // so a name further along the chain is read and has to be one.
+    expect(() => compile(`<div role="doc-subtitle headnig">T</div>`)).toThrow(
+      /`role="headnig"` is not an ARIA role — did you mean `heading`\?/,
+    );
   });
 });
 
@@ -309,6 +421,19 @@ describe('a role that takes meaning away instead of adding it', () => {
     expect(warnings(`<nav role="navigation">a</nav>`)).toEqual([]);
     expect(warnings(`<a href="/x" role="link">x</a>`)).toEqual([]);
   });
+
+  it('accepts a role on an anchor that goes nowhere, which had no link to lose', () => {
+    // `<a>` without `href` is a placeholder the accessibility tree ignores;
+    // the role is the first thing it has been.
+    expect(warnings(`<a role="button" tabindex="0" :click="save()">Save</a>`)).toEqual([]);
+  });
+
+  it('accepts a heading kept out of the outline on purpose', () => {
+    // A visual heading that is not a section: the outline entry is exactly
+    // what `role="presentation"` is there to give up.
+    expect(warnings(`<h2 role="presentation">Filters</h2>`)).toEqual([]);
+    expect(warnings(`<h3 role="none">Sort</h3>`)).toEqual([]);
+  });
 });
 
 describe('a positive tabindex', () => {
@@ -347,6 +472,47 @@ describe('nesting the ARIA content model forbids', () => {
       .toThrow(/flattens everything in it to text/);
   });
 
+  it('rejects an element that only its role makes a control', () => {
+    // Nothing about a `<div>` is focusable, so the role is the whole reason
+    // this is a control — and the whole reason the nesting is wrong.
+    expect(() => compile(`<div role="option"><div role="button">Remove</div></div>`)).toThrow(
+      /`<div>` inside `role="option"`, which flattens everything in it to text/,
+    );
+  });
+
+  it('rejects a control the tag alone makes focusable', () => {
+    // Named in the message, so the finding is about this element rather than
+    // something further down that would have been reported anyway.
+    expect(() => compile(`<div role="option"><select></select></div>`)).toThrow(
+      /`<select>` inside `role="option"`, which flattens everything in it to text/,
+    );
+    expect(() => compile(`<div role="option"><textarea></textarea></div>`)).toThrow(
+      /`<textarea>` inside `role="option"`/,
+    );
+    // A media element is only focusable once it has controls to operate.
+    expect(() => compile(`<div role="option"><audio controls></audio></div>`)).toThrow(
+      /`<audio>` inside `role="option"`/,
+    );
+    expect(() => compile(`<div role="option"><video controls></video></div>`)).toThrow(
+      /`<video>` inside `role="option"`/,
+    );
+  });
+
+  it('rejects a control inside an element that flattens without being told to', () => {
+    // No role written anywhere: `<progress>`, `<meter>` and `<option>` each
+    // announce their contents as their own name on their own.
+    expect(() => compile(`<progress value="3" max="10"><button>Stop</button></progress>`)).toThrow(
+      /`<button>` inside `<progress>`/,
+    );
+    expect(() => compile(`<meter value="3" max="10"><button>Stop</button></meter>`)).toThrow(
+      /`<button>` inside `<meter>`/,
+    );
+    expect(() => compile(`<select><option><button>x</button></option></select>`)).toThrow(
+      /`<button>` inside `<option>`/,
+    );
+    expect(warnings(`<progress value="3" max="10"><span>3 of 10</span></progress>`)).toEqual([]);
+  });
+
   it('names making the two siblings as the remedy', () => {
     expect(() => compile(`<div role="option"><input type="checkbox"></div>`)).toThrow(
       /Make the two siblings — the control beside the `option`, not inside/,
@@ -358,6 +524,10 @@ describe('nesting the ARIA content model forbids', () => {
       .toEqual([]);
     expect(warnings(`<button><span aria-hidden="true">x</span> Close</button>`)).toEqual([]);
     expect(warnings(`<div role="option"><span class="badge">3</span> Ada</div>`)).toEqual([]);
+    // Neither of these can be operated, so neither is a control caught in the
+    // name: a media element without controls, and an input that renders none.
+    expect(warnings(`<div role="option"><video></video> Clip</div>`)).toEqual([]);
+    expect(warnings(`<div role="option"><input type="hidden"> Ada</div>`)).toEqual([]);
   });
 
   it('accepts a heading inside a link, which does not flatten its contents', () => {
@@ -378,6 +548,79 @@ describe('nesting the ARIA content model forbids', () => {
   it('leaves a portalled control to the container it lands in', () => {
     expect(warnings(`<button :click="open()">Open<span :portal><a href="/x">go</a></span></button>`))
       .toEqual([]);
+  });
+});
+
+describe('an attribute written with no value', () => {
+  it('rejects an empty aria-*, whichever kind it is', () => {
+    // One answer across the kinds, or the same mistake is an error on
+    // `aria-live` and silence on `aria-labelledby` for no reason anyone
+    // reading the messages could reconstruct.
+    for (const name of ['aria-live', 'aria-level', 'aria-labelledby', 'aria-relevant']) {
+      expect(() => compile(`<div ${name}="">a</div>`)).toThrow(
+        new RegExp(`\`${name}\` is written with no value`),
+      );
+    }
+  });
+
+  it('rejects the bare attribute, which sets nothing either', () => {
+    // `<span aria-hidden>` reads as hidden and hides nothing: a browser takes
+    // an empty value for an absent one, so the icon is still announced.
+    expect(() => compile(`<span aria-hidden>x</span>`)).toThrow(
+      /`aria-hidden` is written with no value/,
+    );
+  });
+
+  it('accepts an empty role and an empty tabindex, which ask for nothing', () => {
+    // `role=""` is HTML's own way of writing no role, and the tabindex rule is
+    // about positive values only — neither is a state left half set.
+    expect(warnings(`<div role="">a</div>`)).toEqual([]);
+    expect(warnings(`<div role="  ">a</div>`)).toEqual([]);
+    expect(warnings(`<div tabindex="">a</div>`)).toEqual([]);
+  });
+
+  it('quotes a tabindex the way it was written', () => {
+    // Reformatting the value in the message is one more thing for the author
+    // to fail to find in the file.
+    expect(() => compile(`<div tabindex=" 2 " role="button">a</div>`)).toThrow(
+      /`tabindex=" 2 "` puts this element in front of the whole page/,
+    );
+  });
+});
+
+describe('a caller that disagrees', () => {
+  it('turns every refusal into a warning, and finishes the pass', () => {
+    // The escape hatch a rule needs in order to be worth having: a finding
+    // that is wrong about this template must not be a build nobody can run.
+    expect(warnings(`<img src="/a.png"><div :click="go()">x</div>`, { a11y: 'warn' })).toEqual([
+      expect.stringContaining('`<img>` with no `alt`'),
+      expect.stringContaining('`:click` on `<div>`'),
+    ]);
+  });
+
+  it('skips the pass entirely', () => {
+    expect(warnings(`<img src="/a.png">`, { a11y: 'off' })).toEqual([]);
+    expect(warnings(`<div :click="go()">x</div>`, { a11y: 'off' })).toEqual([]);
+  });
+
+  it('refuses by default, so the way out has to be asked for', () => {
+    expect(() => compile(`<img src="/a.png">`)).toThrow(/`<img>` with no `alt`/);
+  });
+});
+
+describe('when an error ends the pass', () => {
+  it('carries out the warnings it had already found', () => {
+    // Otherwise one refusal hides every softer finding in the template until
+    // somebody fixes it, and then the next one hides the rest.
+    try {
+      compile(`<div :click="a()">x</div><img src="/y.png">`);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(CompilerError);
+      expect((error as CompilerError).warnings.map((w) => w.message)).toEqual([
+        expect.stringContaining('`:click` on `<div>`'),
+      ]);
+    }
   });
 });
 

@@ -75,6 +75,8 @@ let inputBacked = false;
 let ownFilter = false;
 /** What a server-rendered page sends down in the textbox. */
 let prefill = '';
+/** Put the textbox behind an `:if`, so a test can have it rendered again. */
+let remountable = false;
 let seq = 0;
 
 beforeEach(() => {
@@ -89,6 +91,7 @@ beforeEach(() => {
   inputBacked = false;
   ownFilter = false;
   prefill = '';
+  remountable = false;
 });
 
 afterEach(() => {
@@ -314,12 +317,14 @@ const comboboxTemplate = (): string => `
                   :click="combo.deselect(v)">x</button>
         </li>
       </ul>
+      ${remountable ? '<span :if="boxVisible.get()">' : ''}
       <input class="input" :ref="input" ${prefill === '' ? '' : `value="${prefill}"`}
              :spread="combo.inputProps()"
              :input="combo.onInput($event)"
              :keydown="combo.onInputKeyDown($event)"
              :click="combo.onInputClick()"
              :blur="combo.onInputBlur()">
+      ${remountable ? '</span>' : ''}
       <button class="toggle" :spread="combo.toggleProps()" :click="combo.onToggleClick()"
               :pointerdown="combo.onTogglePointerDown($event)">v</button>
       <!-- The same two handlers with none of the props, which is all the doc
@@ -368,6 +373,8 @@ interface ComboHarness {
   chips(): HTMLElement | null;
   chipLabels(): string[];
   removeButton(value: string): HTMLButtonElement;
+  /** Take the textbox out of the page and put the markup back as it came. */
+  remountBox(): void;
 }
 
 function comboDemo(): ComboHarness {
@@ -377,6 +384,7 @@ function comboDemo(): ComboHarness {
     list = new Signal.State<Element | null>(null);
     native = new Signal.State<Element | null>(null);
     wrapper = new Signal.State<Element | null>(null);
+    boxVisible = new Signal.State(true);
     items = items;
     multiple = comboOptions.multiple === true;
     /**
@@ -449,6 +457,12 @@ function comboDemo(): ComboHarness {
       el.textContent!,
     ),
     removeButton: (value) => find<HTMLButtonElement>(`.remove[data-value="${value}"]`),
+    remountBox: () => {
+      instance.boxVisible.set(false);
+      flushSync();
+      instance.boxVisible.set(true);
+      flushSync();
+    },
   };
 }
 
@@ -1067,6 +1081,45 @@ describe('the combobox textbox', () => {
     expect(new FormData(ui.form()).get('fruit')).toBe('ba');
   });
 
+  it('takes no name from the box when several values may be chosen', () => {
+    comboOptions = { name: 'fruit', multiple: true, defaultValue: ['ba'] };
+    // The same page, sending the same thing down: a label in the box over the
+    // values in the control that submits.
+    prefill = 'Cherry';
+    const ui = comboDemo();
+
+    // But a multiple keeps its box for typing and shows what it holds as
+    // chips, so nothing it was rendered with there names anything. Reading it
+    // as the name of the first value files a label the page never offered for
+    // it — under whichever value happens to be first.
+    expect(ui.combo.labelOf('ba')).toBe('ba');
+    expect(ui.chipLabels()).toEqual(['ba']);
+    expect(ui.combo.values()).toEqual(['ba']);
+  });
+
+  it('adopts the text it was rendered with once, not again from a later box', () => {
+    comboOptions = { name: 'fruit', defaultValue: 'ch' };
+    prefill = 'Cherry';
+    // The textbox behind an `:if`, as a consumer who reveals the field or
+    // re-renders the row around it has it.
+    remountable = true;
+    const ui = comboDemo();
+    expect(ui.combo.labelOf('ch')).toBe('Cherry');
+
+    openCombo(ui);
+    press(ui.option('ba'));
+    expect(ui.combo.value()).toBe('ba');
+    expect(ui.combo.labelOf('ba')).toBe('Banana');
+
+    // A textbox rendered again comes back holding the markup the server sent,
+    // which is a name for the value the page was loaded with and not for the
+    // one held now. Adopting is what the page is asked once, on the box it
+    // arrived with; every name after that comes from something that named it.
+    ui.remountBox();
+    expect(ui.combo.labelOf('ba')).toBe('Banana');
+    expect(ui.combo.value()).toBe('ba');
+  });
+
   it('shows the label of the value it starts with when `labelFor` supplies one', () => {
     comboOptions = {
       name: 'fruit',
@@ -1144,6 +1197,28 @@ describe('the combobox textbox', () => {
     expect(seen).toEqual(['Cherry']);
   });
 
+  it('reports the question in the box once, however often the box is written', () => {
+    const seen: string[] = [];
+    comboOptions = {
+      name: 'fruit',
+      defaultValue: 'ch',
+      onInputValueChange: (value) => seen.push(value),
+    };
+    const ui = comboDemo();
+    const input = ui.input();
+    input.focus();
+
+    type(input, 'ba');
+    // Typing opened the list, and the list rendering told this component what
+    // Banana is called — which is a name arriving for a value held, so the box
+    // is worked out again. It comes out the same: the question the user is in
+    // the middle of typing. Saying so a second time would have the consumer's
+    // handler run twice for one keystroke, and a search behind it ask twice.
+    expect(ui.combo.labelOf('ba')).toBe('Banana');
+    expect(input.value).toBe('ba');
+    expect(seen).toEqual(['ba']);
+  });
+
   it('keeps the label an option really had over one promised for it', () => {
     comboOptions = { name: 'fruit', defaultValue: 'ba', labelFor: () => 'Stale' };
     const ui = comboDemo();
@@ -1211,6 +1286,47 @@ describe('the combobox textbox', () => {
     expect(ui.combo.value()).toBe('ch');
     expect(input.value).toBe('Cherry');
     expect(ui.combo.isFiltering()).toBe(false);
+  });
+
+  it('puts the name back when Enter takes the option already held', () => {
+    comboOptions = { name: 'fruit', defaultValue: 'ch' };
+    const ui = comboDemo();
+    const input = ui.input();
+
+    type(input, 'ch');
+    key(input, 'ArrowDown');
+    key(input, 'Enter');
+
+    // The keyboard goes its own way to the same answer, and the value not
+    // moving is not the value being left alone: the question was answered, so
+    // the box says what is held rather than what was being asked.
+    expect(ui.combo.value()).toBe('ch');
+    expect(input.value).toBe('Cherry');
+    expect(ui.combo.isFiltering()).toBe(false);
+  });
+
+  it('answers the question in the box when the value is set from outside', () => {
+    const value = new Signal.State<readonly string[]>([]);
+    comboOptions = { name: 'fruit', value };
+    const ui = comboDemo();
+    const input = ui.input();
+    input.focus();
+
+    type(input, 'che');
+    expect(ui.combo.isFiltering()).toBe(true);
+    expect(ui.labels()).toEqual(['Cherry']);
+
+    // A value the consumer writes themselves passes through no handler here —
+    // no press, no keystroke, nothing this component could hang the answer
+    // off. The value arriving is the whole of what says the question was
+    // answered, and a box still asking it would go on narrowing the list to
+    // the thing already chosen.
+    value.set(['ch']);
+    flushSync();
+
+    expect(ui.combo.isFiltering()).toBe(false);
+    expect(input.value).toBe('Cherry');
+    expect(ui.labels()).toEqual(FRUITS.map((fruit) => fruit.label));
   });
 
   it('keeps DOM focus in the textbox and points at the option instead', () => {
@@ -1989,6 +2105,26 @@ describe('committing a value', () => {
     expect(input.value).toBe('Cherry');
   });
 
+  it('keeps a value it took from the box readable, having named it after itself', () => {
+    comboOptions = { allowCustomValue: true, name: 'fruit' };
+    const ui = comboDemo();
+    const input = ui.input();
+
+    type(input, 'Kumquat');
+    expect(key(input, 'Enter')).toBe(true);
+    expect(ui.combo.value()).toBe('Kumquat');
+    expect(new FormData(ui.form()).get('fruit')).toBe('Kumquat');
+
+    // Nothing else on this page will ever say what it is called: it is not in
+    // the catalogue, no option will render for it, and `labelFor` was written
+    // against a list it is not on. The text the user wrote is its name and the
+    // only one it will have — without it the box goes empty over a value the
+    // form still submits, and the chips and announcements have nothing to say.
+    expect(input.value).toBe('Kumquat');
+    expect(ui.combo.inputValue()).toBe('Kumquat');
+    expect(ui.combo.labelOf('Kumquat')).toBe('Kumquat');
+  });
+
   it('takes the highlighted option on Tab and carries on out', () => {
     const ui = comboDemo();
     const input = openCombo(ui);
@@ -2031,28 +2167,66 @@ describe('committing a value', () => {
     const ui = comboDemo();
     const input = openCombo(ui);
     expect(ui.combo.isOpen()).toBe(true);
+    expect(input.value).toBe('Cherry');
+
+    // Read-only is not disabled: the widget says `aria-readonly`, keeps its
+    // tab stop and takes keystrokes, so the box can hold a question the whole
+    // time it is refusing to answer one. Every refusal below is put to it with
+    // that question standing, because a refusal that also emptied the box
+    // would take away what the user is still typing.
+    type(input, 'ban');
+    expect(ui.combo.isFiltering()).toBe(true);
+    expect(ui.labels()).toEqual(['Banana']);
 
     key(input, 'ArrowDown');
     key(input, 'Enter');
     // Nothing was taken, so nothing about the widget may say otherwise: a box
-    // reading "Apple" over a form submitting `ch` is one lie, and a list that
+    // reading "Banana" over a form submitting `ch` is one lie, and a list that
     // collapses on the keystroke that took nothing is another — it says a
     // choice was made, and leaves a read-only widget's options unreadable.
     expect(ui.combo.value()).toBe('ch');
-    expect(input.value).toBe('Cherry');
+    expect(input.value).toBe('ban');
     expect(ui.combo.isOpen()).toBe(true);
 
-    press(ui.option('ap'));
+    press(ui.option('ba'));
     // And the pointer answers it the same way, as it does everywhere else.
     expect(ui.combo.value()).toBe('ch');
-    expect(input.value).toBe('Cherry');
+    expect(input.value).toBe('ban');
     expect(ui.combo.isOpen()).toBe(true);
+
+    key(input, 'Escape');
+    // The first press is the popup's, and the text under it stands.
+    expect(ui.combo.isOpen()).toBe(false);
+    expect(input.value).toBe('ban');
 
     key(input, 'Escape');
     // Emptying the box is a change too, and one that would leave the widget
     // showing nothing over a value it still holds and still submits.
-    expect(input.value).toBe('Cherry');
+    expect(input.value).toBe('ban');
     expect(ui.combo.value()).toBe('ch');
+    expect(new FormData(ui.form()).get('fruit')).toBe('ch');
+  });
+
+  it('refuses to remove a chip while read-only', () => {
+    comboOptions = {
+      name: 'fruit',
+      multiple: true,
+      readOnly: () => true,
+      defaultValue: ['ap', 'ch'],
+    };
+    const ui = comboDemo();
+    const submitted = () =>
+      [...(ui.native() as HTMLSelectElement).selectedOptions].map((option) => option.value);
+
+    // The chip buttons remove by calling `deselect`, which is on the surface
+    // for exactly that. Every other way in refuses first and never reaches it,
+    // so this is the one route by which a read-only widget can be made to drop
+    // a value the form is still submitting.
+    press(ui.removeButton('ap'));
+
+    expect(ui.combo.values()).toEqual(['ap', 'ch']);
+    expect(ui.chips()!.getAttribute('aria-label')).toBe('2 selected');
+    expect(submitted()).toEqual(['ap', 'ch']);
   });
 });
 

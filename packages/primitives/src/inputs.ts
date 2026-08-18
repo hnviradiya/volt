@@ -1629,6 +1629,15 @@ export interface TagsInputOptions {
    * field that cannot see its row has nowhere to put it back.
    */
   list: () => Element | null | undefined;
+  /**
+   * The element the whole field is drawn on.
+   *
+   * Not optional for the same reason, and the end of the same chain: it is the
+   * one part of the field that is still there when every other part has gone.
+   * A row rendered only while there are tags leaves with the last one, and a
+   * disabled field's text box refuses focus, so neither can be the last resort.
+   */
+  root: () => Element | null | undefined;
   label?: () => Element | null | undefined;
   description?: () => Element | null | undefined;
   errorMessage?: () => Element | null | undefined;
@@ -1682,6 +1691,7 @@ export interface TagsInput {
   add(text?: string): boolean;
   removeAt(index: number): void;
   removeLast(): void;
+  /** Empty the row. Not refused while disabled: it is the consumer's own call. */
   clear(): void;
   isFull(): boolean;
   /** The tag a rejected duplicate collided with, until the next edit. */
@@ -1808,34 +1818,51 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
   };
 
   const tagCollection = createCollection(options.list);
-  /** Which tag focus last reached, and so where the row's single stop belongs. */
+  /**
+   * Which tag focus last reached, and so where the row's single stop belongs.
+   *
+   * Written where focus arrives rather than by each thing that moves it, so
+   * that the stop cannot disagree with the tag the user is on: a click moves
+   * focus too, and nothing that moves it by key ever hears about that one.
+   */
   const activeTag = new Signal.State(0);
 
   /**
    * Which tag holds the row's single tab stop.
    *
-   * Read back against the row rather than written at each removal: a row that
-   * shrinks under the stop would keep it on an index no tag has any more,
-   * leaving every tag at `tabindex="-1"` and the whole row unreachable by Tab.
+   * Clamped to the row on the way out rather than corrected at each removal: a
+   * row that shrinks under the stop would keep it on an index no tag has any
+   * more, leaving every tag at `tabindex="-1"` and the whole row unreachable by
+   * Tab. An emptied row is the one case that also writes, below.
    */
   const tabStop = (): number => Math.min(activeTag.get(), state.get().length - 1);
 
   const roving = createRovingFocus(
     tagCollection,
     () => tagCollection.at(untrack(() => activeTag.get())),
-    (el) => {
-      const index = tagCollection.indexOf(el);
-      if (index !== -1) activeTag.set(index);
-    },
+    // Where roving is about to put focus is not recorded here: the row hears it
+    // arrive a moment later, along with every arrival roving knows nothing of.
+    () => {},
     { orientation: 'horizontal', loop: false, typeahead: false },
   );
+
+  /**
+   * Put focus on an element, and say whether it went.
+   *
+   * Asking is not telling: a disabled control and an element with no tab index
+   * both refuse, and the chain below has to know that it refused to go on to
+   * the next place.
+   */
+  const takeFocus = (el: Element | null | undefined): boolean => {
+    if (!(el instanceof HTMLElement)) return false;
+    el.focus();
+    return el.ownerDocument.activeElement === el;
+  };
 
   /** Returns whether the box took it, which a disabled field's will not. */
   const focusInput = (): boolean => {
     const el = options.input();
-    if (!isValueControl(el)) return false;
-    el.focus();
-    return el.ownerDocument.activeElement === el;
+    return isValueControl(el) && takeFocus(el);
   };
 
   /**
@@ -1843,23 +1870,27 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
    *
    * The tag that took its place, the row having closed up leftwards, so it is
    * the one the eye is on already; the last tag when the row is now shorter
-   * than that; the text box when no tag is left; and the row itself when even
-   * the box refuses it, as a disabled field's does. `<body>` is the one answer
-   * never given: it is the top of the document, and the next Tab would start
-   * again from there.
+   * than that; the text box when no tag is left; the row itself when even the
+   * box refuses it, as a disabled field's does; and the field's own root when
+   * the row has gone too, which it does when a consumer renders it only while
+   * there are tags. `<body>` is the one answer never given: it is the top of
+   * the document, and the next Tab would start again from there.
+   *
+   * Measured against the row rather than against the value, because what is
+   * being chosen is an element to focus: a row can show fewer tags than the
+   * value holds, and an index clamped to the value would reach past the end of
+   * it and abandon a row that still has tags in it.
    */
   const handOffFrom = (index: number): void => {
     const tags = tagCollection.all();
-    const at = Math.min(index, tags.length - 1);
-    const next = tags[at];
+    const next = tags[Math.min(index, tags.length - 1)];
     if (next) {
-      activeTag.set(at);
       next.focus();
       return;
     }
     if (focusInput()) return;
-    const row = options.list();
-    if (row instanceof HTMLElement) row.focus();
+    if (takeFocus(options.list())) return;
+    takeFocus(options.root());
   };
 
   /**
@@ -1888,13 +1919,17 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
         target instanceof Element ? tags.findIndex((tag) => tag.contains(target)) : -1;
       focusedTag = tags[index] ?? null;
       focusedIndex = index;
+      // The stop belongs where focus is, and this is the only place that hears
+      // a click. Focus on the row itself is focus in the field but on no tag,
+      // and leaves the stop where it was.
+      if (index !== -1) activeTag.set(index);
     };
 
     // Released as soon as the user leaves the row, or a removal long afterwards
     // would pull focus back into a field nobody is in. An element already off
-    // the page is not the user leaving, so its record stands — a guard against
-    // engines that announce a removed element's focus loss, which the one the
-    // tests run in does not, rather than a case any test drives.
+    // the page is not the user leaving, so its record stands: on the engines
+    // that announce a removed element's focus loss, reading that as leaving
+    // would cancel the very rescue it is reporting the need for.
     const onFocusOut = (event: Event): void => {
       const target = event.target;
       if (target instanceof Element && !target.isConnected) return;
@@ -1936,7 +1971,8 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
       if (held.isConnected) {
         // The row can close up around the tag holding focus without destroying
         // it, and the record has to follow or a later removal would rescue to
-        // the wrong end of the row.
+        // the wrong end of the row. One that has left the row altogether is not
+        // the field's to rescue at all.
         focusedIndex = tagCollection.all().indexOf(held);
         if (focusedIndex === -1) focusedTag = null;
         return;
@@ -2039,7 +2075,6 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
         const last = tagCollection.last();
         if (!last) return false;
         event.preventDefault();
-        activeTag.set(tagCollection.all().length - 1);
         last.focus();
         return true;
       }
@@ -2077,7 +2112,6 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
         return true;
       }
 
-      activeTag.set(index);
       const consumed = roving.onKeyDown(event);
       if (consumed) event.preventDefault();
       return consumed;
@@ -2115,14 +2149,19 @@ export function createTagsInput(options: TagsInputOptions): TagsInput {
       defined({
         ...borrowAria(field),
         role: 'group',
+        // Out of the tab order, and the end of the chain focus falls down when
+        // a removal takes the tag holding it: the row can be rendered only
+        // while there are tags, and a disabled field's box refuses focus, so
+        // this is the last part of the field that is certain to be there.
+        tabindex: '-1',
         'data-full': isFull() || undefined,
       }),
 
     listProps: () => ({
       role: 'list',
       'aria-label': label(options.labels?.list, 'tags', 'Tags'),
-      // Focusable only to be handed focus: out of the tab order, and the last
-      // place the rule has to put it when the text box will not take it.
+      // Focusable only to be handed focus: out of the tab order, and where the
+      // rule puts it when the text box will not take it.
       tabindex: '-1',
     }),
 

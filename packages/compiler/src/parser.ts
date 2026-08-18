@@ -30,8 +30,18 @@ import {
   isComponentTag,
   isOneEditFrom,
 } from './dom-info.js';
+// Type only, so the accessibility pass importing this file back is erased.
+import type { Diagnostic } from './a11y.js';
 
 export class CompilerError extends Error {
+  /**
+   * Accessibility findings collected before this error ended that pass.
+   *
+   * They are about other elements, and dropping them would let one refusal
+   * hide every softer finding in the same template until it was fixed.
+   */
+  warnings: Diagnostic[] = [];
+
   constructor(
     message: string,
     public loc: { line: number; column: number },

@@ -22,7 +22,8 @@ import { fileURLToPath } from 'node:url';
 import { transform as esbuildTransform } from 'esbuild';
 import MagicString from 'magic-string';
 import { compileStringAsync } from 'sass';
-import { compile, CompilerError } from '@voltdev/compiler';
+import { compile, CompilerError, formatDiagnostic } from '@voltdev/compiler';
+import type { A11ySeverity } from '@voltdev/compiler';
 import type { Plugin } from 'vite';
 import { DecoratorError, planLowering } from './decorators.js';
 import { isIdentChar, matchDelimiter, skipQuoted, skipTemplateLiteral } from './scan.js';
@@ -47,6 +48,15 @@ export interface VoltPluginOptions {
    * `CodegenOptions.groupRowBindings`.
    */
   groupRowBindings?: boolean;
+  /**
+   * What the compiler's accessibility rules may do to this build.
+   *
+   * `error`, the default, refuses a template the rules are certain about.
+   * `warn` reports everything and builds anyway, which is what a project
+   * reaches for when a rule is wrong about one template and the alternative
+   * is switching all of them off. `off` skips the pass.
+   */
+  a11y?: A11ySeverity;
 }
 
 const DEFAULT_INCLUDE = /\.m?ts$/;
@@ -75,16 +85,20 @@ export function volt(options: VoltPluginOptions = {}): Plugin[] {
       if (!code.includes('@Component')) return null;
 
       try {
-        return await compileTemplates(
-          code,
-          id,
+        return await compileTemplates(code, id, {
           runtimeModule,
-          options.debug ?? false,
+          debug: options.debug ?? false,
           groupRowBindings,
-          (file) => this.addWatchFile(file),
-        );
+          a11y: options.a11y,
+          watch: (file) => this.addWatchFile(file),
+          warn: (message) => this.warn(message),
+        });
       } catch (err) {
         if (err instanceof CompilerError) {
+          // Softer findings from the same template, which the error ended the
+          // pass before it could return. They are about other elements, and
+          // the author is about to be editing this file anyway.
+          for (const warning of err.warnings) this.warn(formatDiagnostic(warning));
           // The message already names the template's own file, which for a
           // templateUrl is not this module.
           this.error(err.filename ? err.message : `${err.message}\n  in ${id}`);
@@ -184,6 +198,18 @@ interface StyleSite {
   paths: string[];
 }
 
+/** Everything the transform needs from the plugin that is running it. */
+interface TemplateBuild {
+  runtimeModule: string;
+  debug: boolean;
+  groupRowBindings: boolean;
+  a11y: A11ySeverity | undefined;
+  /** Registering a file makes an edit to it re-run this transform. */
+  watch: (file: string) => void;
+  /** Where a finding the compiler is not certain enough about to throw goes. */
+  warn: (message: string) => void;
+}
+
 /**
  * Replace every template in a `@Component({...})` with a compiled `render`,
  * and inline any `styleUrl`/`styleUrls` files.
@@ -195,11 +221,9 @@ interface StyleSite {
 async function compileTemplates(
   code: string,
   id: string,
-  runtimeModule: string,
-  debug: boolean,
-  groupRowBindings: boolean,
-  watch: (file: string) => void,
+  build: TemplateBuild,
 ): Promise<{ code: string; map: null } | null> {
+  const { runtimeModule, debug, groupRowBindings, a11y, watch, warn } = build;
   const templates = findTemplateSites(code);
   const styles = findStyleSites(code);
   if (templates.length === 0 && styles.length === 0) return null;
@@ -236,7 +260,13 @@ async function compileTemplates(
       runtime: RUNTIME_NAMESPACE,
       runtimeModule,
       groupRowBindings,
+      a11y,
     });
+
+    // The half of the accessibility pass that does not refuse the build. It
+    // reaches a person here or nowhere: nothing else in a real build reads it,
+    // and a diagnostic nobody sees is a rule nobody has.
+    for (const warning of result.warnings) warn(formatDiagnostic(warning));
 
     if (debug) {
       const { stats } = result;

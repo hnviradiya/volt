@@ -17,7 +17,10 @@
  *
  * Severity follows the rest of the compiler: certainly wrong throws, the way
  * markup a parser would rebuild throws, and usually wrong is collected as a
- * warning. Both name what to write instead.
+ * warning. Both name what to write instead. And a caller can disagree: a rule
+ * with no way out is one a project escapes by forking the compiler, so
+ * `a11y: 'warn'` keeps the build moving while still reporting everything, and
+ * `a11y: 'off'` skips the pass.
  */
 
 import type {
@@ -50,6 +53,21 @@ export function formatDiagnostic(d: Diagnostic): string {
 }
 
 /**
+ * What a rule that would refuse a template is allowed to do.
+ *
+ * `error` is the default and the one that means anything. `warn` is for the
+ * case no rule survives without — a finding that is wrong about this template,
+ * on a deadline — and downgrades every refusal rather than making a project
+ * choose between editing correct markup and losing the other seven rules.
+ */
+export type A11ySeverity = 'error' | 'warn' | 'off';
+
+export interface A11yOptions {
+  filename?: string;
+  a11y?: A11ySeverity;
+}
+
+/**
  * Events whose whole purpose is to operate the element.
  *
  * Pointer and drag events are deliberately out: a splitter listening on
@@ -74,8 +92,11 @@ const CONTROL_ROLES = new Set([
 /**
  * Roles an element carries without anyone writing one.
  *
- * Only the tags the rules below actually ask about — `<a>`, `<img>` and
- * `<input>` all depend on an attribute and are worked out in `effectiveRole`.
+ * Only the tags whose implicit role decides something here: one that flattens
+ * what is inside it, or a heading. `<select>`, `<textarea>` and `<input>` are
+ * absent because anything focusable is reached by `isFocusable` before its
+ * role is asked for, and `<img>` because a void element has no contents to
+ * flatten.
  */
 const IMPLICIT_ROLES: Record<string, string> = {
   button: 'button',
@@ -83,8 +104,6 @@ const IMPLICIT_ROLES: Record<string, string> = {
   meter: 'meter',
   option: 'option',
   progress: 'progressbar',
-  select: 'combobox',
-  textarea: 'textbox',
 };
 
 /**
@@ -161,11 +180,13 @@ const OVERRIDES: Override[] = [
 
 interface Context {
   warnings: Diagnostic[];
+  severity: A11ySeverity;
   /** Every id the template writes out literally. */
   ids: Set<string>;
   /**
-   * The template computes an id somewhere, so no reference to a missing one
-   * can be ruled out — which id it lands on is a runtime fact.
+   * The template computes an id somewhere, so an element carries one this file
+   * never writes — which id it lands on is a runtime fact. What survives that
+   * is in `missingId`.
    */
   idsUnknowable: boolean;
   filename: string | undefined;
@@ -178,10 +199,25 @@ interface Flattened {
   holder: string;
 }
 
-export function checkAccessibility(root: RootNode, filename?: string): Diagnostic[] {
-  const ctx: Context = { warnings: [], ids: new Set(), idsUnknowable: false, filename };
+export function checkAccessibility(root: RootNode, options: A11yOptions = {}): Diagnostic[] {
+  if (options.a11y === 'off') return [];
+
+  const ctx: Context = {
+    warnings: [],
+    severity: options.a11y ?? 'error',
+    ids: new Set(),
+    idsUnknowable: false,
+    filename: options.filename,
+  };
   collectIds(root.children, ctx);
-  walk(root.children, null, ctx);
+  try {
+    walk(root.children, null, ctx);
+  } catch (e) {
+    // Both severities come out of one pass, so an error ending it would take
+    // every warning found before it — and those are about other elements.
+    if (e instanceof CompilerError) e.warnings = ctx.warnings;
+    throw e;
+  }
   return ctx.warnings;
 }
 
@@ -225,7 +261,9 @@ function walk(nodes: TemplateChildNode[], flattened: Flattened | null, ctx: Cont
 
     // A component's root element is in another module and a `<template>`
     // contributes no element — but what either renders still lands inside
-    // whatever encloses it here.
+    // whatever encloses it here. An `aria-*` written on a component tag is a
+    // prop rather than an attribute, and whether it reaches the DOM at all is
+    // that component's decision, so nothing here can call one wrong.
     if (node.isComponent || node.isTemplate) {
       walk(node.children, flattened, ctx);
       continue;
@@ -238,13 +276,13 @@ function walk(nodes: TemplateChildNode[], flattened: Flattened | null, ctx: Cont
 
 function check(node: ElementNode, flattened: Flattened | null, ctx: Context): void {
   const tag = node.tag.toLowerCase();
-  if (flattened) checkFlattened(node, tag, flattened, ctx);
-  checkAria(node, ctx);
-  checkRole(node, tag, ctx);
-  checkTabindex(node, ctx);
-  checkImageAlt(node, tag, ctx);
-  checkLabelFor(node, tag, ctx);
-  checkListener(node, tag, ctx);
+  if (flattened) rule(() => checkFlattened(node, tag, flattened, ctx));
+  rule(() => checkAria(node, ctx));
+  rule(() => checkRole(node, tag, ctx));
+  rule(() => checkTabindex(node, ctx));
+  rule(() => checkImageAlt(node, tag, ctx));
+  rule(() => checkLabelFor(node, tag, ctx));
+  rule(() => checkListener(node, tag, ctx));
 }
 
 // ---------------------------------------------------------------------------
@@ -293,6 +331,21 @@ function checkAriaValue(
 ): void {
   const raw = attr.value ?? '';
 
+  // Written with nothing in it, whichever kind it is. A browser reads an empty
+  // value as an absent attribute, so `aria-hidden` alone hides nothing and
+  // `aria-labelledby=""` names nothing — one answer here is what stops the
+  // kinds disagreeing about the same mistake.
+  if (raw.trim() === '') {
+    fail(
+      `\`${name}\` is written with no value.\n` +
+        '  An empty value is read as an absent one, so the state this was there to set\n' +
+        '  stays at the default the element already had.\n' +
+        `  Give it a value, or bind it with \`:${name}\` if the value is computed.`,
+      attr,
+      ctx,
+    );
+  }
+
   switch (spec.kind) {
     case 'token': {
       if (spec.values!.includes(raw.trim().toLowerCase())) return;
@@ -340,10 +393,10 @@ function checkAriaValue(
 
     case 'idref':
     case 'idrefs': {
-      if (ctx.idsUnknowable) return;
       for (const id of raw.trim().split(/\s+/).filter(Boolean)) {
         if (ctx.ids.has(id)) continue;
-        warn(missingId(`\`${name}\``, id, ctx), attr, ctx);
+        const message = missingId(`\`${name}\``, id, ctx);
+        if (message) warn(message, attr, ctx);
       }
       return;
     }
@@ -351,17 +404,29 @@ function checkAriaValue(
 }
 
 /**
- * The one message both kinds of id reference share.
+ * The one message both kinds of id reference share, or nothing to say.
  *
  * A reference nothing resolves is dropped in silence, and the commonest cause
  * by far is a single character — so a near miss is named where there is one.
+ *
+ * Where the template computes an id somewhere, some element carries one this
+ * file never writes and a reference matching none of the written ids may still
+ * resolve, so the check goes quiet. A near miss is what survives that: a
+ * computed id is built from a counter or a field name, never from something
+ * one edit away from an id somebody typed, so the miss is a typo either way.
+ * Without this the two rules are off for any template using a primitive,
+ * because a `:spread` is how every primitive is consumed.
  */
-function missingId(what: string, id: string, ctx: Context): string {
+function missingId(what: string, id: string, ctx: Context): string | null {
   const near = [...ctx.ids].find((known) => isOneEditFrom(id, known));
+  if (ctx.idsUnknowable && !near) return null;
+
   return (
-    `${what} points at \`${id}\`, which no element in this template carries.\n` +
-    '  A reference to an id nothing has is dropped, so what it was there to supply\n' +
-    '  is missing rather than wrong.\n' +
+    (ctx.idsUnknowable
+      ? `${what} points at \`${id}\`, one edit from the \`${near}\` this template writes.\n`
+      : `${what} points at \`${id}\`, which no element in this template carries.\n`) +
+    '  An id reference resolves exactly or not at all, so what it was there to\n' +
+    '  supply is missing rather than wrong.\n' +
     (near
       ? `  Did you mean \`${near}\`?`
       : `  Give the element it means \`id="${id}"\`, or point this at one that exists.`)
@@ -385,7 +450,9 @@ function isModuleRole(role: string): boolean {
 
 function checkRole(node: ElementNode, tag: string, ctx: Context): void {
   const attr = attrOf(node, 'role');
-  if (!attr?.value) return;
+  // `role=""` is HTML's own way of writing no role, and asks for nothing —
+  // unlike an empty `aria-*`, which was written to set something and does not.
+  if (!attr?.value?.trim()) return;
 
   // A space-separated value is a fallback chain: the first role a browser
   // knows is the one it uses, so every one of them has to be knowable.
@@ -416,6 +483,13 @@ function checkRole(node: ElementNode, tag: string, ctx: Context): void {
     );
   }
 
+  // A module role's superclasses live in a vocabulary this compiler does not
+  // carry, and the modules' own idioms keep what the element had: doc-backlink
+  // and doc-biblioref are links, doc-toc is a navigation. Judging them against
+  // a table written from the core roles reports correct DPUB markup as a
+  // mistake, on exactly the elements the module exists for.
+  if (isModuleRole(role)) return;
+
   for (const entry of OVERRIDES) {
     if (!entry.tags.includes(tag)) continue;
     if (entry.needsHref && !has(node, 'href')) continue;
@@ -436,11 +510,14 @@ function checkRole(node: ElementNode, tag: string, ctx: Context): void {
 
 function checkTabindex(node: ElementNode, ctx: Context): void {
   const attr = attrOf(node, 'tabindex');
-  const value = attr?.value?.trim();
-  if (!value || !/^\+?\d+$/.test(value) || Number(value) <= 0) return;
+  const written = attr?.value ?? '';
+  const value = written.trim();
+  if (!/^\+?\d+$/.test(value) || Number(value) <= 0) return;
 
   fail(
-    `\`tabindex="${value}"\` puts this element in front of the whole page.\n` +
+    // Quoted as written: a message that silently reformats what it is
+    // reporting is one the author has to search for twice.
+    `\`tabindex="${written}"\` puts this element in front of the whole page.\n` +
       '  A positive tabindex is a document-wide ordering rather than a local one:\n' +
       '  every element without one now comes after it, on every page this component\n' +
       '  appears on.\n' +
@@ -481,13 +558,15 @@ function checkImageAlt(node: ElementNode, tag: string, ctx: Context): void {
 // ---------------------------------------------------------------------------
 
 function checkLabelFor(node: ElementNode, tag: string, ctx: Context): void {
-  if (tag !== 'label' || ctx.idsUnknowable) return;
+  if (tag !== 'label') return;
   const attr = attrOf(node, 'for');
   const target = attr?.value?.trim();
   if (!target || ctx.ids.has(target)) return;
 
+  const message = missingId('`<label for>`', target, ctx);
+  if (!message) return;
   warn(
-    `${missingId('`<label for>`', target, ctx)}\n` +
+    `${message}\n` +
       '  A label attached to nothing gives its control no name and moves no focus when\n' +
       '  it is clicked. Wrapping the control in the `<label>` needs no id at all.',
     attr!,
@@ -526,28 +605,18 @@ function checkListener(node: ElementNode, tag: string, ctx: Context): void {
 // Nesting the ARIA content model forbids
 // ---------------------------------------------------------------------------
 
-/** The role an element carries here, written or implied. */
+/**
+ * The role an element carries here, written or implied.
+ *
+ * The attribute-dependent roles — a link only with `href`, a checkbox only
+ * with `type` — are deliberately not worked out. Every element they would
+ * describe is focusable, and `isFocusable` is asked first by both callers, so
+ * computing them decides nothing and only invites the two to disagree.
+ */
 function effectiveRole(node: ElementNode, tag: string): string | null {
   const written = attrOf(node, 'role')?.value?.trim().toLowerCase().split(/\s+/)[0];
   if (written && ARIA_ROLES.has(written)) return written;
-  if (tag === 'a' || tag === 'area') return has(node, 'href') ? 'link' : null;
-  if (tag === 'input') return inputRole(node);
-  // An empty alt is how an image says it is decoration, which is exactly the
-  // presentational role.
-  if (tag === 'img') return attrOf(node, 'alt')?.value === '' ? 'presentation' : 'img';
   return IMPLICIT_ROLES[tag] ?? null;
-}
-
-function inputRole(node: ElementNode): string | null {
-  const type = (attrOf(node, 'type')?.value ?? 'text').trim().toLowerCase();
-  if (type === 'hidden') return null;
-  if (type === 'checkbox') return 'checkbox';
-  if (type === 'radio') return 'radio';
-  if (type === 'range') return 'slider';
-  if (type === 'button' || type === 'submit' || type === 'reset' || type === 'image') {
-    return 'button';
-  }
-  return 'textbox';
 }
 
 function flattensContent(node: ElementNode): Flattened | null {
@@ -646,9 +715,9 @@ interface Located {
   loc: { line: number; column: number };
 }
 
+/** Every enum in the table has two members or more, so there is no lone one. */
 function list(values: readonly string[]): string {
   const quoted = values.map((v) => `\`${v}\``);
-  if (quoted.length === 1) return quoted[0]!;
   return `${quoted.slice(0, -1).join(', ')} or ${quoted[quoted.length - 1]}`;
 }
 
@@ -656,6 +725,27 @@ function warn(message: string, at: Located, ctx: Context): void {
   ctx.warnings.push({ message, loc: at.loc, filename: ctx.filename });
 }
 
+/**
+ * Ends the rule that found something, not the pass.
+ *
+ * Under `a11y: 'warn'` a refusal still has to unwind the rule that raised it —
+ * every one of them is written expecting `fail` never to return — while the
+ * rules after it go on running, which is the whole point of the mode.
+ */
+const STOP = Symbol('volt:a11y:stop');
+
+function rule(run: () => void): void {
+  try {
+    run();
+  } catch (e) {
+    if (e !== STOP) throw e;
+  }
+}
+
 function fail(message: string, at: Located, ctx: Context): never {
+  if (ctx.severity === 'warn') {
+    warn(message, at, ctx);
+    throw STOP;
+  }
   throw new CompilerError(message, at.loc, undefined, ctx.filename);
 }

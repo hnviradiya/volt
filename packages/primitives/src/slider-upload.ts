@@ -549,18 +549,20 @@ export function createSlider(options: SliderOptions): Slider {
   const validateValues = options.validate;
 
   /**
-   * The first thumb's mirror, which is the control the field validates.
+   * The mirror standing for thumb `index`, if the consumer rendered one.
    *
    * Found by query rather than by ref because the mirrors come out of the same
-   * loop the thumbs do, and a `:for` cannot hold a ref per iteration. A
+   * loop the thumbs do, and a `:for` cannot hold a ref per iteration.
+   */
+  const mirrorAt = (index: number): HTMLInputElement | null =>
+    options.root()?.querySelector<HTMLInputElement>(`[${SLIDER_INPUT_ATTRIBUTE}="${index}"]`) ??
+    null;
+
+  /**
+   * The first thumb's mirror, which is the control the field validates. A
    * consumer with one thumb can pass `input` instead and skip the lookup.
    */
-  const control = (): Element | null => {
-    const given = options.input?.();
-    if (given) return given;
-    const root = options.root();
-    return root?.querySelector(`[${SLIDER_INPUT_ATTRIBUTE}="0"]`) ?? root ?? null;
-  };
+  const control = (): Element | null => options.input?.() ?? mirrorAt(0) ?? options.root() ?? null;
 
   const composed: FormField = createFormField({
     control,
@@ -572,58 +574,37 @@ export function createSlider(options: SliderOptions): Slider {
     validate: validateValues ? () => validateValues(current()) : undefined,
   });
 
-  /** Every mirror the consumer rendered, paired with the thumb it stands for. */
-  function mirrorInputs(): readonly (readonly [HTMLInputElement, number])[] {
-    const root = options.root();
-    if (!root) return [];
-
-    const out: (readonly [HTMLInputElement, number])[] = [];
-    for (const mirror of root.querySelectorAll<HTMLInputElement>(`[${SLIDER_INPUT_ATTRIBUTE}]`)) {
-      const index = Number(mirror.getAttribute(SLIDER_INPUT_ATTRIBUTE));
-      if (Number.isInteger(index) && index >= 0) out.push([mirror, index]);
-    }
-    return out;
-  }
-
-  /** What each mirror holds, by thumb index. */
-  const readMirrors = (): readonly string[] => {
-    const out: string[] = [];
-    for (const [mirror, index] of mirrorInputs()) out[index] = mirror.value;
-    return out;
-  };
-
   /**
-   * The mirrors as they stood the last time they agreed with the value.
+   * The value the mirrors were last filled from, thumb by thumb.
    *
    * Two places hold this slider's value — the signal it reads and the mirrors
    * the form is read from — and between a gesture and the render that follows
    * it they disagree. This is the state they last agreed on, which is what
    * says which of the two has moved since.
    */
-  let agreed: readonly string[] = [];
+  let rendered: readonly string[] = [];
 
   /**
    * What a submit would send right now, thumb by thumb.
    *
-   * A mirror still holding the agreed state is a render behind, so the signal
-   * is the newer of the two; a mirror holding anything else has been written
-   * by something outside this component — a session restore, a page back from
-   * the bfcache, an autofill — and what it holds is what the form will send.
+   * A mirror still holding what it was filled with is a render behind, so the
+   * signal is the newer of the two; a mirror holding anything else has been
+   * written by something outside this component — a session restore, a page
+   * back from the bfcache, an autofill — and what it holds is what the form
+   * will send.
    *
    * Read from the DOM on every call rather than sampled when an event says to:
    * assigning to `value` announces nothing, so the restores that fire no event
    * at all are exactly the ones a sampled answer never sees.
    */
   function submitted(): readonly number[] {
-    const list = [...current()];
-    for (const [mirror, index] of mirrorInputs()) {
-      if (index >= list.length || mirror.value === agreed[index]) continue;
-      const value = Number(mirror.value);
-      // A mirror holding something unparseable is not a number this can be
-      // dirty about; a range input is sanitised by the platform and never is.
-      if (Number.isFinite(value)) list[index] = value;
-    }
-    return list;
+    return current().map((value, index) => {
+      const mirror = mirrorAt(index);
+      if (!mirror || mirror.value === rendered[index]) return value;
+      // Whatever a range input holds is a number: the platform sanitises
+      // anything else away before it can be read back out.
+      return Number(mirror.value);
+    });
   }
 
   /**
@@ -687,13 +668,16 @@ export function createSlider(options: SliderOptions): Slider {
     ...composed,
     isDirty,
     // Clearing a record is not enough when the record is a value the form will
-    // still send: the mirrors are put back in step with the value, so that a
-    // field reporting itself clean is telling the truth about the submit.
+    // still send, and putting only the mirrors back leaves the thumb showing
+    // one value under a form that submits another. Both halves go back, so a
+    // field reporting itself clean is telling the truth about the submit and
+    // about the thumb.
     reset: () => {
-      const list = initial;
-      for (const [mirror, index] of mirrorInputs()) {
-        const value = String(list[index] ?? min);
-        if (mirror.value !== value) mirror.value = value;
+      setValues(initial);
+      for (const [index, value] of initial.entries()) {
+        const mirror = mirrorAt(index);
+        const text = String(value);
+        if (mirror && mirror.value !== text) mirror.value = text;
       }
       composed.reset();
     },
@@ -731,11 +715,12 @@ export function createSlider(options: SliderOptions): Slider {
    */
   let edited: string | null = null;
   effect(() => {
-    const values = current().join(',');
+    const list = current();
+    const values = list.join(',');
     untrack(() => {
       // The mirrors have just been filled from this value, so this is the
       // state the two of them agree on until one of them moves again.
-      agreed = readMirrors();
+      rendered = list.map((value) => String(value));
       // The first pass is the mount, which is not an edit: nothing has been
       // typed, and a validator that runs on input has nothing to run about.
       if (edited !== null && edited !== values) composed.markEdited();

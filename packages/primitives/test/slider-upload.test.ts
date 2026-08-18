@@ -1148,6 +1148,10 @@ describe('slider: dirtiness', () => {
     expect(slider.values()).toEqual([20, 81]);
     expect(slider.field.isDirty()).toBe(true);
     expect(root.getAttribute('data-dirty')).toBe('');
+    // Every surface the field publishes dirtiness on says the same thing. The
+    // control's own record is the first thumb's mirror, which has not moved,
+    // so this is where a prop object left reading it disagrees with the field.
+    expect(slider.field.controlProps()['data-dirty']).toBe(true);
 
     // The first thumb back where it started, with the second still moved: the
     // control the field validates now reads its default again, and the slider
@@ -1166,30 +1170,51 @@ describe('slider: dirtiness', () => {
   it('counts a value the mirror was given by something other than the slider', () => {
     const form = document.createElement('form');
     host.append(form);
-    const { slider, root, mirrors } = build(SLIDER, { defaultValue: [20], name: 'price' }, form);
+    const { slider, root, mirrors } = build(SLIDER, { defaultValue: [20, 80], name: 'price' }, form);
 
     // A session restore, an autofill or a script writes the control itself: no
     // thumb moves and no signal is set, and the form goes on to submit a value
     // the user never chose. A guard that only ever hears about the slider's own
     // writes has nothing to say about it.
-    const mirror = mirrors()[0]!;
-    mirror.value = '77';
+    //
+    // Written to the upper thumb's mirror, which is not the control the field
+    // listens to — so the render that follows is the slider's own delegation
+    // and nothing else.
+    const mirror = mirrors()[1]!;
+    mirror.value = '90';
     mirror.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
 
-    expect(new FormData(form).getAll('price')).toEqual(['77']);
+    expect(new FormData(form).getAll('price')).toEqual(['20', '90']);
     expect(slider.field.isDirty()).toBe(true);
     expect(root.getAttribute('data-dirty')).toBe('');
 
     // Not a latch: the next value the slider writes fills the mirrors from
     // itself, so what was written over them is gone with it.
-    slider.setValues([30]);
+    slider.setValues([20, 30]);
     flushSync();
-    slider.setValues([20]);
+    slider.setValues([20, 80]);
     flushSync();
-    expect(mirrors()[0]!.value).toBe('20');
+    expect(mirrors()[1]!.value).toBe('80');
     expect(slider.field.isDirty()).toBe(false);
     expect(root.hasAttribute('data-dirty')).toBe(false);
+  });
+
+  it('counts a restore that announces itself with change alone', () => {
+    const form = document.createElement('form');
+    host.append(form);
+    const { slider, root, mirrors } = build(SLIDER, { defaultValue: [20, 80], name: 'price' }, form);
+
+    // A restored session fires `change` and no `input` in some engines, and on
+    // the upper thumb's mirror there is no field listener to cover for a
+    // slider that only heard about one of the two.
+    const mirror = mirrors()[1]!;
+    mirror.value = '90';
+    mirror.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+
+    expect(slider.field.isDirty()).toBe(true);
+    expect(root.getAttribute('data-dirty')).toBe('');
   });
 
   it('counts a value written straight to a mirror, with no event to announce it', () => {
@@ -1236,6 +1261,15 @@ describe('slider: dirtiness', () => {
     flushSync();
 
     expect(root.getAttribute('data-dirty')).toBe('');
+
+    // The second restore of a page is worth as much as the first: a page can
+    // go back into the bfcache and come out of it again, and an answer that
+    // was rendered once and then stopped moving is a stale one.
+    mirrors()[0]!.value = '20';
+    window.dispatchEvent(new Event('pageshow'));
+    flushSync();
+
+    expect(root.hasAttribute('data-dirty')).toBe(false);
   });
 
   it('lets a form reset take back a mirror the slider never wrote', async () => {
@@ -1280,6 +1314,52 @@ describe('slider: dirtiness', () => {
     expect(new FormData(form).getAll('price')).toEqual(['20']);
     expect(slider.field.isDirty()).toBe(false);
     expect(root.hasAttribute('data-dirty')).toBe(false);
+  });
+
+  it('puts a moved slider back when the field is reset', () => {
+    const form = document.createElement('form');
+    host.append(form);
+    const { slider, root, thumb, mirrors } = build(
+      SLIDER,
+      { defaultValue: [20], name: 'price' },
+      form,
+    );
+
+    press(thumb(0), 'ArrowRight');
+    expect(slider.value()).toBe(21);
+
+    // The mirrors are half of what a reset has to put back and the value is
+    // the other half. Putting back only the mirrors leaves the thumb showing
+    // 21 over a form submitting 20 — the defect this model exists to answer,
+    // with the two halves swapped over.
+    slider.field.reset();
+    flushSync();
+
+    expect(slider.values()).toEqual([20]);
+    expect(thumb(0).getAttribute('aria-valuenow')).toBe('20');
+    expect(mirrors()[0]!.value).toBe('20');
+    expect(new FormData(form).getAll('price')).toEqual(['20']);
+    expect(slider.field.isDirty()).toBe(false);
+    expect(root.hasAttribute('data-dirty')).toBe(false);
+  });
+
+  it('answers for the submit, not the thumb, when a restore writes the default', () => {
+    const form = document.createElement('form');
+    host.append(form);
+    const { slider, thumb, mirrors } = build(SLIDER, { defaultValue: [20], name: 'price' }, form);
+
+    press(thumb(0), 'ArrowRight');
+    // A restore landing on the default over a slider the user has moved is
+    // where the two halves disagree most sharply: the thumb says 21 and the
+    // form would send 20. Dirty asks whether a reset would change the submit,
+    // and it would not — the thumb left standing at 21 is the limit of a model
+    // that will not move the value on the user's behalf, not a wrong answer
+    // about the form.
+    mirrors()[0]!.value = '20';
+
+    expect(slider.values()).toEqual([21]);
+    expect(new FormData(form).getAll('price')).toEqual(['20']);
+    expect(slider.field.isDirty()).toBe(false);
   });
 
   it('is clean at the default even when the mirrors arrive after the first render', () => {

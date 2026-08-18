@@ -49,7 +49,7 @@ export type {
 };
 
 export { formatDiagnostic } from './a11y.js';
-export type { Diagnostic } from './a11y.js';
+export type { A11ySeverity, Diagnostic } from './a11y.js';
 
 export { CHILD_MARKER, clientMarkup, rootArity } from './markup.js';
 export type {

@@ -99,17 +99,20 @@ describe('every option the compiler reads is covered', () => {
     return [...seen].sort();
   }
 
-  it('covers them all, and nothing that only names a file', () => {
+  it('covers them all, bar the two that cannot move a byte', () => {
     // `filename` is deliberately outside the hash: it varies per template and
-    // this identifies a build. Everything else the compiler consults can move
-    // bytes, so it belongs in the hash whether or not it does so today.
+    // this identifies a build. `a11y` too, for its own reason — it decides
+    // whether a template compiles at all, never what it compiles to, so two
+    // builds that disagree about it still print identical markup and must
+    // still hydrate each other's. Everything else the compiler consults can
+    // move bytes, so it belongs in the hash whether or not it does so today.
     //
     // Driven over the whole corpus rather than one list: an option read on one
     // construct only — an event, a portal, a row inside an `<svg>` — is
     // invisible to a single template, and invisible is exactly how it would
     // stay out of the hash while moving bytes.
     expect(optionsRead(CORPUS.map((entry) => entry.template))).toEqual(
-      [...Object.keys(DEFAULTS), 'filename'].sort(),
+      [...Object.keys(DEFAULTS), 'filename', 'a11y'].sort(),
     );
   });
 });

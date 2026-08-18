@@ -4,13 +4,20 @@ import { volt } from '../src/index.js';
 import type { Plugin } from 'vite';
 
 type TransformHook = (
-  this: { error(message: string): never; addWatchFile(file: string): void },
+  this: {
+    error(message: string): never;
+    warn(message: string): void;
+    addWatchFile(file: string): void;
+  },
   code: string,
   id: string,
 ) => Promise<{ code: string } | null> | { code: string } | null;
 
 /** Files the plugin asked Vite to watch, so template edits hot-reload. */
 let watched: string[] = [];
+
+/** What the plugin reported without refusing the build. */
+let warned: string[] = [];
 
 /** A module living beside the fixtures, so relative paths resolve. */
 const FIXTURE_ID = resolve(import.meta.dirname, 'fixtures/component.ts');
@@ -23,9 +30,13 @@ async function runTransform(
 ): Promise<string | null> {
   const hook = plugin.transform as unknown as TransformHook;
   watched = [];
+  warned = [];
   const context = {
     error(message: string): never {
       throw new Error(message);
+    },
+    warn(message: string) {
+      warned.push(message);
     },
     addWatchFile(file: string) {
       watched.push(file);
@@ -132,6 +143,54 @@ describe('template precompilation', () => {
     await expect(runTransform(templates, source)).rejects.toThrow(
       /templateUrl "\.\/nope\.html" could not be read/,
     );
+  });
+
+  it('reports an accessibility warning, which reaches a person here or nowhere', async () => {
+    // The warning half of the compiler's accessibility pass is a judgement a
+    // caller may disagree with, so it is returned rather than thrown — and a
+    // returned diagnostic nobody prints is a rule nobody has.
+    const source = `
+      @Component({ selector: 'v-w', templateUrl: './unreachable.html' })
+      export class W {}
+    `;
+    const { templates } = plugins();
+    await runTransform(templates, source);
+    expect(warned).toEqual([
+      expect.stringMatching(/^\[volt:compiler\] `:click` on `<div>`[\s\S]*unreachable\.html:1:6\)$/),
+    ]);
+  });
+
+  it('still reports the warnings an accessibility error cut the pass short of', async () => {
+    const source = `
+      @Component({ selector: 'v-x', templateUrl: './no-alt.html' })
+      export class X {}
+    `;
+    const { templates } = plugins();
+    await expect(runTransform(templates, source)).rejects.toThrow(/`<img>` with no `alt`/);
+    expect(warned).toEqual([expect.stringContaining('`:click` on `<div>`')]);
+  });
+
+  it('builds anyway once the caller downgrades the rules, and still says everything', async () => {
+    const source = `
+      @Component({ selector: 'v-x', templateUrl: './no-alt.html' })
+      export class X {}
+    `;
+    const { templates } = plugins({ a11y: 'warn' });
+    expect(await runTransform(templates, source)).toContain('render: __volt_render_0');
+    expect(warned).toEqual([
+      expect.stringContaining('`:click` on `<div>`'),
+      expect.stringContaining('`<img>` with no `alt`'),
+    ]);
+  });
+
+  it('says nothing when the rules are switched off', async () => {
+    const source = `
+      @Component({ selector: 'v-x', templateUrl: './no-alt.html' })
+      export class X {}
+    `;
+    const { templates } = plugins({ a11y: 'off' });
+    expect(await runTransform(templates, source)).toContain('render: __volt_render_0');
+    expect(warned).toEqual([]);
   });
 
   it('reports template syntax errors against the html file, not the component', async () => {

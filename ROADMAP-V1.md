@@ -612,7 +612,12 @@ correct code teaches people to disable the rules.
 
 Severity follows the existing convention: things that are certainly wrong are
 errors, things that are usually wrong are warnings, and both name the remedy
-rather than the violation.
+rather than the violation. The warnings reach a person through
+`@voltdev/vite-plugin`, which prints each one against the template's own file:
+a finding nothing surfaces is a rule nobody has, and four of the eight are
+warnings. A caller who disagrees with one has a way out that is not pinning an
+old compiler — `a11y: 'warn'` downgrades every refusal and still reports it,
+`a11y: 'off'` skips the pass.
 
 ## Imperative islands
 

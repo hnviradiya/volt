@@ -62,6 +62,7 @@ beforeEach(() => {
   passwordOptions = {};
   pinOptions = {};
   tagsOptions = {};
+  tagsVisible = null;
   ratingOptions = {};
   FakeResizeObserver.live = [];
   FakeResizeObserver.disconnects = 0;
@@ -1486,9 +1487,17 @@ describe('PIN input', () => {
 // ---------------------------------------------------------------------------
 
 let tagsOptions: Partial<TagsInputOptions>;
+/**
+ * What the row shows, when that is not the whole value.
+ *
+ * A consumer's row is not obliged to render every tag it holds, and where
+ * focus goes after a removal is a question about the row.
+ */
+let tagsVisible: ((tags: readonly string[]) => readonly string[]) | null;
 
 interface TagsInstance {
   tags: ReturnType<typeof createTagsInput>;
+  input: Signal.State<Element | null>;
   handled: boolean;
 }
 
@@ -1500,7 +1509,7 @@ function tagsInput(dir = '', row = '') {
         <label :ref="label" :spread="tags.labelProps()">Topics</label>
         <div :ref="root" :spread="tags.rootProps()">
           <ul${row} :ref="list" :spread="tags.listProps()">
-            <li class="tag" :for="(tag, i) in tags.tags()" :key="tag" :spread="tags.tagProps(i)"
+            <li class="tag" :for="(tag, i) in visible()" :key="tag" :spread="tags.tagProps(i)"
                 :keydown="onTagKey($event, i)">
               <span class="text">{ tag }</span>
               <button class="remove" :spread="tags.removeProps(i)" :click="tags.removeAt(i)">x</button>
@@ -1526,8 +1535,14 @@ function tagsInput(dir = '', row = '') {
       ...tagsOptions,
       input: () => this.input.get(),
       list: () => this.list.get(),
+      root: () => this.root.get(),
       label: () => this.label.get(),
     });
+
+    visible(): readonly string[] {
+      const tags = this.tags.tags();
+      return tagsVisible ? tagsVisible(tags) : tags;
+    }
 
     onKey(event: KeyboardEvent): void {
       this.handled = this.tags.onKeyDown(event);
@@ -1552,6 +1567,7 @@ function tagsInput(dir = '', row = '') {
     chip: (index: number) => host.querySelectorAll<HTMLElement>('.tag')[index]!,
     remove: (index: number) => host.querySelectorAll<HTMLButtonElement>('.remove')[index]!,
     list: () => host.querySelector<HTMLElement>('ul')!,
+    root: () => host.querySelector<HTMLElement>('div[role="group"]')!,
     status: () => host.querySelector<HTMLElement>('.status')!,
     form: () => host.querySelector('form')!,
     labels: () =>
@@ -1706,6 +1722,81 @@ describe('tags input', () => {
     expect(status().textContent).toBe('ada removed');
     expect(status().getAttribute('aria-live')).toBe('polite');
     expect(status().getAttribute('aria-atomic')).toBe('true');
+  });
+
+  it('removes no tag while the field is disabled or read-only', () => {
+    const disabled = new Signal.State(true);
+    const readOnly = new Signal.State(false);
+    tagsOptions = {
+      defaultValue: ['ada', 'grace'],
+      disabled: () => disabled.get(),
+      readOnly: () => readOnly.get(),
+    };
+    const { instance } = tagsInput();
+
+    // This is what backs the remove control inside each tag, and Backspace on
+    // it: a field that refuses everything else the user presses cannot answer
+    // those two.
+    instance.tags.removeAt(0);
+    flushSync();
+    expect(instance.tags.tags()).toEqual(['ada', 'grace']);
+
+    disabled.set(false);
+    readOnly.set(true);
+    instance.tags.removeAt(0);
+    flushSync();
+    expect(instance.tags.tags()).toEqual(['ada', 'grace']);
+
+    readOnly.set(false);
+    instance.tags.removeAt(0);
+    flushSync();
+    expect(instance.tags.tags()).toEqual(['grace']);
+  });
+
+  it('clears while disabled, because clearing is nothing the user pressed', () => {
+    tagsOptions = { defaultValue: ['ada', 'grace'], disabled: () => true };
+    const { instance } = tagsInput();
+
+    // The asymmetry with `removeAt` above, pinned deliberately: `clear` is the
+    // consumer's own call and not a control this field describes, and the same
+    // write through the value signal beside it could refuse nothing anyway.
+    // Whichever way it is settled, it has to be settled on purpose.
+    instance.tags.clear();
+    flushSync();
+
+    expect(instance.tags.tags()).toEqual([]);
+  });
+
+  it('says nothing when the row is emptied, where removing one tag speaks', () => {
+    tagsOptions = { defaultValue: ['ada', 'grace'] };
+    const { instance, status } = tagsInput();
+
+    instance.tags.removeAt(0);
+    flushSync();
+    expect(status().textContent).toBe('ada removed');
+
+    // Pinned as it stands rather than as it should be. Emptying the row is the
+    // largest change the field makes and the only silent one, and there is no
+    // label to say it with yet; this line is what makes closing that a change
+    // somebody made rather than one that happened.
+    instance.tags.clear();
+    flushSync();
+    expect(status().textContent).toBe('ada removed');
+  });
+
+  it('stops flashing a duplicate when the row it pointed into is cleared', () => {
+    tagsOptions = { defaultValue: ['ada'] };
+    const { instance } = tagsInput();
+
+    instance.tags.add('ada');
+    expect(instance.tags.duplicateIndex()).toBe(0);
+
+    // The index is a place in a row that no longer exists: kept, it would
+    // flash whichever tag arrives at that place next, for a clash nobody made.
+    instance.tags.clear();
+    flushSync();
+
+    expect(instance.tags.duplicateIndex()).toBe(null);
   });
 
   it('makes the list a list, and each tag an item in it', () => {
@@ -1931,6 +2022,26 @@ describe('tags input', () => {
     expect(document.activeElement).toBe(input());
   });
 
+  it('keeps the record when a tag off the page announces the focus it lost', () => {
+    tagsOptions = { defaultValue: ['ada'] };
+    const { instance, input, chip, list } = tagsInput('', ' :if="tags.tags().length > 0"');
+
+    chip(0).focus();
+    const tag = chip(0);
+    // Engines disagree about whether removing the focused element announces
+    // the focus loss; the one these tests run in is silent, so the
+    // announcement is made by hand. It reaches the field at all only because
+    // the row went with the tag, and what it reports is a rescue still owed —
+    // read as the user leaving, it would cancel the rescue instead.
+    list().remove();
+    tag.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+
+    instance.tags.removeAt(0);
+    flushSync();
+
+    expect(document.activeElement).toBe(input());
+  });
+
   it('hands the tab stop back to the first tag after a clear', () => {
     tagsOptions = { defaultValue: ['ada', 'grace', 'edsger'] };
     const { instance, input, chips } = tagsInput();
@@ -1978,6 +2089,20 @@ describe('tags input', () => {
     expect(chips().map((el) => el.getAttribute('tabindex'))).toEqual(['-1', '0']);
   });
 
+  it('moves the stop to the tag a click put focus on', () => {
+    tagsOptions = { defaultValue: ['ada', 'grace', 'edsger'] };
+    const { chip, chips } = tagsInput();
+
+    // A pointer is the one way into the row no key handler sees. A stop left
+    // where the keys last put it answers Tab with one tag while the user is
+    // on another, which is the split the whole model exists to close.
+    chip(2).focus();
+    flushSync();
+
+    expect(document.activeElement).toBe(chip(2));
+    expect(chips().map((el) => el.getAttribute('tabindex'))).toEqual(['-1', '-1', '0']);
+  });
+
   it('keeps the stop inside a row a consumer write shortened', () => {
     const value = new Signal.State<readonly string[]>(['ada', 'grace', 'edsger']);
     tagsOptions = { value };
@@ -2009,6 +2134,41 @@ describe('tags input', () => {
     // This environment focuses whatever it is asked to; a browser focuses only
     // what can take it, so the attribute is the half that has to be asserted.
     expect(list().getAttribute('tabindex')).toBe('-1');
+  });
+
+  it('hands focus to the field itself when neither the row nor the box will take it', () => {
+    tagsOptions = { defaultValue: ['ada', 'grace'], disabled: () => true };
+    // Each half of this has a test of its own above, and together they leave
+    // the chain with nothing on the end of it: the row is rendered only while
+    // there are tags, so it goes with the last one, and a disabled field's box
+    // refuses focus. What is left is the field, which is still on the page.
+    const { instance, chip, list, root } = tagsInput('', ' :if="tags.tags().length > 0"');
+
+    chip(0).focus();
+    instance.tags.clear();
+    flushSync();
+
+    expect(list()).toBe(null);
+    expect(document.activeElement).toBe(root());
+    // As with the row: this environment focuses whatever it is asked to, so
+    // the attribute is the half a browser would be answering.
+    expect(root().getAttribute('tabindex')).toBe('-1');
+  });
+
+  it('will not hand focus to a ref that is not a text control', () => {
+    tagsOptions = { defaultValue: ['ada'] };
+    const { instance, chip, list, root } = tagsInput();
+
+    // A `:ref` that landed on the wrapper instead of the control. Focus that
+    // goes somewhere nothing can be typed is the dead end `<body>` is, one
+    // element further in; a browser would refuse the wrapper and this
+    // environment would not, so the refusal has to be the library's.
+    instance.input.set(root());
+    chip(0).focus();
+    instance.tags.removeAt(0);
+    flushSync();
+
+    expect(document.activeElement).toBe(list());
   });
 
   it('holds focus given to the row itself without taking it off the tags', () => {
@@ -2092,6 +2252,46 @@ describe('tags input', () => {
     // is the one the eye is on, and the one before it is a step backwards.
     expect(document.activeElement).toBe(chip(1));
     expect(document.activeElement?.textContent).toContain('grace');
+  });
+
+  it('hands off to a tag on the page rather than one only the value has', () => {
+    tagsOptions = { defaultValue: ['ada', 'grace', 'edsger'] };
+    // A row showing less than the whole value — filtered, or cut short by the
+    // space there was for it. After the removal the value is two tags long and
+    // the row is one, and only one of those is somewhere focus can be put.
+    tagsVisible = (tags) => tags.filter((tag) => tag !== 'edsger');
+    const { instance, chip } = tagsInput();
+
+    chip(1).focus();
+    instance.tags.removeAt(1);
+    flushSync();
+
+    // Clamped against the value the index would point past the end of the row,
+    // giving up on a row that still has a tag in it.
+    expect(document.activeElement).toBe(chip(0));
+    expect(document.activeElement?.textContent).toContain('ada');
+  });
+
+  it('lets go of a tag that has left the row', () => {
+    const value = new Signal.State<readonly string[]>(['ada', 'grace', 'edsger']);
+    tagsOptions = { value };
+    const { chip } = tagsInput();
+
+    chip(1).focus();
+    const lifted = chip(1);
+    // Out of the row and into a layer of its own, as a drag lifts one. It is
+    // still on the page, so nothing has been destroyed and there is nothing to
+    // rescue — and it is no longer one of the row's tags, so when it does go
+    // the field has no business pulling focus back into a box nobody is near.
+    document.body.append(lifted);
+    value.set(['ada', 'grace']);
+    flushSync();
+
+    value.set(['ada']);
+    flushSync();
+
+    expect(lifted.isConnected).toBe(false);
+    expect(document.activeElement).toBe(document.body);
   });
 
   it('adds a half-typed tag when the field is left', () => {
