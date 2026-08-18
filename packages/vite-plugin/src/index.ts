@@ -1,7 +1,7 @@
 /**
  * @voltdev/vite-plugin
  *
- * Two build-time jobs, both of which remove work from the browser:
+ * Three build-time jobs, all of which remove work from the browser:
  *
  *  1. **Standard decorators.** `@Component` and `@Prop` are TC39 stage-3
  *     syntax that no engine implements yet. Rather than ship a decorator
@@ -14,6 +14,12 @@
  *     function built from hoisted `<template>` clones, and `styleUrl` is
  *     compiled from Sass — so no compiler of either kind ships to production
  *     and nothing is parsed at runtime.
+ *
+ *  3. **The `Signal` namespace.** `export namespace` compiles to a runtime
+ *     object, which no bundler can take apart, so `Signal.State` alone holds
+ *     the watcher and the introspection surface in the bundle. Direct member
+ *     accesses are rewritten to imports of the individual members; see
+ *     `signals.ts`.
  */
 
 import { readdir, readFile } from 'node:fs/promises';
@@ -26,6 +32,7 @@ import { compile, CompilerError, formatDiagnostic } from '@voltdev/compiler';
 import type { A11ySeverity } from '@voltdev/compiler';
 import type { Plugin } from 'vite';
 import { DecoratorError, planLowering } from './decorators.js';
+import { planSignalLowering } from './signals.js';
 import { isIdentChar, matchDelimiter, skipQuoted, skipTemplateLiteral } from './scan.js';
 
 export interface VoltPluginOptions {
@@ -49,6 +56,14 @@ export interface VoltPluginOptions {
    */
   groupRowBindings?: boolean;
   /**
+   * Rewrite `Signal.State` and friends to direct imports.
+   *
+   * Off means the namespace object reaches the bundle, and with it everything
+   * else it holds. There is no behavioural difference either way — turning it
+   * off only costs bytes.
+   */
+  lowerSignals?: boolean;
+  /**
    * What the compiler's accessibility rules may do to this build.
    *
    * `error`, the default, refuses a template the rules are certain about.
@@ -70,6 +85,7 @@ export function volt(options: VoltPluginOptions = {}): Plugin[] {
   const runtimeModule = options.runtimeModule ?? '@voltdev/core/runtime';
   const precompile = options.precompileTemplates ?? true;
   const groupRowBindings = options.groupRowBindings ?? false;
+  const lowerSignals = options.lowerSignals ?? true;
 
   const shouldProcess = (id: string): boolean => {
     const clean = id.split('?')[0] ?? id;
@@ -105,6 +121,33 @@ export function volt(options: VoltPluginOptions = {}): Plugin[] {
         }
         throw err;
       }
+    },
+  };
+
+  const signalPlugin: Plugin = {
+    name: 'volt:signals',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!lowerSignals || !shouldProcess(id)) return null;
+      // The namespace can only be reached through a binding called `Signal`,
+      // whatever it was renamed to locally.
+      if (!code.includes('Signal')) return null;
+
+      const plan = planSignalLowering(code);
+      if (plan.kind !== 'lowered') {
+        // Declining is invisible in the output, so the only way to find out
+        // that a module still carries the namespace is to be told.
+        if (options.debug && plan.kind === 'declined') {
+          console.info(`[volt] ${id}: Signal namespace kept — ${plan.reason}`);
+        }
+        return null;
+      }
+
+      const s = new MagicString(code);
+      for (const { start, end, text } of plan.rewrites) s.overwrite(start, end, text);
+      const named = plan.imports.map((it) => `${it.exported} as ${it.local}`).join(', ');
+      s.prepend(`import { ${named} } from ${JSON.stringify(plan.importFrom)};\n`);
+      return { code: s.toString(), map: s.generateMap({ hires: true, source: id }) };
     },
   };
 
@@ -174,7 +217,7 @@ export function volt(options: VoltPluginOptions = {}): Plugin[] {
     },
   };
 
-  return [envPlugin, templatePlugin, decoratorPlugin];
+  return [envPlugin, templatePlugin, signalPlugin, decoratorPlugin];
 }
 
 export default volt;

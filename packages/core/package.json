@@ -20,6 +20,10 @@
     "./jit": {
       "types": "./dist/jit.d.ts",
       "import": "./dist/jit.js"
+    },
+    "./signals": {
+      "types": "./dist/signals.d.ts",
+      "import": "./dist/signals.js"
     }
   },
   "files": [

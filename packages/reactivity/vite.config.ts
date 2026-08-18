@@ -22,7 +22,7 @@ export default defineConfig({
     // Volt targets current engines; nothing here is downlevelled.
     target: 'esnext',
     lib: {
-      entry: { index: r('src/index.ts') },
+      entry: { index: r('src/index.ts'), signals: r('src/signals.ts') },
       formats: ['es'],
     },
     rollupOptions: {

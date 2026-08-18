@@ -50,6 +50,7 @@ export default defineConfig({
   define: { __VOLT_DEV__: 'true' },
   resolve: {
     alias: {
+      '@voltdev/reactivity/signals': resolve(root, 'packages/reactivity/src/signals.ts'),
       '@voltdev/reactivity': resolve(root, 'packages/reactivity/src/index.ts'),
       '@voltdev/compiler': resolve(root, 'packages/compiler/src/index.ts'),
       '@voltdev/primitives': resolve(root, 'packages/primitives/src/index.ts'),
@@ -59,6 +60,7 @@ export default defineConfig({
       // Longest first — '@voltdev/core' would otherwise shadow its subpaths.
       '@voltdev/core/runtime': resolve(root, 'packages/core/src/runtime.ts'),
       '@voltdev/core/jit': resolve(root, 'packages/core/src/jit.ts'),
+      '@voltdev/core/signals': resolve(root, 'packages/core/src/signals.ts'),
       '@voltdev/core': resolve(root, 'packages/core/src/index.ts'),
     },
   },

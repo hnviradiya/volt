@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { compile } from '@voltdev/compiler';
+import { DELEGATED_EVENTS, NEVER_DELEGATED } from '../src/dom-info.js';
 
 /** Compile and return just the generated body, for readable snapshots. */
 function gen(template: string): string {
@@ -126,6 +127,20 @@ describe('event delegation is limited to events it suits', () => {
 
   it('still lets an explicit listener option force a direct listener', () => {
     expect(gen(`<button :click.once="go()"></button>`)).toContain('_rt.on(');
+  });
+
+  // The cases above name the events one at a time, so a name added to
+  // NEVER_DELEGATED and to DELEGATED_EVENTS both would sit there contradicting
+  // itself and nothing would notice. Drive the whole set instead. That the
+  // resulting listener can genuinely cancel is proved where a listener can
+  // actually run: packages/core/test/event-delegation.test.ts.
+  it('holds every name it says it never delegates to that', () => {
+    for (const name of NEVER_DELEGATED) {
+      expect(DELEGATED_EVENTS.has(name), `${name} is in both lists`).toBe(false);
+      // A name the parser does not know as an event compiles to a property
+      // binding, so listing it here would describe a decision never taken.
+      expect(gen(`<div :${name}="go()"></div>`), `:${name}`).toContain('_rt.on(');
+    }
   });
 });
 

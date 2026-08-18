@@ -166,7 +166,7 @@ export const DELEGATED_EVENTS = new Set([
  * as long as the gesture lasts.
  */
 export const NEVER_DELEGATED = new Set([
-  'wheel', 'mousewheel',
+  'wheel',
   'touchstart', 'touchmove', 'touchend', 'touchcancel',
   'mousemove', 'mouseover', 'mouseout',
   'pointermove', 'pointerover', 'pointerout',

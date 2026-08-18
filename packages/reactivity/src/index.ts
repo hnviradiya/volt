@@ -67,9 +67,12 @@ export { isSignal, isWritableSignal } from './graph.js';
 export {
   effect,
   renderEffect,
+  measureEffect,
   batch,
   flushSync,
   tick,
+  getFlushMetrics,
+  resetFlushMetrics,
   createRoot,
   onCleanup,
   getScope,
@@ -80,4 +83,4 @@ export {
   provideContext,
 } from './effect.js';
 
-export type { Scope, Context, Dispose, CleanupFn, EffectFn } from './effect.js';
+export type { Scope, Context, Dispose, CleanupFn, EffectFn, FlushMetrics } from './effect.js';

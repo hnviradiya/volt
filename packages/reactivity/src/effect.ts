@@ -2,10 +2,12 @@
  * Volt's effect system, layered on `Signal.subtle.Watcher`.
  *
  * The Signals proposal deliberately ships no `effect`, because scheduling is a
- * framework concern. Volt schedules in two phases:
+ * framework concern. Volt schedules in three phases:
  *
  *   - `renderEffect` — DOM patching. Runs immediately on creation so a
- *     template builds synchronously, and flushes before user effects.
+ *     template builds synchronously, and flushes before everything else.
+ *   - `measureEffect` — reading geometry, once the DOM has settled and before
+ *     anything writes again, so every read in a flush shares one layout.
  *   - `effect` — user work. Its first run is deferred along with the rest, so
  *     it always observes a settled tree.
  *
@@ -210,6 +212,10 @@ const renderWatcher = new WatcherNode(function () {
   schedule();
 });
 
+const measureWatcher = new WatcherNode(function () {
+  schedule();
+});
+
 const effectWatcher = new WatcherNode(function () {
   schedule();
 });
@@ -227,10 +233,54 @@ function schedule(): void {
 
 const MAX_FLUSH_PASSES = 100;
 
+export interface FlushMetrics {
+  /** Flushes that ran at least one effect, since the last reset. */
+  flushes: number;
+  /** Forced layouts the most recent of those flushes cost. */
+  forcedLayouts: number;
+  /** The worst any single flush has cost since the last reset. */
+  peakForcedLayouts: number;
+}
+
+const metrics: FlushMetrics = { flushes: 0, forcedLayouts: 0, peakForcedLayouts: 0 };
+
 /**
- * Drain both queues now. Render effects settle completely before user effects
- * run, and the loop repeats while effects keep dirtying the graph so the DOM
- * is fully settled when this returns.
+ * A snapshot of what the scheduler cost.
+ *
+ * Layout thrash is invisible until something counts it, and the count is the
+ * only way to know the measure lane is still doing its job: one forced layout
+ * per flush is healthy, and a component that reads geometry from the wrong
+ * phase shows up here as a peak that climbs with the number of components on
+ * screen. Tracked in production too — a metric that disappears from the build
+ * where performance matters defends nothing.
+ */
+export function getFlushMetrics(): FlushMetrics {
+  return { ...metrics };
+}
+
+export function resetFlushMetrics(): void {
+  metrics.flushes = 0;
+  metrics.forcedLayouts = 0;
+  metrics.peakForcedLayouts = 0;
+}
+
+function settleError(phase: string): Error {
+  return new Error(
+    __VOLT_DEV__
+      ? '[volt] ' +
+        phase +
+        ' effects did not settle after ' +
+        MAX_FLUSH_PASSES +
+        ' passes — one of them is very likely writing a signal it also reads.'
+      : '[volt] effects did not settle',
+  );
+}
+
+/**
+ * Drain the queues now, in phase order: render effects settle completely,
+ * then measure effects read, then user effects run. Every pass starts again
+ * from the top, so a user effect that writes still gets its DOM patched — and
+ * anything measuring it re-read — before this returns.
  */
 export function flushSync(): void {
   // An open batch wins: nothing is allowed to observe a half-applied group,
@@ -239,22 +289,35 @@ export function flushSync(): void {
   flushing = true;
   scheduled = false;
 
+  // Whether a read would have to wait for layout. It starts true because
+  // whatever caused this flush — an event handler, a bare `.set()` — has
+  // already written something the engine has not laid out since.
+  let layoutStale = true;
+  let forcedLayouts = 0;
+  let passes = 0;
+
   try {
-    let passes = 0;
     for (;;) {
       const renderPending = renderWatcher.getPending();
       if (renderPending.length > 0) {
         for (const node of renderPending) runEffectComputed(node);
         renderWatcher.watch();
-        if (++passes > MAX_FLUSH_PASSES) {
-          throw new Error(
-            __VOLT_DEV__
-              ? '[volt] Render effects did not settle after ' +
-                MAX_FLUSH_PASSES +
-                ' passes — a render effect is very likely writing a signal it also reads.'
-              : '[volt] render effects did not settle',
-          );
+        layoutStale = true;
+        if (++passes > MAX_FLUSH_PASSES) throw settleError('Render');
+        continue;
+      }
+
+      const measurePending = measureWatcher.getPending();
+      if (measurePending.length > 0) {
+        // The whole point of the lane: the first read pays for layout and
+        // every other read in the drain is then free.
+        if (layoutStale) {
+          forcedLayouts++;
+          layoutStale = false;
         }
+        drainMeasure(measurePending);
+        measureWatcher.watch();
+        if (++passes > MAX_FLUSH_PASSES) throw settleError('Measure');
         continue;
       }
 
@@ -263,23 +326,84 @@ export function flushSync(): void {
 
       for (const node of effectPending) runEffectComputed(node);
       effectWatcher.watch();
-
-      if (++passes > MAX_FLUSH_PASSES) {
-        throw new Error(
-          __VOLT_DEV__
-            ? '[volt] Effects did not settle after ' +
-              MAX_FLUSH_PASSES +
-              ' passes — an effect is very likely writing a signal it also reads.'
-            : '[volt] effects did not settle',
-        );
-      }
+      layoutStale = true;
+      if (++passes > MAX_FLUSH_PASSES) throw settleError('User');
     }
   } finally {
     flushing = false;
+    // A flush that found nothing to do is not a flush: counting it would
+    // overwrite the last real measurement with a zero on the next `tick()`.
+    if (passes > 0) {
+      metrics.flushes++;
+      metrics.forcedLayouts = forcedLayouts;
+      if (forcedLayouts > metrics.peakForcedLayouts) metrics.peakForcedLayouts = forcedLayouts;
+    }
     const resolvers = pendingResolvers;
     pendingResolvers = [];
     for (const resolve of resolvers) resolve();
   }
+}
+
+function drainMeasure(pending: ComputedSignal<unknown>[]): void {
+  if (!__VOLT_DEV__) {
+    for (const node of pending) runEffectComputed(node);
+    return;
+  }
+
+  const observer = watchForMeasureWrites();
+  try {
+    for (const node of pending) runEffectComputed(node);
+  } finally {
+    if (observer) reportMeasureWrites(observer);
+  }
+}
+
+/**
+ * Dev-only: the phase's read-only contract, enforced.
+ *
+ * A write during the measure drain invalidates the layout the drain just paid
+ * for, so the next read forces another — the thrash the lane exists to
+ * remove, reinstated silently and only visible under a profiler. A
+ * MutationObserver catches every write path, including `style.top = ...`,
+ * which patching individual DOM methods would miss.
+ */
+let measureObserver: MutationObserver | null | undefined;
+
+function watchForMeasureWrites(): MutationObserver | null {
+  if (measureObserver === undefined) {
+    measureObserver =
+      typeof MutationObserver === 'function' && typeof document !== 'undefined'
+        ? // Records are taken synchronously at the end of the drain, so the
+          // callback is never left anything to deliver.
+          new MutationObserver(() => {})
+        : null;
+  }
+  measureObserver?.observe(document, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    characterData: true,
+  });
+  return measureObserver;
+}
+
+function reportMeasureWrites(observer: MutationObserver): void {
+  const records = observer.takeRecords();
+  observer.disconnect();
+  if (records.length === 0 || typeof console === 'undefined') return;
+
+  const record = records[0]!;
+  const tag = (record.target as Partial<Element>).nodeName?.toLowerCase() ?? 'node';
+  const what =
+    record.type === 'attributes'
+      ? `${record.attributeName} on <${tag}>`
+      : `${record.type} on <${tag}>`;
+  console.error(
+    `[volt] A measure effect wrote to the DOM (${what}). The measure phase is ` +
+      'read-only: a write there dirties the layout the phase just forced, so the ' +
+      'next read forces another one. Set a signal instead and let a render ' +
+      'effect apply it, or move the write to effect().',
+  );
 }
 
 function runEffectComputed(node: ComputedSignal<unknown>): void {
@@ -446,4 +570,25 @@ export function effect(fn: EffectFn): Dispose {
  */
 export function renderEffect(fn: EffectFn): Dispose {
   return createEffect(fn, renderWatcher, true);
+}
+
+/**
+ * A read-only effect, run after the DOM has settled and before any user
+ * effect writes to it again.
+ *
+ * Geometry — `getBoundingClientRect`, `offsetWidth`, `scrollTop` — is only
+ * meaningful once rendering has finished, and reading it forces the engine to
+ * lay out everything written since the last frame. Read from an `effect` and
+ * every component that positions a popover, syncs a scroller or measures
+ * overflow forces a layout of its own, turning one flush into write, layout,
+ * write, layout, once per component. Read from here and they all share the
+ * single layout the phase forces once.
+ *
+ * Writing a signal from here is the intended way out: the render effect that
+ * reads it patches the DOM on the next pass, still ahead of user effects.
+ * Writing to the DOM directly is what reinstates the thrash, so in
+ * development the drain reports it.
+ */
+export function measureEffect(fn: EffectFn): Dispose {
+  return createEffect(fn, measureWatcher, false);
 }

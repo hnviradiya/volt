@@ -130,6 +130,14 @@ only the native phase. Events that do not bubble, and any handler needing
 `.capture`, `.once` or `.passive`, get a real listener instead — delegation
 cannot express those.
 
+Two more classes are excluded, and neither is a preference. Browsers force a
+`wheel` or touch listener registered on the document to be passive, so a
+delegated `preventDefault()` is discarded and `:wheel.prevent` would compile
+to a handler that prevents nothing. And the events that fire continuously —
+`pointermove`, `dragover`, and the hover pair — invert the trade delegation
+is made for: a drag has one handler and fires hundreds of times a second, so
+every walk to the document is paid and none of it is saved.
+
 ## Markers only where they are needed
 
 Dynamic content needs an anchor so the runtime knows where to insert. A naive
