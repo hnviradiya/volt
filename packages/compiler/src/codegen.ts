@@ -29,6 +29,7 @@ import {
   ATTR_TO_PROP,
   BOOLEAN_ATTRIBUTES,
   DELEGATED_EVENTS,
+  NEVER_DELEGATED,
   EVENT_GUARD_MODIFIERS,
   EVENT_OPTION_MODIFIERS,
   KEY_MODIFIERS,
@@ -923,7 +924,11 @@ class Generator {
         const { handler, options } = this.genEventHandler(dir, ctx);
         // Listener options (capture/once/passive) need a real listener on the
         // element; everything else can share one document-level listener.
-        const canDelegate = options === null && DELEGATED_EVENTS.has(dir.name);
+        // Both sets, not one. Keeping them disjoint by hand worked only while
+        // somebody remembered to, and a name in NEVER_DELEGATED that is also
+        // delegated is the silent-preventDefault bug returning.
+        const canDelegate =
+          options === null && DELEGATED_EVENTS.has(dir.name) && !NEVER_DELEGATED.has(dir.name);
         if (canDelegate) {
           this.stats.delegatedEvents++;
           this.delegatedEventNames.add(dir.name);

@@ -137,9 +137,13 @@ describe('event delegation is limited to events it suits', () => {
   it('holds every name it says it never delegates to that', () => {
     for (const name of NEVER_DELEGATED) {
       expect(DELEGATED_EVENTS.has(name), `${name} is in both lists`).toBe(false);
-      // A name the parser does not know as an event compiles to a property
-      // binding, so listing it here would describe a decision never taken.
-      expect(gen(`<div :${name}="go()"></div>`), `:${name}`).toContain('_rt.on(');
+      // Assert what the set actually promises — that nothing here is
+      // delegated — rather than that a direct listener is emitted. A name the
+      // parser does not know as an event compiles to a property binding, which
+      // is equally not delegated; asserting `_rt.on(` instead made the test
+      // satisfiable by removing a name from the set, which is what happened to
+      // `mousewheel`.
+      expect(gen(`<div :${name}="go()"></div>`), `:${name}`).not.toContain('_rt.delegate(');
     }
   });
 });

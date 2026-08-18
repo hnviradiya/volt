@@ -11,8 +11,8 @@ export default defineConfig({
 
 ## Why it is required
 
-The plugin is not a convenience. It does two things nothing else in a current
-Vite toolchain does.
+The plugin is not a convenience. It does three things nothing else in a
+current Vite toolchain does.
 
 **It lowers TC39 standard decorators.** They are stage 3 and implemented by
 no JavaScript engine. Vite 8 transforms with oxc, which parses decorators but
@@ -53,6 +53,48 @@ markup, so no compiler ships to the browser and no template is parsed at
 runtime. `styleUrl` and `styleUrls` are compiled from Sass the same way. Every file it
 reads is registered with the watcher, so editing markup or CSS hot-reloads.
 
+**It lowers the `Signal` namespace to direct imports.** `Signal` is the
+spelling the TC39 proposal defines, and `export namespace` compiles to a
+runtime object. An object is opaque to a bundler — reaching one property keeps
+all of them — so an app that only ever writes `new Signal.State(0)` still
+ships `Signal.subtle.Watcher`, `untrack` and the six introspection functions,
+with no line of the app able to reach any of them.
+
+```ts
+// what you write
+import { Signal } from '@voltdev/core';
+const count = new Signal.State(0);
+
+// what ships
+import { State as __volt_Signal_State } from '@voltdev/core/signals';
+const count = new __volt_Signal_State(0);
+```
+
+Measured on a Vite production build: an app using only `Signal.State` goes
+from 1,898 to 1,665 bytes gzipped (−233 B, −12.3%), and the counter example
+from 5,321 to 5,125 (−196 B, −3.7%). The lowered output is byte-for-byte
+identical to writing that import by hand.
+
+Nothing about authoring changes here either. `@voltdev/core/signals` holds the
+same bindings the namespace does — not copies — so `instanceof` and every
+identity check give the same answer whichever spelling produced the signal,
+and the namespace keeps working with no build step at all.
+
+The pass only rewrites `Signal.State`, `Signal.Computed` and
+`Signal.subtle.<member>` read directly off the imported binding. Anything else
+the name is used for needs the object as an object, so the file is left
+exactly as written:
+
+```ts
+const S = Signal;          // aliased
+const { State } = Signal;  // destructured
+register(Signal);          // passed on
+new Signal[name](0);       // computed key
+```
+
+That costs bytes and nothing else. `debug: true` names the file and the reason
+whenever it happens.
+
 ## Options
 
 ```ts
@@ -60,6 +102,7 @@ interface VoltPluginOptions {
   include?: RegExp;              // default: /\.m?ts$/
   exclude?: RegExp;              // default: /[\\/]node_modules[\\/]/
   precompileTemplates?: boolean; // default: true
+  lowerSignals?: boolean;        // default: true
   runtimeModule?: string;        // default: '@voltdev/core/runtime'
   debug?: boolean;               // default: false
 }

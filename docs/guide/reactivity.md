@@ -149,12 +149,34 @@ flushSync();        // synchronous
 await tick();       // or await the microtask
 ```
 
-### Render effects run first
+### Effects run in three phases
 
-Volt schedules in two phases. `renderEffect` patches the DOM; `effect` is for
-your own work and runs after the DOM has settled, so it always observes a
-consistent tree. Compiled templates use `renderEffect`; you almost always
-want `effect`.
+Volt schedules in three phases, in this order:
+
+| Phase | Function | For |
+|---|---|---|
+| Render | `renderEffect` | Patching the DOM. Compiled templates use this |
+| Measure | `measureEffect` | Reading geometry, on a settled DOM |
+| User | `effect` | Your own work. What you almost always want |
+
+`effect` runs after the DOM has settled, so it always observes a consistent
+tree. The middle phase exists because reading geometry is expensive in a way
+that is invisible at one component and brutal at twenty: `getBoundingClientRect`
+forces the browser to lay out everything written since the last frame, so a
+popover, a scroll sync and an autosizing textarea each measuring from their own
+`effect` turn one flush into write, layout, write, layout, three times over.
+
+```ts
+measureEffect(() => {
+  // Every read in the flush shares the one layout this forces.
+  height.set(panel.getBoundingClientRect().height);
+});
+```
+
+Measuring is read-only. Set a signal with what you measured, as above, and the
+render effect that consumes it patches the DOM on the next pass — still before
+any user effect runs. Writing to the DOM from a measure callback puts the
+thrash straight back, so in development Volt reports it.
 
 ## Ownership and disposal
 

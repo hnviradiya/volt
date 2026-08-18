@@ -106,6 +106,9 @@ export function planSignalLowering(code: string): SignalPlan {
   const locals = new Set(bindings.map((binding) => binding.local));
   const skip = bindings.map((binding) => binding.declaration);
   const rewrites: { start: number; end: number; text: string }[] = [];
+  // Keyed by the local alias, not the export: the two levels of the namespace
+  // share one flat module, and importing one export under two names is legal
+  // where emitting one specifier for two aliases would leave one undeclared.
   const used = new Map<string, string>();
 
   for (const at of findIdentifiers(code, locals, skip)) {
@@ -116,7 +119,7 @@ export function planSignalLowering(code: string): SignalPlan {
         reason: `\`${code.slice(at.start, at.end)}\` is used as a value, not as \`.State\`, \`.Computed\` or \`.subtle.*\``,
       };
     }
-    used.set(access.exported, access.local);
+    used.set(access.local, access.exported);
     rewrites.push({ start: at.start, end: access.end, text: access.local });
   }
 
@@ -126,7 +129,7 @@ export function planSignalLowering(code: string): SignalPlan {
     kind: 'lowered',
     rewrites,
     importFrom: [...targets][0]!,
-    imports: [...used].map(([exported, local]) => ({ exported, local })),
+    imports: [...used].map(([local, exported]) => ({ exported, local })),
   };
 }
 

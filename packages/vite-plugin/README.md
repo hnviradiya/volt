@@ -17,7 +17,7 @@ export default defineConfig({
 });
 ```
 
-It does two things nothing else in the toolchain currently does:
+It does three things nothing else in the toolchain currently does:
 
 1. **Lowers TC39 standard decorators.** They are stage 3 and implemented by no
    JavaScript engine. Vite transforms with oxc, which parses decorators but
@@ -25,6 +25,10 @@ It does two things nothing else in the toolchain currently does:
    error.
 2. **Compiles templates at build time**, so the compiler never ships and no
    template is parsed at runtime.
+3. **Lowers the `Signal` namespace to direct imports.** `export namespace`
+   compiles to a runtime object that no bundler can take apart, so
+   `Signal.State` alone would keep the watcher and the whole introspection
+   surface in every app.
 
 It also compiles `styleUrl` through Sass, and rejects a `templateUrl` whose
 spelling differs from the file on disk — including case, which otherwise

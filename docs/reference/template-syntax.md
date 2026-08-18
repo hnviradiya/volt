@@ -173,11 +173,14 @@ Delegation is skipped, and a real listener attached, when:
 
 - the event does not bubble — `focus`, `blur`, media and animation events
 - you use `.capture`, `.once` or `.passive`, which need real listener options
-- the event is `wheel` or one of the touch events, which browsers force to be
-  passive at the document — a delegated `preventDefault()` would be discarded,
-  so `:wheel.prevent` would silently do nothing
+- the event is `wheel`, `mousewheel`, `touchstart` or `touchmove`, which
+  browsers force to be passive on the document — a delegated `preventDefault()`
+  would be discarded, so `:wheel.prevent` would silently do nothing. This is
+  those four specifically, not touch events in general: `touchend` and
+  `touchcancel` are cancellable at the document.
 - the event fires continuously — `pointermove`, `mousemove`, `pointerover`,
-  `mouseover`, `dragover` — where a walk to the document per event costs more
+  `mouseover`, `pointerout`, `mouseout`, `dragover` — where a walk to the
+  document per event costs more
   than the listener it saves. Hover belongs in CSS, and a gesture should listen
   on the document only for as long as the gesture lasts.
 

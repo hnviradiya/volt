@@ -109,6 +109,32 @@ describe('phase order', () => {
     expect(order).toEqual(['render', 'measure', 'apply:20', 'user']);
     dispose();
   });
+
+  it('gives up on measures that keep dirtying each other', () => {
+    const a = new Signal.State(0);
+    const b = new Signal.State(0);
+    let dispose = (): void => {};
+
+    createRoot((d) => {
+      dispose = d;
+      measureEffect(() => a.set(b.get() + 1));
+      measureEffect(() => b.set(a.get() + 1));
+    });
+
+    let thrown: unknown;
+    try {
+      flushSync();
+    } catch (err) {
+      thrown = err;
+    } finally {
+      // Disposed before the assertion runs: a pair still ping-ponging would
+      // otherwise follow this test into every flush after it.
+      dispose();
+    }
+
+    // The alternative to throwing is a hang, which is the worse one.
+    expect(String(thrown)).toMatch(/Measure effects did not settle/);
+  });
 });
 
 describe('the read-only contract', () => {

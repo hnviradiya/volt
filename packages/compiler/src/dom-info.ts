@@ -164,10 +164,15 @@ export const DELEGATED_EVENTS = new Set([
  *
  * Hover belongs in CSS, and a gesture should listen on the document only for
  * as long as the gesture lasts.
+ *
+ * Codegen consults this, so a name added here stops being delegated. It was
+ * decorative until now — the two sets were kept disjoint by hand and nothing
+ * checked, so adding a name had no effect and the next person had no way to
+ * find that out except by testing the output.
  */
 export const NEVER_DELEGATED = new Set([
-  'wheel',
-  'touchstart', 'touchmove', 'touchend', 'touchcancel',
+  'wheel', 'mousewheel',
+  'touchstart', 'touchmove',
   'mousemove', 'mouseover', 'mouseout',
   'pointermove', 'pointerover', 'pointerout',
   'dragover',

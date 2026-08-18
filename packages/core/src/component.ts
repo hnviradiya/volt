@@ -24,7 +24,6 @@
  */
 
 import {
-  Signal,
   createRoot,
   flushSync,
   getScope,
@@ -35,6 +34,8 @@ import {
   type Dispose,
   type Scope,
 } from '@voltdev/reactivity';
+// See `dom.ts` for why the framework's own modules take the lowered spelling.
+import { State as StateSignal } from '@voltdev/reactivity/signals';
 
 import { insert } from './dom.js';
 
@@ -525,8 +526,8 @@ export interface LazyOptions {
 interface LazyRecord {
   loader: () => Promise<unknown>;
   options: LazyOptions;
-  component: Signal.State<ComponentType<unknown> | null>;
-  failure: Signal.State<unknown>;
+  component: StateSignal<ComponentType<unknown> | null>;
+  failure: StateSignal<unknown>;
   inFlight: Promise<void> | null;
 }
 
@@ -557,8 +558,8 @@ export function lazy<T = unknown>(
   LAZY.set(placeholder, {
     loader: loader as () => Promise<unknown>,
     options,
-    component: new Signal.State<ComponentType<unknown> | null>(null),
-    failure: new Signal.State<unknown>(undefined),
+    component: new StateSignal<ComponentType<unknown> | null>(null),
+    failure: new StateSignal<unknown>(undefined),
     inFlight: null,
   });
 

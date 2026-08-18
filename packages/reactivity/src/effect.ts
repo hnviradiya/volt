@@ -253,6 +253,10 @@ const metrics: FlushMetrics = { flushes: 0, forcedLayouts: 0, peakForcedLayouts:
  * phase shows up here as a peak that climbs with the number of components on
  * screen. Tracked in production too — a metric that disappears from the build
  * where performance matters defends nothing.
+ *
+ * Counted from the phase transitions rather than by instrumenting reads, so a
+ * measure drain that follows writes is charged one layout whether or not a
+ * callback asked for geometry: an upper bound, and the cheap one.
  */
 export function getFlushMetrics(): FlushMetrics {
   return { ...metrics };
@@ -344,37 +348,30 @@ export function flushSync(): void {
   }
 }
 
+/**
+ * A measure drain, watched in development for writes.
+ *
+ * The phase is read-only by contract: a write in the middle of it invalidates
+ * the layout the drain just paid for, so the next read forces another one and
+ * the thrash the lane exists to remove is back, silently, visible only under
+ * a profiler. A MutationObserver catches every write path — including
+ * `style.top = ...`, which patching individual DOM methods would miss — and
+ * costs nothing outside the drain.
+ *
+ * It is written inline rather than as helpers so the whole diagnostic sits in
+ * one `__VOLT_DEV__` branch and a production build drops all of it.
+ */
 function drainMeasure(pending: ComputedSignal<unknown>[]): void {
   if (!__VOLT_DEV__) {
     for (const node of pending) runEffectComputed(node);
     return;
   }
 
-  const observer = watchForMeasureWrites();
-  try {
-    for (const node of pending) runEffectComputed(node);
-  } finally {
-    if (observer) reportMeasureWrites(observer);
-  }
-}
-
-/**
- * Dev-only: the phase's read-only contract, enforced.
- *
- * A write during the measure drain invalidates the layout the drain just paid
- * for, so the next read forces another — the thrash the lane exists to
- * remove, reinstated silently and only visible under a profiler. A
- * MutationObserver catches every write path, including `style.top = ...`,
- * which patching individual DOM methods would miss.
- */
-let measureObserver: MutationObserver | null | undefined;
-
-function watchForMeasureWrites(): MutationObserver | null {
   if (measureObserver === undefined) {
     measureObserver =
       typeof MutationObserver === 'function' && typeof document !== 'undefined'
-        ? // Records are taken synchronously at the end of the drain, so the
-          // callback is never left anything to deliver.
+        ? // Records are taken synchronously below, so the callback is never
+          // left anything to deliver.
           new MutationObserver(() => {})
         : null;
   }
@@ -384,27 +381,30 @@ function watchForMeasureWrites(): MutationObserver | null {
     attributes: true,
     characterData: true,
   });
-  return measureObserver;
+
+  try {
+    for (const node of pending) runEffectComputed(node);
+  } finally {
+    const records = measureObserver?.takeRecords();
+    measureObserver?.disconnect();
+    const record = records?.[0];
+    if (record && typeof console !== 'undefined') {
+      const tag = (record.target as Partial<Element>).nodeName?.toLowerCase() ?? 'node';
+      const what =
+        record.type === 'attributes'
+          ? `${record.attributeName} on <${tag}>`
+          : `${record.type} on <${tag}>`;
+      console.error(
+        `[volt] A measure effect wrote to the DOM (${what}). The measure phase is ` +
+          'read-only: a write there dirties the layout the phase just forced, so the ' +
+          'next read forces another one. Set a signal instead and let a render ' +
+          'effect apply it, or move the write to effect().',
+      );
+    }
+  }
 }
 
-function reportMeasureWrites(observer: MutationObserver): void {
-  const records = observer.takeRecords();
-  observer.disconnect();
-  if (records.length === 0 || typeof console === 'undefined') return;
-
-  const record = records[0]!;
-  const tag = (record.target as Partial<Element>).nodeName?.toLowerCase() ?? 'node';
-  const what =
-    record.type === 'attributes'
-      ? `${record.attributeName} on <${tag}>`
-      : `${record.type} on <${tag}>`;
-  console.error(
-    `[volt] A measure effect wrote to the DOM (${what}). The measure phase is ` +
-      'read-only: a write there dirties the layout the phase just forced, so the ' +
-      'next read forces another one. Set a signal instead and let a render ' +
-      'effect apply it, or move the write to effect().',
-  );
-}
+let measureObserver: MutationObserver | null | undefined;
 
 function runEffectComputed(node: ComputedSignal<unknown>): void {
   try {

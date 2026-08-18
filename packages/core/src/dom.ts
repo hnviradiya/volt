@@ -18,10 +18,16 @@ import {
   renderEffect,
   type Scope,
 } from '@voltdev/reactivity';
-
-// Annotated explicitly: the inferred type names an internal module, which
-// would leak a non-portable path into the emitted declarations.
-const untrack: <T>(cb: () => T) => T = Signal.subtle.untrack;
+// The lowered spelling of the namespace, which is the whole point of it: the
+// DOM runtime is in every bundle, so reaching `Signal.subtle.untrack` here
+// would hold the namespace object — and everything else it carries — alive in
+// every app, whatever the app itself was compiled to.
+import {
+  State as StateSignal,
+  Computed as ComputedSignal,
+  untrack,
+} from '@voltdev/reactivity/signals';
+import { createReuseMarks } from './reuse-marks.js';
 
 /**
  * Bindings being collected for a shared effect, or null when each makes its own.
@@ -309,7 +315,7 @@ export type BranchEntry = [Accessor<unknown> | null, () => unknown];
 export function branch(branches: BranchEntry[]): Accessor<unknown> {
   // The winning index is its own computed, so re-testing conditions does not
   // rebuild the branch unless the winner actually changes.
-  const active = new Signal.Computed(() => {
+  const active = new ComputedSignal(() => {
     for (let i = 0; i < branches.length; i++) {
       const condition = branches[i]![0];
       if (condition === null || condition()) return i;
@@ -317,7 +323,7 @@ export function branch(branches: BranchEntry[]): Accessor<unknown> {
     return -1;
   });
 
-  const result = new Signal.State<unknown>(null);
+  const result = new StateSignal<unknown>(null);
 
   // A render effect, not a computed: building a branch creates effects, and
   // re-running this disposes the previous branch's scope along with them.
@@ -341,7 +347,7 @@ interface MountedBlock {
 interface Row {
   block: MountedBlock;
   dispose: () => void;
-  item: Signal.State<unknown>;
+  item: StateSignal<unknown>;
   /** Record a new position, waking the index signal only if one was made. */
   setIndex(index: number): void;
 }
@@ -367,16 +373,32 @@ export function each(
   keyFn: ((item: unknown, index: number) => unknown) | null,
 ): Accessor<Node[]> {
   const scope = getScope();
+
+  // The bookkeeping belongs to the list, not to the pass. Every buffer here is
+  // written in place and handed back and forth between passes, so reconciling
+  // a list that has not changed allocates nothing at all — no keys, no rows,
+  // no node list, and no per-row reuse marks.
   let prevKeys: unknown[] = [];
-  let prevRows: Row[] = [];
+  let prevRows: (Row | undefined)[] = [];
+  let keys: unknown[] = [];
+  let rows: (Row | undefined)[] = [];
+  let nodes: Node[] = [];
+  const marks = createReuseMarks();
 
   onCleanup(() => {
-    for (const row of prevRows) row.dispose();
-    prevRows = [];
+    for (const row of prevRows) row?.dispose();
     prevKeys = [];
+    prevRows = [];
+    keys = [];
+    rows = [];
+    nodes = [];
   });
 
-  const result = new Signal.State<Node[]>([]);
+  // The node list is the same array on every pass, so the signal is told not
+  // to compare: what changes is its contents. Every reader copies what it
+  // reads — `insert` flattens into an array of its own — so nothing is left
+  // holding a buffer that moves underneath it.
+  const result = new StateSignal<Node[]>([], { equals: () => false });
 
   // A render effect rather than a computed, because reconciling writes the
   // per-row item and index signals — something a pure computed may not do.
@@ -389,31 +411,53 @@ export function each(
         : Array.from(raw as Iterable<unknown>);
 
     const count = items.length;
-    const keys = new Array<unknown>(count);
     // No key function means key by the item itself. Duplicates are fine: the
-    // reconciler buckets equal keys and pairs them up in order.
+    // reconciler pairs equal keys up in order.
     for (let i = 0; i < count; i++) keys[i] = keyFn ? keyFn(items[i], i) : items[i];
 
-    const rows = new Array<Row>(count);
+    const prevCount = prevRows.length;
 
-    const out = untrack(() => {
-      // Buckets, not a plain index map, so duplicate keys still pair up 1:1.
-      const available = new Map<unknown, number[]>();
-      for (let i = 0; i < prevKeys.length; i++) {
-        const bucket = available.get(prevKeys[i]);
-        if (bucket) bucket.push(i);
-        else available.set(prevKeys[i], [i]);
+    untrack(() => {
+      // Where a previous key's rows are. A key almost always names one row, so
+      // its index is stored bare and only a key that genuinely repeats grows a
+      // bucket — which is what spares a unique-keyed list an array per row. A
+      // bucket's first slot counts how many of that key's rows have been
+      // claimed; consuming with `shift` instead would be quadratic on a list
+      // where one key repeats thousands of times.
+      const available = new Map<unknown, number | number[]>();
+      for (let i = 0; i < prevCount; i++) {
+        const key = prevKeys[i];
+        const found = available.get(key);
+        if (found === undefined) available.set(key, i);
+        else if (typeof found === 'number') available.set(key, [0, found, i]);
+        else found.push(i);
       }
 
-      const reused = new Set<number>();
+      marks.begin(prevCount);
 
       for (let i = 0; i < count; i++) {
-        const bucket = available.get(keys[i]);
-        const oldIndex = bucket && bucket.length > 0 ? bucket.shift() : undefined;
+        const key = keys[i];
+        const found = available.get(key);
+        let oldIndex = -1;
 
-        if (oldIndex !== undefined) {
+        if (typeof found === 'number') {
+          // Overwritten with -1 rather than deleted: deleting enough of a Map
+          // makes it compact its table, which is the per-pass allocation back.
+          if (found >= 0) {
+            oldIndex = found;
+            available.set(key, -1);
+          }
+        } else if (found !== undefined) {
+          const taken = found[0]! + 1;
+          if (taken < found.length) {
+            oldIndex = found[taken]!;
+            found[0] = taken;
+          }
+        }
+
+        if (oldIndex >= 0) {
           const row = prevRows[oldIndex]!;
-          reused.add(oldIndex);
+          marks.claim(oldIndex);
           rows[i] = row;
           // Refresh in place; the row's DOM stays exactly where it is.
           row.item.set(items[i]);
@@ -424,19 +468,41 @@ export function each(
         rows[i] = createRow(scope, rowFn, items[i], i);
       }
 
-      for (let i = 0; i < prevRows.length; i++) {
-        if (!reused.has(i)) prevRows[i]!.dispose();
+      // Emptied as it is walked: these two become the next pass's scratch, and
+      // until that pass overwrites them they would go on holding a disposed
+      // row's DOM. Clearing here rather than while the map is built also means
+      // a row body that throws leaves the previous state whole to reconcile
+      // against next time.
+      for (let i = 0; i < prevCount; i++) {
+        if (!marks.claimed(i)) prevRows[i]!.dispose();
+        prevKeys[i] = undefined;
+        prevRows[i] = undefined;
       }
 
+      // The buffers swap rather than being copied, and both pairs are trimmed
+      // to the live count — a list that spikes to 100k and settles at 50 hands
+      // the space back on the pass that shrinks it, rather than keeping the
+      // large arrays for as long as the list is on screen.
+      const spentKeys = prevKeys;
+      const spentRows = prevRows;
       prevKeys = keys;
       prevRows = rows;
+      keys = spentKeys;
+      rows = spentRows;
+      if (prevKeys.length > count) prevKeys.length = count;
+      if (prevRows.length > count) prevRows.length = count;
+      if (keys.length > count) keys.length = count;
+      if (rows.length > count) rows.length = count;
 
-      const nodes: Node[] = [];
-      for (const row of rows) nodes.push(...row.block.nodes());
-      return nodes;
+      let written = 0;
+      for (let i = 0; i < count; i++) {
+        const rowNodes = prevRows[i]!.block.nodes();
+        for (let j = 0; j < rowNodes.length; j++) nodes[written++] = rowNodes[j]!;
+      }
+      if (nodes.length > written) nodes.length = written;
     });
 
-    result.set(out);
+    result.set(nodes);
   });
 
   return () => result.get();
@@ -448,12 +514,12 @@ function createRow(
   item: unknown,
   index: number,
 ): Row {
-  const itemSignal = new Signal.State<unknown>(item);
+  const itemSignal = new StateSignal<unknown>(item);
 
   // The index signal is created only if the row body actually reads `$index`,
   // which most templates never do. Otherwise every row in every list pays for
   // a signal at creation and a write on every reconcile that nothing observes.
-  let indexSignal: Signal.State<number> | null = null;
+  let indexSignal: StateSignal<number> | null = null;
   let indexValue = index;
 
   let block: MountedBlock = { nodes: () => [] };
@@ -464,7 +530,7 @@ function createRow(
     block = materializeBlock(
       rowFn(
         () => itemSignal.get(),
-        () => (indexSignal ??= new Signal.State(indexValue)).get(),
+        () => (indexSignal ??= new StateSignal(indexValue)).get(),
       ),
     );
     return disposeRow;
