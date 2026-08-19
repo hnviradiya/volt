@@ -360,3 +360,22 @@ The useful summary: Effect is a plausible thing to use *with* Volt, not against
 it. Being a good citizen beside it — not fighting its cancellation, not
 demanding a competing container — is worth more than matching its features.
 
+## A flush has phases, and that was arrived at twice
+
+Volt's scheduler drains render effects, then measure callbacks that may only
+read, then user effects. The reason is that geometry read from an ordinary
+effect forces a layout over everything just written, so a page with twenty
+measuring components pays twenty write-then-layout cycles instead of one.
+
+Solid 2 splits effects into compute and apply phases, which is the same
+conclusion reached independently. That is worth recording because it is the
+only kind of evidence available for a decision like this one: two projects with
+the same architecture — fine-grained reactivity, no virtual DOM, a synchronous
+flush — arriving separately at the same shape means the phase split follows
+from the architecture rather than from anyone's taste.
+
+It also sets the standard for the split's own honesty. Volt's version shipped
+with a metric that counted the opposite of what it documented and with no
+component using it; both are fixed, and the lesson stands beside the decision:
+a phase that nothing measures in is a phase that does nothing.
+

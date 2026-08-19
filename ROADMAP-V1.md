@@ -412,6 +412,65 @@ Not yet, and the reason:
 - [ ] Per-route rendering mode, and partial hydration driven by the compiler's
       existing static/dynamic split rather than an island annotation
 
+## Async in the graph, or async in a lane
+
+An open architectural decision, and the one place a comparable project may have
+a structurally better answer than the one already built here.
+
+Volt's position today: `createResource` owns a request's lifecycle, and the
+server rendering design adds a `dataEffect` lane because the resource's first
+fetch runs from a deferred user effect — so "no effects run on the server" and
+"the server awaits its data" cannot both be true as the roadmap states them. A
+third lane resolves that without changing what a resource is.
+
+Solid 2 takes the larger step: the reactive graph itself understands promises,
+so a component can return one and `createResource` dissolves into an ordinary
+memo. The contradiction does not need resolving because it never forms.
+
+Both work. The difference is where the complexity sits — in a scheduler lane
+that a handful of primitives know about, or in the graph that every signal
+already goes through.
+
+- [ ] Decide this before streaming SSR and server functions harden around the
+      current shape. Both are being built now, and both will encode whichever
+      answer is in place when they land.
+- [ ] The criteria, in order: whether a promise-aware graph can keep the
+      glitch-freedom the TC39 proposal specifies, since Volt's reactivity is
+      the proposal rather than an interpretation of it and that is not a
+      constraint Solid carries; what it costs a client that never awaits
+      anything; and whether it survives the measure lane, which splits a flush
+      into phases that an async continuation would have to re-enter.
+- [ ] If the lane stays, say why here rather than by default. Deciding by not
+      deciding is how the API shape gets fixed by whatever shipped first.
+
+The convergence worth noting separately: Solid 2 splits effects into compute
+and apply phases, which is the measure lane arrived at independently. Two
+projects with this architecture reaching the same conclusion apart from each
+other is the strongest evidence available that the phase split is structural
+rather than a preference.
+
+## One command, not five packages
+
+An application today needs the router, the query cache, the server package and
+the plugin wired together by hand. Each is a deliverable and each works; none
+of them is a way to start.
+
+Solid 2 folds this into a `start` mode on its Vite plugin: SPA, server
+rendering, file-system routing and server functions, without configuration.
+Volt is unusually well placed to do the same, because its plugin is already
+mandatory — it lowers the decorators, so there is no build without it, and
+nothing is being added to a project that was not there.
+
+- [ ] A `start` mode in `@voltdev/vite-plugin` that wires the router, the query
+      cache, server rendering and server functions together, with the
+      per-route rendering mode the hybrid plan already describes.
+- [ ] It must stay opt-in. The roadmap's own position is that CSR is
+      first-class and server rendering is something an application chooses,
+      never the price of using the framework — a turnkey mode that quietly
+      makes every project a server project would contradict that.
+- [ ] `create-volt` generates a project that uses it, so the wiring is
+      demonstrated rather than described.
+
 ## Server functions
 
 A method that runs on the server and is called from the client as though it
