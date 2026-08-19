@@ -93,23 +93,32 @@ instead. It fires at most once until re-armed with `watch()`.
 |---|---|
 | `effect(fn)` | Runs immediately, re-runs on change, after the DOM settles |
 | `renderEffect(fn)` | Same, but flushes before user effects. For DOM patching |
-| `measureEffect(fn)` | Reads geometry between the two, on a settled DOM |
+| `dataEffect(fn)` | Asks for data. Deferred like `effect`, drained before measure |
+| `measureEffect(fn)` | Reads geometry after that, on a settled DOM |
 
-All three return a disposer. Returning a function from `fn` registers a
+All four return a disposer. Returning a function from `fn` registers a
 cleanup that runs before the next execution and on disposal.
 
-A flush runs them in that order: render effects patch the DOM to a fixed
-point, measure effects read, then user effects run. Reading geometry —
-`getBoundingClientRect`, `offsetWidth`, `scrollTop` — forces the engine to lay
-out everything written since the last frame, so a read from an `effect` costs
-one layout per component that positions a popover, syncs a scroller or
-measures overflow. Reading from `measureEffect` puts every read in the flush
-behind a single layout.
+A flush runs them in phase order: render effects patch the DOM to a fixed
+point, data effects ask for what the tree needs, measure effects read, then
+user effects run. Reading geometry — `getBoundingClientRect`, `offsetWidth`,
+`scrollTop` — forces the engine to lay out everything written since the last
+frame, so a read from an `effect` costs one layout per component that positions
+a popover, syncs a scroller or measures overflow. Reading from `measureEffect`
+puts every read in the flush behind a single layout.
 
 The measure phase is read-only. Publish what you measured by setting a signal;
 the render effect that consumes it patches on the next pass, still ahead of
 user effects. In development, a DOM write made during the measure phase is
 reported to the console.
+
+`dataEffect` is the phase `createResource` starts its fetch from, and the only
+one besides render that a server flush drains — see
+[server rendering](./server). Its first run is deferred, like `effect`'s, so a
+resource declared as a class field sees the props assigned after construction;
+but it drains before measure, so the signal a fetch writes as it starts sends
+the flush back through the render phase without dirtying a layout that has
+already been paid for.
 
 ```ts
 const stop = effect(() => {

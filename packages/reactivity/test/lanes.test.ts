@@ -96,6 +96,66 @@ describe('phase order', () => {
   });
 });
 
+describe('the data lane itself', () => {
+  it('re-arms its watcher, so a write after a drain flushes without being asked', async () => {
+    const source = new Signal.State(0);
+    let runs = 0;
+
+    createRoot(() => {
+      dataEffect(() => {
+        source.get();
+        runs++;
+      });
+    });
+
+    // Nothing here calls `flushSync`: a watcher notifies at most once until it
+    // is re-armed, so a lane that drains without re-arming keeps working for
+    // anyone who asks explicitly and silently stops scheduling for everyone
+    // else.
+    await Promise.resolve();
+    expect(runs).toBe(1);
+
+    source.set(1);
+    await Promise.resolve();
+    expect(runs).toBe(2);
+
+    // The second write is the one that needs the re-arm. The first run was
+    // queued at creation rather than notified, so nothing had been armed yet
+    // and the write above wakes the watcher either way.
+    source.set(2);
+    await Promise.resolve();
+    expect(runs).toBe(3);
+  });
+
+  it('gives up on data effects that keep dirtying each other', () => {
+    const a = new Signal.State(0);
+    const b = new Signal.State(0);
+    let dispose = (): void => {};
+
+    createRoot((d) => {
+      dispose = d;
+      dataEffect(() => a.set(b.get() + 1));
+      dataEffect(() => b.set(a.get() + 1));
+    });
+
+    let thrown: unknown;
+    try {
+      flushSync();
+    } catch (err) {
+      thrown = err;
+    } finally {
+      // Disposed before the assertion runs: a pair still ping-ponging would
+      // otherwise follow this test into every flush after it.
+      dispose();
+    }
+
+    // A server holds its response open for as long as this flush runs, so the
+    // alternative to throwing is not a hang the developer sees but a request
+    // that never answers.
+    expect(String(thrown)).toMatch(/Data effects did not settle/);
+  });
+});
+
 describe('a server flush', () => {
   it('stops after the data lane', () => {
     serverBuild(true);

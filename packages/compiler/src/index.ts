@@ -53,6 +53,7 @@ export type { A11ySeverity, Diagnostic } from './a11y.js';
 
 export {
   LIBRARY_MESSAGE_KEYS,
+  checkCatalog,
   checkMessageSites,
   collectTranslateCalls,
   generateMessages,
@@ -61,6 +62,7 @@ export {
   unusedMessages,
 } from './messages.js';
 export type {
+  CatalogCheckOptions,
   CatalogMessage,
   GenerateOptions,
   GeneratedMessages,

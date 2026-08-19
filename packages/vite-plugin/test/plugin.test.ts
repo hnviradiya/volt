@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { resolve } from 'node:path';
 import { volt } from '../src/index.js';
-import type { Plugin } from 'vite';
+import { resolveConfig, type Plugin } from 'vite';
 
 type TransformHook = (
   this: {
@@ -348,24 +348,79 @@ describe('paths must match the file on disk exactly', () => {
 });
 
 describe('the build flags', () => {
-  /** What the env plugin would hand Vite for a given build. */
-  function defines(env: { mode: string; command: 'build'; isSsrBuild?: boolean }) {
+  type Env = { mode: string; command: 'build' | 'serve'; isSsrBuild?: boolean };
+  type Environment = { consumer?: 'client' | 'server' };
+
+  /**
+   * What one environment of one build is compiled with.
+   *
+   * Both hooks, merged the way Vite merges them — the environment's `define`
+   * over the root's — because the answer is only right as the pair.
+   */
+  function defines(name: string, env: Env, environment: Environment = {}) {
     const plugin = volt().find((p) => p.name === 'volt:env')!;
-    const hook = plugin.config as (config: object, env: object) => { define: Record<string, string> };
-    return hook.call(plugin, {}, env).define;
+    const config = plugin.config as (config: object, env: Env) => { define: Record<string, string> };
+    const perEnvironment = plugin.configEnvironment as (
+      name: string,
+      config: Environment,
+      env: Env,
+    ) => { define: Record<string, string> };
+    return {
+      ...config.call(plugin, {}, env).define,
+      ...perEnvironment.call(plugin, name, environment, env).define,
+    };
   }
 
-  it('marks an SSR build as one', () => {
-    expect(defines({ mode: 'production', command: 'build', isSsrBuild: true }).__VOLT_SERVER__).toBe(
-      'true',
-    );
+  const build: Env = { mode: 'production', command: 'build' };
+  const ssrBuild: Env = { mode: 'production', command: 'build', isSsrBuild: true };
+  const serve: Env = { mode: 'development', command: 'serve' };
+
+  it('marks the server environment as one, and the client environment as not', () => {
+    expect(defines('ssr', ssrBuild).__VOLT_SERVER__).toBe('true');
+    // The half a single `define` cannot express: the client modules of the
+    // same build must not be compiled as a server build, or the pages it
+    // serves are the ones that never queue `onMount`.
+    expect(defines('client', ssrBuild).__VOLT_SERVER__).toBe('false');
   });
 
-  it('marks every other build as a client build', () => {
-    // Left undefined rather than false by Vite itself, which is why the check
-    // is for `true` and not for absence: a client bundle must not be left with
-    // the server's flushing and lifecycle gating live in it.
-    expect(defines({ mode: 'production', command: 'build' }).__VOLT_SERVER__).toBe('false');
-    expect(defines({ mode: 'development', command: 'build' }).__VOLT_DEV__).toBe('true');
+  it('marks the server side of a dev server too, where no build flag is set', () => {
+    // `isSsrBuild` is Vite's answer for a build and is undefined on a dev
+    // server — the mode an SSR application is developed in, and where a flag
+    // read from it would leave every gate inert.
+    expect(defines('ssr', serve).__VOLT_SERVER__).toBe('true');
+    expect(defines('client', serve).__VOLT_SERVER__).toBe('false');
+  });
+
+  it('goes by what an environment consumes, not by its name', () => {
+    expect(defines('edge', build, { consumer: 'server' }).__VOLT_SERVER__).toBe('true');
+    expect(defines('worker', build, { consumer: 'client' }).__VOLT_SERVER__).toBe('false');
+  });
+
+  it('marks a plain client build as a client build', () => {
+    expect(defines('client', build).__VOLT_SERVER__).toBe('false');
+    expect(defines('client', { mode: 'development', command: 'build' }).__VOLT_DEV__).toBe('true');
+  });
+
+  /**
+   * The hooks above, run by Vite rather than by this file.
+   *
+   * Calling a hook proves what it answers; only Vite proves that it is asked —
+   * a per-environment `define` that Vite never merges is a flag every module
+   * reads as `false`, and the unit tests above would still pass.
+   */
+  it('reaches both environments of a real config, on a dev server as much as a build', async () => {
+    const inline = { configFile: false as const, logLevel: 'silent' as const, plugins: [volt()] };
+
+    // A dev server has both environments whether or not the project asked for
+    // them; a build has the server one only when the project ships a server.
+    const resolved = {
+      serve: await resolveConfig(inline, 'serve'),
+      build: await resolveConfig({ ...inline, environments: { ssr: {} } }, 'build'),
+    };
+
+    for (const [command, config] of Object.entries(resolved)) {
+      expect(config.environments.ssr!.define?.__VOLT_SERVER__, command).toBe('true');
+      expect(config.environments.client!.define?.__VOLT_SERVER__, command).toBe('false');
+    }
   });
 });

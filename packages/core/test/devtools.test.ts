@@ -32,7 +32,7 @@ import {
 // Not re-exported by the framework entry, because an application disposes a
 // scope by unmounting or by the root that made it. A panel is handed the scope
 // itself, which is what the test below is about.
-import { disposeScope } from '@voltdev/reactivity';
+import { disposeScope, runWithScope, setDevListener } from '@voltdev/reactivity';
 import {
   devtools,
   type ComponentNode,
@@ -61,6 +61,18 @@ class Counter {
   count = new Signal.State(2);
   doubled = new Signal.Computed(() => this.count.get() * 2);
   label = new Signal.State('hi');
+}
+
+@Component({ selector: 'v-overlay', render: compileTemplate(`<i>overlay</i>`) })
+class Overlay {}
+
+@Component({ selector: 'v-portal', render: compileTemplate(`<div>portal</div>`) })
+class Portal {
+  // A modal put elsewhere in the document: declared inside this component, so
+  // the tools record it as a child of it, but owned by a root of its own, so
+  // it outlives this component's scope. That is the only way the two trees —
+  // where a component was declared, and which scope disposes it — come apart.
+  overlay = runWithScope(null, () => mount(Overlay, document.querySelector('#overlay')!));
 }
 
 let host: HTMLElement;
@@ -109,6 +121,12 @@ function named(update: UpdateRecord): string[] {
 }
 
 describe('the object an extension reaches', () => {
+  // One test below detaches the listener. Put it back afterwards, so a
+  // failure inside that test is one failure rather than the rest of the file.
+  afterEach(() => {
+    devtools();
+  });
+
   it('is published under the name the documentation gives', () => {
     expect((globalThis as Record<string, unknown>)['__VOLT_DEVTOOLS__']).toBe(tools);
   });
@@ -116,6 +134,32 @@ describe('the object an extension reaches', () => {
   it('carries a version an extension can check its assumptions against', () => {
     expect(Number.isInteger(tools.version)).toBe(true);
     expect(tools.version).toBeGreaterThanOrEqual(1);
+  });
+
+  it('says whether a session is running', () => {
+    // A panel reopened on a page it was already recording reads this to know
+    // which button to draw.
+    expect(tools.recording).toBe(false);
+    tools.startRecording();
+    expect(tools.recording).toBe(true);
+    tools.stopRecording();
+    expect(tools.recording).toBe(false);
+  });
+
+  it('re-attaches to the reactive core after something detached it', () => {
+    mountCounter();
+    // What measuring the cost of the hooks means: take them out. This is the
+    // whole reason `install` sets the listener on every call rather than once.
+    setDevListener(null);
+    tools.startRecording();
+    counter.count.set(3);
+    flushSync();
+    expect(tools.updates()).toEqual([]);
+
+    expect(devtools()).toBe(tools);
+    counter.count.set(4);
+    flushSync();
+    expect(named(tools.updates().at(-1)!)).toEqual(['Counter.count']);
   });
 });
 
@@ -182,6 +226,26 @@ describe('component tree', () => {
     expect(find(tools.componentTree(), 'Counter')).toBeUndefined();
     expect(find(tools.componentTree(), 'Badge')).toBeUndefined();
   });
+
+  it('hands a departing component its children rather than dropping them', () => {
+    document.body.innerHTML = '<div id="app"></div><div id="overlay"></div>';
+    host = document.querySelector('#app')!;
+    const handle = mount(Portal, host);
+    const overlay = (handle.instance as Portal).overlay;
+    expect(find(tools.componentTree(), 'Overlay')).toBeDefined();
+
+    handle.unmount();
+
+    // The overlay's own root was not touched, so it is still on screen. A
+    // child dropped with its parent would vanish from the tree while it is
+    // still rendering.
+    expect(document.querySelector('#overlay')!.textContent).toBe('overlay');
+    expect(find(tools.componentTree(), 'Portal')).toBeUndefined();
+    expect(find(tools.componentTree(), 'Overlay')).toBeDefined();
+
+    overlay.unmount();
+    expect(find(tools.componentTree(), 'Overlay')).toBeUndefined();
+  });
 });
 
 describe('signal graph', () => {
@@ -191,6 +255,10 @@ describe('signal graph', () => {
 
     const count = labelled(graph, 'Counter.count');
     const doubled = labelled(graph, 'Counter.doubled');
+
+    // Ids tell two nodes apart or they are not ids: every assertion below
+    // that compares one to another would hold for a constant otherwise.
+    expect(new Set(graph.map((node) => node.id)).size).toBe(graph.length);
 
     expect(count.kind).toBe('state');
     expect(count.value).toBe(2);
@@ -251,6 +319,24 @@ describe('signal graph', () => {
     // The child's prop is named after the child that declares it, and is
     // reachable from the parent because a render effect writes it.
     expect(graph.some((node) => node.label === 'Badge.text')).toBe(true);
+  });
+
+  it('reads values without subscribing whoever asked', () => {
+    mountCounter();
+    let runs = 0;
+    const dispose = effect(() => {
+      runs++;
+      tools.signalGraph(counter);
+    });
+    flushSync();
+    expect(runs).toBe(1);
+
+    // A panel that read values tracked would re-run whatever opened it on the
+    // next write, which is the tools driving the application they measure.
+    counter.count.set(11);
+    flushSync();
+    expect(runs).toBe(1);
+    dispose();
   });
 
   it('walks every mounted component when given no seed', () => {
@@ -343,6 +429,76 @@ describe('why did this update', () => {
     dispose();
   });
 
+  it('counts a write that reached an effect down two paths once', () => {
+    const source = new Signal.State(0);
+    tools.label(source, 'source');
+    const left = new Signal.Computed(() => source.get() + 1);
+    const right = new Signal.Computed(() => source.get() * 2);
+    const dispose = effect(() => {
+      left.get();
+      right.get();
+    });
+    flushSync();
+    tools.startRecording();
+
+    // The write reaches the effect through both computeds, so the wake fires
+    // twice for it. One write is one cause.
+    source.set(1);
+    flushSync();
+
+    expect(named(tools.updates().at(-1)!)).toEqual(['source']);
+    dispose();
+  });
+
+  it('does not open a session with causes left over from the last one', () => {
+    const value = new Signal.State(0);
+    tools.label(value, 'value');
+    const dispose = effect(() => {
+      value.get();
+    });
+    flushSync();
+
+    tools.startRecording();
+    // Woken inside the session, but the session ends before the flush that
+    // would have charged the wake to a run and cleared it.
+    value.set(1);
+    tools.stopRecording();
+    flushSync();
+
+    tools.startRecording();
+    value.set(2);
+    flushSync();
+
+    // A stale write blamed for a new session's update is the failure this
+    // guards: the panel would name a `.set()` from before it was opened.
+    expect(tools.updates().at(-1)!.causes.map((cause) => cause.value)).toEqual([2]);
+    dispose();
+  });
+
+  it('shortens a value to something a row or a log line can hold', () => {
+    const value = new Signal.State<unknown>(['a', 'b']);
+    tools.label(value, 'Cart.items');
+    const dispose = effect(() => {
+      value.get();
+    });
+    flushSync();
+    tools.startRecording();
+
+    const shown = (next: unknown): string => {
+      value.set(next);
+      flushSync();
+      return tools.describeUpdate(tools.updates().at(-1)!);
+    };
+
+    // The shape the reference advertises as the error-message format, down to
+    // the counts: a whole cart inlined into a log line explains nothing.
+    expect(shown(['a', 'b', 'c'])).toContain('Cart.items Array(2) → Array(3)');
+    expect(shown(function submit() {})).toContain('Array(3) → ƒ submit');
+    expect(shown(document.createElement('p'))).toContain('ƒ submit → <p>');
+    expect(shown('y'.repeat(80))).toContain(`<p> → ${JSON.stringify('y'.repeat(39) + '…')}`);
+    dispose();
+  });
+
   it('reports how the write reached the effect', () => {
     mountCounter();
     tools.startRecording();
@@ -352,11 +508,13 @@ describe('why did this update', () => {
     const graph = tools.signalGraph(counter);
     const update = tools.updates().find((u) => named(u).includes('Counter.count'))!;
 
+    const count = labelled(graph, 'Counter.count');
+    const doubled = labelled(graph, 'Counter.doubled');
+    // Two ids, and two different ones: a path of the right length made of one
+    // repeated id would say nothing about which node relayed the write.
+    expect(count.id).not.toBe(doubled.id);
     // Written signal first, then what relayed it: the computed in between.
-    expect(update.through).toEqual([
-      labelled(graph, 'Counter.count').id,
-      labelled(graph, 'Counter.doubled').id,
-    ]);
+    expect(update.through).toEqual([count.id, doubled.id]);
   });
 
   it('reports the written signal alone when the effect read it directly', () => {
@@ -367,7 +525,10 @@ describe('why did this update', () => {
 
     const graph = tools.signalGraph(counter);
     const update = tools.updates().find((u) => named(u).includes('Counter.label'))!;
-    expect(update.through).toEqual([labelled(graph, 'Counter.label').id]);
+    const label = labelled(graph, 'Counter.label');
+    expect(update.through).toEqual([label.id]);
+    // And that id belongs to that signal and to nothing else in the graph.
+    expect(graph.filter((node) => node.id === label.id)).toHaveLength(1);
   });
 
   it('follows a write across a component boundary', () => {
@@ -498,6 +659,71 @@ describe('why did this update', () => {
     dispose();
   });
 
+  it('names at most the three newest writes, oldest first', () => {
+    const signals = ['w1', 'w2', 'w3', 'w4'].map((name) => {
+      const signal = new Signal.State(0);
+      tools.label(signal, name);
+      return signal;
+    });
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    let runs = 0;
+    const dispose = effect(() => {
+      for (const signal of signals) signal.get();
+      if (++runs > 1) throw new Error('boom');
+    });
+    flushSync();
+
+    for (const signal of signals) signal.set(1);
+    flushSync();
+
+    // Capped, because an effect woken by everything is not explained by a
+    // message naming everything; and read in the order the writes happened,
+    // which is the opposite of the order they are found in.
+    const message = String(spy.mock.calls[0]?.[0]);
+    expect(message).toContain('woken by w2 (0 → 1), w3 (0 → 1), w4 (0 → 1)');
+    expect(message).not.toContain('w1');
+    spy.mockRestore();
+    dispose();
+  });
+
+  it('forgets the oldest wakes in a turn that never flushes', () => {
+    const flag = new Signal.State(false);
+    const noise = new Signal.State(0);
+    tools.label(flag, 'flag');
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const thrower = effect(() => {
+      if (flag.get()) throw new Error('boom');
+    });
+    const bystander = effect(() => {
+      noise.get();
+    });
+    flushSync();
+
+    // A turn small enough to fit in the log names the write, so the assertion
+    // below is about the bound rather than about attribution being broken.
+    flag.set(true);
+    noise.set(1);
+    flushSync();
+    expect(String(spy.mock.calls[0]?.[0])).toContain('woken by flag');
+
+    flag.set(false);
+    flushSync();
+    spy.mockClear();
+
+    // The same wake, buried under more wakes than the log holds. A batch left
+    // open would otherwise grow this for as long as the turn lasts.
+    flag.set(true);
+    for (let i = 2; i < 4_300; i++) noise.set(i);
+    flushSync();
+    expect(String(spy.mock.calls[0]?.[0])).not.toContain('woken by');
+
+    spy.mockRestore();
+    thrower();
+    bystander();
+  });
+
   it('blames only the write that woke the effect that threw', () => {
     const quiet = new Signal.State(0);
     const loud = new Signal.State(0);
@@ -556,18 +782,52 @@ describe('performance', () => {
   });
 
   it('lists the busiest effect first', () => {
-    mountCounter();
+    const quiet = new Signal.State(0);
+    const busy = new Signal.State(0);
     tools.startRecording();
+    // Declared quiet-first, so the order effects were created in is the
+    // opposite of the answer. A list handed back unsorted would pass a
+    // fixture whose creation order already agreed with its run counts.
+    const stopQuiet = effect(() => {
+      quiet.get();
+    });
+    const stopBusy = effect(() => {
+      busy.get();
+    });
+    flushSync();
 
-    counter.count.set(5);
-    flushSync();
-    counter.count.set(6);
-    flushSync();
-    counter.label.set('bye');
-    flushSync();
+    for (let i = 1; i <= 3; i++) {
+      busy.set(i);
+      flushSync();
+    }
 
-    const runs = tools.effectStats().map((stat) => stat.runs);
-    expect(runs).toEqual([2, 1, 1]);
+    expect(tools.effectStats().map((stat) => stat.runs)).toEqual([4, 1]);
+    stopQuiet();
+    stopBusy();
+  });
+
+  it('leaves out an effect that has not run yet', () => {
+    tools.startRecording();
+    const dispose = effect(() => {});
+
+    // Declared inside the session but not yet flushed: a row of zeroes, which
+    // a panel sorting by cost would rank above whatever is actually slow.
+    expect(tools.effectStats()).toEqual([]);
+    flushSync();
+    expect(tools.effectStats()).toHaveLength(1);
+    dispose();
+  });
+
+  it('drops a disposed effect rather than keeping it as history', () => {
+    tools.startRecording();
+    const dispose = effect(() => {});
+    flushSync();
+    expect(tools.effectStats()).toHaveLength(1);
+
+    // Its record holds the node, and the node holds the closure and whatever
+    // DOM it captured, so history here is a leak with a name.
+    dispose();
+    expect(tools.effectStats()).toEqual([]);
   });
 
   it('times each run, and remembers the worst one', () => {
@@ -622,6 +882,47 @@ describe('performance', () => {
     // The binding that renders the count, and the measure effect reading it.
     expect(flushes[0]!.effects).toBe(2);
     dispose();
+  });
+
+  it('keeps the last 60 flushes and drops the rest', () => {
+    let clock = 0;
+    const spy = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const cost = new Signal.State(0);
+    const dispose = effect(() => {
+      clock += cost.get();
+    });
+    flushSync();
+    tools.startRecording();
+
+    // Each flush costs a different amount, so which 60 were kept is readable
+    // rather than only how many.
+    for (let i = 1; i <= 65; i++) {
+      cost.set(i);
+      flushSync();
+    }
+
+    // Bounded because a session left open records a flush per interaction for
+    // as long as the page is up.
+    expect(tools.flushes().map((flush) => flush.durationMs)).toEqual(
+      Array.from({ length: 60 }, (_, i) => i + 6),
+    );
+    spy.mockRestore();
+    dispose();
+  });
+
+  it('does not record a flush that found nothing to do', () => {
+    mountCounter();
+    tools.startRecording();
+
+    // A flush with an empty queue is not a flush. Recording it would put
+    // zero-length rows between the ones that measure something.
+    flushSync();
+    flushSync();
+    expect(tools.flushes()).toEqual([]);
+
+    counter.count.set(3);
+    flushSync();
+    expect(tools.flushes()).toHaveLength(1);
   });
 
   it('collects nothing until asked', () => {
@@ -740,6 +1041,12 @@ describe('production build', () => {
     'effectCreated',
     'effectDisposed',
     'explain',
+    // The two on the hot path, written as the call rather than the bare name:
+    // every `Signal.State.set` and every effect wake goes through these, so
+    // they are the ones the guard most has to remove. `wake`/`write` alone
+    // would match too much of an unrelated bundle to mean anything.
+    '.wake(',
+    '.write(',
   ];
 
   it('carries none of the instrumentation', async () => {
@@ -760,20 +1067,20 @@ describe('production build', () => {
    * rests on the consumer's define plus `sideEffects: false` in the manifest —
    * a path the assertion above does not travel.
    */
-  it('carries none of it out of the published package either', async () => {
-    const entry = resolve(root, 'packages/core/dist/index.js');
-    if (!existsSync(entry)) {
-      // `pnpm build` has not run; nothing to read rather than a failure.
-      expect(existsSync(entry)).toBe(false);
-      return;
-    }
+  // Skipped rather than passed when `pnpm build` has not run: a test that
+  // bundles nothing and reports green is worse than one that reports nothing,
+  // because only the second is visible in the run.
+  it.skipIf(!existsSync(resolve(root, 'packages/core/dist/index.js')))(
+    'carries none of it out of the published package either',
+    async () => {
+      const [production, development] = await Promise.all([
+        bundle(false, fromPackage),
+        bundle(true, fromPackage),
+      ]);
 
-    const [production, development] = await Promise.all([
-      bundle(false, fromPackage),
-      bundle(true, fromPackage),
-    ]);
-
-    expect(markers.filter((marker) => development.includes(marker))).toEqual(markers);
-    expect(markers.filter((marker) => production.includes(marker))).toEqual([]);
-  }, 30_000);
+      expect(markers.filter((marker) => development.includes(marker))).toEqual(markers);
+      expect(markers.filter((marker) => production.includes(marker))).toEqual([]);
+    },
+    30_000,
+  );
 });

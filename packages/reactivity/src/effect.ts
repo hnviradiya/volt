@@ -490,8 +490,9 @@ export function flushSync(): void {
  * Past those two the guard is blind by construction. A property write that
  * touches no node and moves no scroller — `input.value`, `el.focus()`,
  * `element.animate()` — is not reported, and neither is a write to a subtree
- * that is not in the document. That boundary is pinned by test rather than
- * left to be discovered by whoever widens it.
+ * that is not in the document. Everything on that list with an implementation
+ * to call is pinned by test, so widening the guard reddens one rather than
+ * being noticed by whoever is surprised by it later.
  */
 function drainMeasure(pending: ComputedSignal<unknown>[]): void {
   if (!__VOLT_DEV__) {

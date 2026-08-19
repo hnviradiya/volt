@@ -362,6 +362,90 @@ export function unusedMessages(
   return findings;
 }
 
+/** The categories `Intl.PluralRules` can select, and the only keys a form may have. */
+const PLURAL_CATEGORIES = ['zero', 'one', 'two', 'few', 'many', 'other'];
+
+export interface CatalogCheckOptions {
+  /** The catalogue file, so a refusal says which file to edit. */
+  catalogFile?: string;
+}
+
+/**
+ * Hold the catalogue itself to a shape a message can have.
+ *
+ * `MessageCatalog` is a TypeScript type and the catalogue is a JSON file, so
+ * nothing about the type survives the read: a catalogue is whatever somebody
+ * wrote. Every shape refused here would otherwise generate — a nested group
+ * becomes a plural switch over categories no locale selects, a form set
+ * without `other` loses its default arm, a number has no arm at all — and each
+ * emits a function returning `undefined` under a declaration that promises a
+ * string. A blank where a sentence goes, found in production, is precisely the
+ * failure this whole pass exists to prevent, so it is refused at the read
+ * rather than checked at the call sites, which would pass it too.
+ */
+export function checkCatalog(catalog: MessageCatalog, options: CatalogCheckOptions = {}): void {
+  const where = options.catalogFile ?? 'the catalogue';
+
+  for (const [key, message] of Object.entries(catalog)) {
+    if (!IDENTIFIER.test(key) || RESERVED.has(key)) {
+      throw new Error(
+        `[volt:messages] \`${key}\` cannot be a message key: a compiled message is an exported ` +
+          `function, and that is not a name one can have. Rename it in ${where} — ` +
+          `\`${suggestIdentifier(key)}\` would work.`,
+      );
+    }
+
+    if (typeof message === 'string') continue;
+
+    if (message === null || typeof message !== 'object' || Array.isArray(message)) {
+      throw new Error(
+        `[volt:messages] \`${key}\` in ${where} is ${describeValue(message)}. A message is a ` +
+          'string, or an object of plural forms.',
+      );
+    }
+
+    const written = Object.keys(message);
+    const strays = written.filter((form) => !PLURAL_CATEGORIES.includes(form));
+    if (strays.length > 0) {
+      const stray = strays[0]!;
+      throw new Error(
+        strays.length === written.length
+          ? `[volt:messages] \`${key}\` in ${where} is a group of messages, not a message. A ` +
+              'catalogue is one level deep, because a compiled message is an exported function ' +
+              `and there is no second way to spell a function name — write \`${key}.${stray}\` ` +
+              `as \`${suggestIdentifier(`${key}.${stray}`)}\`.`
+          : `[volt:messages] \`${key}.${stray}\` in ${where} is not a plural category. The ` +
+              `categories are ${PLURAL_CATEGORIES.join(', ')}.`,
+      );
+    }
+
+    for (const [form, text] of Object.entries(message)) {
+      if (typeof text !== 'string') {
+        throw new Error(
+          `[volt:messages] \`${key}.${form}\` in ${where} is ${describeValue(text)}. A plural ` +
+            'form is a string.',
+        );
+      }
+    }
+
+    if (typeof message.other !== 'string') {
+      throw new Error(
+        `[volt:messages] \`${key}\` in ${where} has no \`other\` form. It is the one category ` +
+          'every locale has, so it is what a count no other form covers falls back to — and ' +
+          'without it such a count has no string at all.',
+      );
+    }
+  }
+}
+
+/** What a value is, so a refusal says what was found and not only what was wanted. */
+function describeValue(value: unknown): string {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (Array.isArray(value)) return 'a list';
+  return `a ${typeof value}`;
+}
+
 /** The line a key is declared on, so the warning is clickable. */
 function keyLocation(key: string, source: string | undefined): { line: number; column: number } {
   if (!source) return { line: 1, column: 1 };
@@ -445,16 +529,12 @@ export function generateMessages(
     );
   }
 
-  const shapes = Object.entries(catalog).map(([key, message]) => {
-    if (!IDENTIFIER.test(key) || RESERVED.has(key)) {
-      throw new Error(
-        `[volt:messages] \`${key}\` cannot be a message key: a compiled message is an exported ` +
-          `function, and that is not a name one can have. Rename it in ` +
-          `${options.catalogFile ?? 'the catalogue'} — \`${suggestIdentifier(key)}\` would work.`,
-      );
-    }
-    return messageShape(key, message);
-  });
+  // Checked here as well as at the read, because a catalogue reaches this
+  // function from a test and a runtime compile too, and every shape it refuses
+  // would otherwise emit a function that returns `undefined`.
+  checkCatalog(catalog, { catalogFile: options.catalogFile });
+
+  const shapes = Object.entries(catalog).map(([key, message]) => messageShape(key, message));
 
   const from = options.catalogFile ?? 'the catalogue';
   const header = [

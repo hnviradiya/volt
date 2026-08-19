@@ -17,8 +17,9 @@
  *
  *  3. **The `Signal` namespace.** `export namespace` compiles to a runtime
  *     object, which no bundler can take apart, so `Signal.State` alone holds
- *     the watcher and the introspection surface in the bundle. Direct member
- *     accesses are rewritten to imports of the individual members; see
+ *     the introspection surface in the bundle. The watcher is not part of
+ *     that: the graph reaches it directly, so it ships either way. Direct
+ *     member accesses are rewritten to imports of the individual members; see
  *     `signals.ts`.
  */
 
@@ -29,6 +30,7 @@ import { transform as esbuildTransform } from 'esbuild';
 import MagicString from 'magic-string';
 import { compileStringAsync } from 'sass';
 import {
+  checkCatalog,
   compile,
   CompilerError,
   formatDiagnostic,
@@ -118,6 +120,17 @@ export interface VoltMessagesOptions {
    * of the application's and every message would look unused.
    */
   unused?: 'warn' | 'off';
+  /**
+   * Keys the unused report never names, whatever the call sites say.
+   *
+   * Naming a list replaces the default rather than adding to it, because the
+   * default is the strings `@voltdev/primitives` speaks for itself and an
+   * application that renders no Dialog is right to want `close` reported. It
+   * is also the answer for a message only a server-only module reaches: a
+   * client build never walks those, so it has nothing to account for the key
+   * with.
+   */
+  ignore?: readonly string[];
 }
 
 const DEFAULT_MESSAGES_ID = 'virtual:volt-messages';
@@ -296,13 +309,34 @@ export function volt(options: VoltPluginOptions = {}): Plugin[] {
           // left to the app, because forgetting it would mean either shipping
           // every diagnostic or crashing on an undefined identifier.
           __VOLT_DEV__: JSON.stringify(env.mode !== 'production'),
-          // Which side of the render this build is. Vite already knows —
-          // `vite build --ssr` sets it — and the answer decides behaviour, not
-          // just diagnostics: a client bundle drops the request scoping and
-          // the server's flushing, and a server bundle never queues `onMount`.
-          __VOLT_SERVER__: JSON.stringify(env.isSsrBuild === true),
+          // The browser's answer, and the one anything that never reaches an
+          // environment falls back to. Which side a module is really compiled
+          // for is decided per environment, below.
+          __VOLT_SERVER__: 'false',
         },
       };
+    },
+    /**
+     * Which side of the render this build is, answered per environment.
+     *
+     * It cannot be answered in `config`, for two reasons. A `define` returned
+     * from there is one value for every environment, and a build has two — so
+     * a wider predicate would compile the *client* modules of an SSR build as
+     * a server build, dropping `onMount` from the page. And `isSsrBuild` is
+     * set by Vite for a build only: on a dev server it is undefined, so the
+     * modules a `vite dev` runs through its SSR environment would be told
+     * they were in a browser — which is the mode an SSR application is
+     * developed in, and where every gate would be inert.
+     *
+     * The answer decides behaviour, not just diagnostics: a client bundle
+     * drops the request scoping and the server's flushing, and a server
+     * bundle never queues `onMount`.
+     */
+    configEnvironment(name, config) {
+      // Vite's own default for an environment that does not say: everything
+      // that is not the client consumes on a server.
+      const consumer = config.consumer ?? (name === 'client' ? 'client' : 'server');
+      return { define: { __VOLT_SERVER__: JSON.stringify(consumer === 'server') } };
     },
   };
 
@@ -381,6 +415,7 @@ export function volt(options: VoltPluginOptions = {}): Plugin[] {
       for (const finding of unusedMessages(loaded.catalog, used, {
         filename: loaded.file,
         source: loaded.source,
+        ignore: messages.ignore,
       })) {
         this.warn(formatDiagnostic(finding));
       }
@@ -412,6 +447,11 @@ async function readCatalog(file: string, locale: string | undefined): Promise<Lo
   } catch (err) {
     throw new Error(`[volt] messages catalogue "${file}" is not valid JSON:\n${(err as Error).message}`);
   }
+  // Before anything reads it: a shape the generator cannot compile is a
+  // message that renders as nothing, and refusing it at the read means the
+  // build stops on the catalogue rather than on the page that used it.
+  checkCatalog(catalog, { catalogFile: file });
+
   return { file, source, catalog, locale: locale ?? localeFromPath(file) };
 }
 
@@ -534,7 +574,7 @@ async function compileTemplates(
       catalogFile,
     });
 
-    for (const site of result.messageSites) use(site.key);
+    for (const key of result.messageKeys) use(key);
 
     // The half of the accessibility pass that does not refuse the build. It
     // reaches a person here or nowhere: nothing else in a real build reads it,

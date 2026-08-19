@@ -431,6 +431,14 @@ export function createResource<T, S = undefined>(
 
     const id = generation;
     lastStart = Date.now();
+    /**
+     * Whether a server render is waiting on this.
+     *
+     * Read here rather than where it is used, because this is the last line
+     * that still runs inside the request's own flush: nothing observes a
+     * request across an `await`, by design.
+     */
+    const awaited = currentRequest() !== null;
 
     /** True only while this call is still the one whose answer anyone wants. */
     const current = (): boolean => id === generation && !disposed;
@@ -479,9 +487,16 @@ export function createResource<T, S = undefined>(
         if (!current()) return undefined;
 
         if (tries < retries && (options.shouldRetry?.(error, tries + 1) ?? true)) {
-          // The backoff is cancellable, so a source change during it starts the
-          // new request instead of queueing behind a wait for the old one.
-          if (!(await wait(retryDelay(tries + 1, error)))) return undefined;
+          // The schedule is the client's, exactly as the debounce below is: a
+          // server render is already waiting on this inside `settleRequest`,
+          // and seconds tuned to let a flaky phone connection recover are
+          // seconds a response spends holding its socket open. The retry still
+          // happens — it is only the wait between attempts that has no one to
+          // benefit.
+          const backoff = awaited ? 0 : retryDelay(tries + 1, error);
+          // Cancellable, so a source change during it starts the new request
+          // instead of queueing behind a wait for the old one.
+          if (!(await wait(backoff))) return undefined;
           if (!current()) return undefined;
           continue;
         }

@@ -96,11 +96,34 @@ export function clearRequestState(key: symbol): void {
  * Register data work the request has to wait for before it can be written out.
  *
  * Compiled out of a client build, where a resource's request is nobody's to
- * wait for: the page renders without it and updates when it lands.
+ * wait for: the page renders without it and updates when it lands. The guard
+ * is more than the minifier's hint, because `runInRequest` is exported to both
+ * sides: a scope entered on the client would collect promises that no
+ * `settleRequest` — compiled out there — is ever going to drain.
  */
 export function trackRequestData(work: Promise<unknown>): void {
   if (!__VOLT_SERVER__) return;
   current?.pending.push(work);
+}
+
+/**
+ * How many times a request may go back for more data.
+ *
+ * Far below `flushSync`'s hundred passes, because a round here is a network
+ * wait rather than a synchronous drain: a resource whose source is another
+ * resource's data nests a handful deep in the worst honest design, and a page
+ * that needs a twenty-first round is describing a cycle rather than a depth.
+ */
+const MAX_SETTLE_ROUNDS = 20;
+
+function settleRoundsError(): Error {
+  return new Error(
+    __VOLT_DEV__
+      ? '[volt] a request was still asking for data after ' +
+        MAX_SETTLE_ROUNDS +
+        ' rounds — something asks for another fetch every time the last one lands.'
+      : '[volt] request did not settle',
+  );
 }
 
 /**
@@ -111,6 +134,12 @@ export function trackRequestData(work: Promise<unknown>): void {
  * for; awaiting those may produce a tree that asks for more — a resource whose
  * source is another resource's data — so quiescence is only reached when a
  * flush adds nothing to the queue.
+ *
+ * And it is bounded, for the same reason `flushSync` is: a tree that asks for
+ * one more fetch every time the last answer lands never reaches quiescence,
+ * and without a bound that is a request that hangs until something upstream
+ * times it out — the one failure a server must not have, because nothing in
+ * the process is left to say what went wrong.
  *
  * The whole body is a server build's. In a client build `__VOLT_SERVER__` is
  * `false`, the minifier removes everything below the guard, and a call here
@@ -131,7 +160,7 @@ export async function settleRequest(scope: RequestScope, build: () => void): Pro
 
   runInRequest(scope, build);
 
-  for (;;) {
+  for (let round = 0; ; round++) {
     runInRequest(scope, flushSync);
     const pending = scope.pending;
     if (pending.length === 0) return;
@@ -140,5 +169,9 @@ export async function settleRequest(scope: RequestScope, build: () => void): Pro
     // business — it has already written its own error state — and must not
     // take down the render that started it.
     await Promise.allSettled(pending);
+    // Counted after the wait rather than before it, so the promises this round
+    // started are observed either way and a rejection among them is nobody's
+    // unhandled one.
+    if (round >= MAX_SETTLE_ROUNDS) throw settleRoundsError();
   }
 }

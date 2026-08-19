@@ -244,10 +244,12 @@ describe('the read-only contract', () => {
 
     const dispose = createRoot((d) => {
       measureEffect(() => {
-        // A property that changes no node, and a node the observer is not
-        // watching. Neither is caught, and this test is what makes that a
-        // stated boundary rather than a surprise found later.
+        // A property that changes no node, a method that moves focus rather
+        // than a scroller, and a node the observer is not watching. None is
+        // caught, and this test is what makes that a stated boundary rather
+        // than a surprise found later.
         input.value = 'typed';
+        input.focus();
         detached.setAttribute('data-x', '1');
       });
       return d;
@@ -255,8 +257,15 @@ describe('the read-only contract', () => {
     flushSync();
 
     expect(spy).not.toHaveBeenCalled();
+    // The writes themselves, so that a measure that never ran cannot pass this
+    // by writing nothing — which is the shape every assertion for an absence
+    // is one refactor away from becoming.
+    expect(input.value).toBe('typed');
+    expect(document.activeElement).toBe(input);
+    expect(detached.getAttribute('data-x')).toBe('1');
     spy.mockRestore();
     dispose();
+    input.blur();
     input.remove();
   });
 
@@ -383,11 +392,15 @@ describe('effects created during a measure', () => {
     const order: string[] = [];
 
     const dispose = createRoot((d) => {
+      // Declared first, and created first: a measure the render pass has not
+      // made yet is behind it in every queue there is. Only the lane puts the
+      // measurement in front, so writing these the other way round would let
+      // this pass with no lane at all.
+      effect(() => void order.push('user'));
       renderEffect(() => {
         order.push('render');
         measureEffect(() => void order.push('measure:from-render'));
       });
-      effect(() => void order.push('user'));
       return d;
     });
 

@@ -42,6 +42,7 @@ export default defineConfig({
           { text: 'Template syntax', link: '/reference/template-syntax' },
           { text: 'Reactivity API', link: '/reference/reactivity' },
           { text: 'Component API', link: '/reference/component' },
+          { text: 'Server rendering', link: '/reference/server' },
           { text: 'Vite plugin', link: '/reference/vite-plugin' },
           { text: 'Developer tools', link: '/reference/devtools' },
         ],

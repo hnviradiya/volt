@@ -2,7 +2,7 @@
  * The instrumentation a developer-tools panel reads, and nothing more.
  *
  * There is no UI here and no extension: this is the model side of one, exposed
- * so that a panel, a test, or a production error reporter can all ask the same
+ * so that a panel, a test, or an error reporter can all ask the same
  * questions. Four of them, which are the four the roadmap asks for:
  *
  *   - `componentTree()` — instances, their props and their scopes
@@ -32,6 +32,14 @@
  * effect construction and this must not be the reason a dev build feels slow.
  * What is always on is what an effect that throws needs to name the write
  * behind it, which is not something anyone can be asked to turn on first.
+ *
+ * Always means always in a development build, and nowhere else. The roadmap
+ * asks for one shape that serves the panel and a production crash report
+ * alike; `__VOLT_DEV__` makes those two exclusive, because the guard keeping a
+ * null check off every signal write in production is the same guard that
+ * removes the call telling this module the write happened. The panel was
+ * chosen. A production build reports what it reported before — the error and
+ * its stack, with `explain` never asked and no causality to add.
  */
 
 import type { Scope } from '@voltdev/reactivity';
@@ -611,7 +619,7 @@ function materialise(): Write {
   pending = {
     seq: ++writeSeq,
     signal,
-      previous: pendingPrevious,
+    previous: pendingPrevious,
     value: pendingValue,
     time: now(),
     stack: captureStacks ? trimStack() : undefined,
@@ -817,6 +825,9 @@ const api: Devtools = {
 
   effectStats: () =>
     [...effects.values()]
+      // An effect declared during the session but not yet run has nothing to
+      // report but zeroes, and a panel sorting by cost would rank it above
+      // whatever is actually slow.
       .filter((record) => record.runs > 0)
       .map((record) => ({
         id: idOf(record.node),

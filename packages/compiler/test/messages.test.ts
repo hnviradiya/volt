@@ -32,6 +32,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   CompilerError,
   LIBRARY_MESSAGE_KEYS,
+  checkCatalog,
   compile,
   formatDiagnostic,
   generateMessages,
@@ -212,6 +213,15 @@ describe('a message key the catalogue does not have', () => {
   it('stays quiet about a key it cannot read', () => {
     expect(() => build(`<p>{ t(whichever) }</p>`)).not.toThrow();
   });
+
+  it('reads any `t` with a literal argument as a call site, which reserves the name', () => {
+    // The compiler cannot tell the locale's `t` from a component method of the
+    // same name, so with a catalogue configured `t` is spelled for one thing.
+    // Written down here and in the reference, because it is a refusal rather
+    // than a warning and there is no way to opt one call out of it.
+    expect(() => build(`<p>{ t('mm-dd') }</p>`)).toThrow(/no such message/);
+    expect(() => build(`<p>{ dates.t('mm-dd') }</p>`)).toThrow(/no such message/);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -333,6 +343,73 @@ describe('keys mentioned by ordinary source', () => {
 });
 
 // ---------------------------------------------------------------------------
+// A catalogue that cannot compile
+// ---------------------------------------------------------------------------
+
+describe('a catalogue shape no message can have', () => {
+  // The catalogue is JSON, so `MessageCatalog` describes nothing that survives
+  // the read. Each shape below used to generate: a function returning
+  // `undefined`, declared as returning `string` — a blank where a sentence
+  // goes, found in production, which is the failure this pass exists to stop.
+  const refuse = (catalog: unknown) =>
+    checkCatalog(catalog as MessageCatalog, { catalogFile: 'messages/en.json' });
+
+  it('refuses a nested group, and says what to call it instead', () => {
+    expect(() => refuse({ nav: { home: 'Home', away: 'Away' } })).toThrow(
+      /`nav` in messages\/en\.json is a group of messages/,
+    );
+    expect(() => refuse({ nav: { home: 'Home', away: 'Away' } })).toThrow(
+      /write `nav\.home` as `navHome`/,
+    );
+  });
+
+  it('refuses it from the generator too, rather than emitting `undefined`', () => {
+    // The two entry points are separate: a catalogue reaches the generator
+    // from a test and from a runtime compile without passing the plugin's
+    // read, and the generated switch would take `home` and `away` for plural
+    // categories no locale ever selects.
+    expect(() => generateMessages({ nav: { home: 'Home' } } as never, { locale: 'en' })).toThrow(
+      /group of messages/,
+    );
+  });
+
+  it('refuses a plural with no `other`, which is the arm every count falls to', () => {
+    expect(() => refuse({ files: { one: '{n} file' } })).toThrow(
+      /`files` in messages\/en\.json has no `other` form/,
+    );
+    expect(() => refuse({ files: { one: '{n} file', other: '{n} files' } })).not.toThrow();
+  });
+
+  it('refuses a category no locale has beside ones it does', () => {
+    expect(() => refuse({ files: { other: '{n} files', lots: 'many' } })).toThrow(
+      /`files\.lots` in messages\/en\.json is not a plural category/,
+    );
+  });
+
+  it('refuses a value that is not a string or a set of forms', () => {
+    expect(() => refuse({ count: 42 })).toThrow(/`count` in messages\/en\.json is a number/);
+    expect(() => refuse({ thing: null })).toThrow(/`thing` in messages\/en\.json is null/);
+    expect(() => refuse({ list: ['a', 'b'] })).toThrow(/`list` in messages\/en\.json is a list/);
+  });
+
+  it('refuses a form that is not a string', () => {
+    expect(() => refuse({ files: { one: 1, other: '{n} files' } })).toThrow(
+      /`files\.one` in messages\/en\.json is a number/,
+    );
+  });
+
+  it('refuses a key that cannot be a function name, wherever the catalogue is read', () => {
+    expect(() => refuse({ 'user.name': 'Name' })).toThrow(/userName/);
+    expect(() => refuse({ default: 'Default' })).toThrow(/cannot be a message key/);
+  });
+
+  it('accepts the shapes a catalogue is allowed to have', () => {
+    expect(() => refuse(CATALOG)).not.toThrow();
+    expect(() => refuse({ files: { zero: 'none', one: 'one', other: 'many' } })).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // The generated module
 // ---------------------------------------------------------------------------
 
@@ -367,6 +444,17 @@ describe('the module a catalogue compiles to', () => {
     expect(() => generateMessages({ default: 'Default' }, { locale: 'en' })).toThrow(
       /cannot be a message key/,
     );
+  });
+
+  it('refuses a locale tag it cannot bake into an `Intl` instance', () => {
+    // The tag is a constant in the generated module rather than an argument,
+    // so a bad one is not a mislabelled catalogue: it is a `RangeError` on the
+    // first page that formats a number, in whichever component gets there
+    // first. `messages.locale` is set by hand, and this is its only check.
+    expect(() => generateMessages({ close: 'Close' }, { locale: 'en_US' })).toThrow(
+      /`en_US` is not a language tag/,
+    );
+    expect(() => generateMessages({ close: 'Close' }, { locale: 'en-GB' })).not.toThrow();
   });
 });
 

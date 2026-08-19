@@ -87,8 +87,10 @@ something a development build should pay for unasked.
 
 ```ts
 tools.startRecording(); // optionally { limit, stacks }
+tools.recording; // true — what a panel reopened on a recording page reads
 // … interact with the application …
 tools.updates();
+tools.stopRecording();
 ```
 
 Each `UpdateRecord` is one run of one effect:
@@ -114,9 +116,9 @@ thing here that costs on the write path rather than on the read.
 
 ### The same answer, in an error
 
-Attribution is collected whether or not a session is running, because it is
-also what makes a crash report actionable. When an effect throws, the message
-names the write that woke it:
+Attribution is collected whether or not a session is recording, so an effect
+that throws names the write that woke it without anyone having pressed record
+first:
 
 ```
 [volt] Uncaught error in effect — woken by Cart.items (Array(2) → Array(3)): TypeError…
@@ -135,11 +137,27 @@ This is deliberately one mechanism rather than two. Fine-grained reactivity
 has no re-render to fall back on, so "which write woke this effect" is both
 the question a panel exists to answer and the context an error report needs.
 
+Both are development-build facilities, and only that. `__VOLT_DEV__` removes
+the calls that tell the tools a write happened, so a production build reports
+an error with its stack and nothing else: no `woken by` clause, and nothing
+for `subscribe` to be handed. The two cannot both be had while one flag
+controls both — the guard that keeps a null check off every signal write in
+production is the same guard that removes the attribution — and the panel is
+the side that was chosen. A crash report that needs the causality has to come
+from a development build.
+
 ## Performance
 
+Both of these belong to a session: they return `[]` until `startRecording()`
+and stop growing at `stopRecording()`. A record and a timing per effect run is
+not something a development build should pay for unasked, which is the same
+reason `updates()` is a session too.
+
 ```ts
-tools.effectStats(); // per live effect, most-run first
-tools.flushes(); // the last 60 flushes
+tools.startRecording();
+// … interact with the application …
+tools.effectStats(); // per live effect that has run, most-run first
+tools.flushes(); // the last 60 flushes; a flush with nothing to do is not one
 ```
 
 | `EffectStat` | Description |

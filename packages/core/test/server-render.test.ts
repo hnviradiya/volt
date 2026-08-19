@@ -98,6 +98,14 @@ describe('styles', () => {
   })
   class Styled {}
 
+  @Component({
+    selector: 'v-blank',
+    // What an emptied `styleUrl` file leaves behind: not absent, just nothing.
+    styles: '\n  \n',
+    render: compileTemplate(`<p>body</p>`),
+  })
+  class Blank {}
+
   it('reach every request, not only the first', async () => {
     const first = await renderRequest(Styled);
     const second = await renderRequest(Styled);
@@ -121,6 +129,17 @@ describe('styles', () => {
     const injected = document.head.querySelectorAll('style[data-volt="v-styled"]');
     expect(injected).toHaveLength(1);
     expect(injected[0]!.textContent).toBe('.styled { color: red }');
+  });
+
+  it('are nothing at all when the component declares only whitespace', async () => {
+    const { styles } = await renderRequest(Blank);
+    // A request that collected this would hand the emitter `v-blank{}` to
+    // print into every page.
+    expect(styles).toEqual([]);
+
+    serverBuild(false);
+    mount(Blank, document.createElement('div'));
+    expect(document.head.querySelectorAll('style[data-volt="v-blank"]')).toHaveLength(0);
   });
 });
 

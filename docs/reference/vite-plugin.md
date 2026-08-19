@@ -57,8 +57,8 @@ reads is registered with the watcher, so editing markup or CSS hot-reloads.
 spelling the TC39 proposal defines, and `export namespace` compiles to a
 runtime object. An object is opaque to a bundler — reaching one property keeps
 all of them — so an app that only ever writes `new Signal.State(0)` still
-ships `Signal.subtle.Watcher`, `untrack` and the six introspection functions,
-with no line of the app able to reach any of them.
+ships `currentComputed`, `introspectSources`, `introspectSinks`, `hasSinks`
+and `hasSources`, with no line of the app able to reach any of them.
 
 ```ts
 // what you write
@@ -70,10 +70,20 @@ import { State as __volt_Signal_State } from '@voltdev/core/signals';
 const count = new __volt_Signal_State(0);
 ```
 
-Measured on a Vite production build: an app using only `Signal.State` goes
-from 1,898 to 1,665 bytes gzipped (−233 B, −12.3%), and the counter example
-from 5,321 to 5,125 (−196 B, −3.7%). The lowered output is byte-for-byte
-identical to writing that import by hand.
+What the rewrite is worth is decided by module layout rather than by the
+rewrite, so the namespace has a module to itself and dropping it drops a
+chunk. Measured on a Vite 8 production build of `examples/counter`: 24,466 to
+23,944 bytes, 9,035 to 8,854 gzipped (−181 B, −2.0%). A module that
+constructs a signal and runs no effect is a much smaller bundle and loses a
+much larger share of it — 1,932 to 1,691 gzipped (−241 B, −12.5%).
+`packages/vite-plugin/test/bundle.test.ts` builds an app both ways and holds
+the saving. The lowered output is byte-for-byte identical to writing that
+import by hand.
+
+The watcher is not part of what leaves, and neither is `untrack` for an app
+that uses `effect`: the graph asks `sink instanceof WatcherNode` on every
+notification and `effect` imports both straight from it, so no lowering of the
+namespace can reach what the runtime already holds.
 
 Nothing about authoring changes here either. `@voltdev/core/signals` holds the
 same bindings the namespace does — not copies — so `instanceof` and every
@@ -95,6 +105,12 @@ new Signal[name](0);       // computed key
 That costs bytes and nothing else. `debug: true` names the file and the reason
 whenever it happens.
 
+The pass also only ever sees your own source — `.ts`/`.mts` outside
+`node_modules`. Volt's own packages ship pre-built, and every one that reaches
+through the namespace hands the object back, so an app importing
+`@voltdev/primitives`, `@voltdev/query` or `@voltdev/router` keeps it whatever
+its own source says.
+
 ## Options
 
 ```ts
@@ -111,6 +127,7 @@ interface VoltPluginOptions {
     id?: string;                 // default: 'virtual:volt-messages'
     typesFile?: string;          // default: none
     unused?: 'warn' | 'off';     // default: 'warn'
+    ignore?: readonly string[];  // default: the library's own keys
   };
 }
 ```
@@ -178,6 +195,18 @@ speaks for itself (`close`, `noResults`, `pageOf` and the rest of
 `DEFAULT_MESSAGES`) are never reported, because an application translating them
 is translating what a Dialog says, not what its own templates ask for.
 
+`ignore` lets a project name that list itself. It replaces the default rather
+than adding to it: an application that renders no Dialog is right to want
+`close` reported, so naming a list means naming every key to spare.
+
+That is also the answer to the one case the report gets wrong. A build with a
+client environment and a server one runs the whole cycle once per environment,
+and each reports against the modules it walked: a message only a server-only
+module asks for is unaccounted for in the client's graph, so the client half
+reports it. The report cannot see the other half of the build to know better.
+Name those keys in `ignore`, or set `unused: 'off'` and let the server build
+alone do the reporting.
+
 `typesFile` writes the declarations somewhere your tsconfig includes:
 
 ```ts
@@ -196,7 +225,23 @@ so does `t('pageOf', { n: 1 })`.
 
 A key has to be a plain identifier, because a compiled message is an exported
 function and there is no second way to spell a function name. A nested or
-dotted catalogue is refused with a suggestion rather than silently renamed.
+dotted catalogue is refused with a suggestion rather than silently renamed —
+`{ "nav": { "home": "Home" } }` says to write `navHome`. The same refusal
+covers every other shape a `.json` file can hold and a message cannot: a plural
+with no `other` form, a form that is not a string, a number, a list, `null`.
+Each of them would otherwise compile to a function returning `undefined` under
+a declaration promising a `string`, which is the blank-where-a-sentence-goes
+this whole pass exists to prevent. The catalogue is checked when it is read, so
+the build stops on the catalogue rather than on a page that used it.
+
+One name is reserved while `messages` is configured: **`t`**. In a template,
+every `t(...)` and every `<anything>.t(...)` with a literal first argument is
+read as a translation call site — so a component method called `t` that is not
+the locale's turns its first argument into a message key, and into a build
+error when the catalogue has no such message. In ordinary source the same shape
+is noted rather than checked, so there it costs nothing beyond a message that
+stops being reported as unused. Call the method something else, or leave
+`messages` off.
 
 None of this replaces `createLocaleProvider`. Its runtime `MessageCatalog` is
 still there, still the fallback, and still the whole story for a project with

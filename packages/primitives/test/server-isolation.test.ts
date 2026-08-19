@@ -251,6 +251,41 @@ class Typeahead {
   );
 }
 
+@Component({
+  selector: 'v-flaky',
+  render: compileTemplate(`<p>{ answer.data() ?? 'waiting' }</p>`),
+})
+class Flaky {
+  answer = createResource(
+    async ({ attempt }) => {
+      asked.push(`attempt ${attempt}`);
+      if (attempt === 0) throw new Error('the gateway hiccuped');
+      return 'answered on the second try';
+    },
+    // A schedule written for a phone on a bad connection, where waiting is
+    // cheaper than asking again immediately.
+    { retry: 1, retryDelay: () => 30_000 },
+  );
+}
+
+@Component({
+  selector: 'v-profile',
+  render: compileTemplate(`<p>{ profile.data() ?? 'waiting' }</p>`),
+})
+class Profile {
+  user = createResource(async () => {
+    asked.push('user');
+    return 'ada';
+  });
+  profile = createResource(
+    async ({ source }) => {
+      asked.push(`profile of ${source}`);
+      return `${source}'s profile`;
+    },
+    { source: () => this.user.data(), enabled: () => this.user.data() !== undefined },
+  );
+}
+
 describe('a resource declared as a class field', () => {
   beforeEach(() => {
     asked = [];
@@ -273,6 +308,26 @@ describe('a resource declared as a class field', () => {
 
     expect(asked).toEqual(['typed']);
     expect(html).toContain('<p>answered typed</p>');
+  });
+
+  it('does not make a server wait out a retry backoff meant for a bad connection', async () => {
+    // Same argument as the debounce above, and the same failure if it is not
+    // followed through: the wait happens inside `settleRequest`, so it is not
+    // a page shipped without its data but a response holding its socket open
+    // for half a minute.
+    const html = await renderRequest(Flaky);
+
+    expect(asked).toEqual(['attempt 0', 'attempt 1']);
+    expect(html).toContain('<p>answered on the second try</p>');
+  });
+
+  it("waits for a resource whose source is another resource's data", async () => {
+    // Two rounds of the settle loop, which is the whole reason it is a loop:
+    // the second fetch does not exist until the first has answered.
+    const html = await renderRequest(Profile);
+
+    expect(asked).toEqual(['user', 'profile of ada']);
+    expect(html).toContain("<p>ada's profile</p>");
   });
 
   it('fetches nothing in a client-only build, where the render is compiled out', async () => {

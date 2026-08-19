@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { volt, type VoltPluginOptions } from '../src/index.js';
-import { build as viteBuild, type Plugin } from 'vite';
+import { build as viteBuild, createLogger, type Plugin } from 'vite';
 import type { RollupOutput } from 'rollup';
 
 const FIXTURES = resolve(import.meta.dirname, 'fixtures');
@@ -80,6 +80,16 @@ describe('a message key the catalogue does not have', () => {
     await expect(
       call<Promise<unknown>>(templates, 'transform', component('mistyped.html'), FIXTURE_ID),
     ).rejects.toThrow(/mistyped\.html:3:/);
+  });
+
+  it('names the catalogue the project pointed it at', async () => {
+    // The compiler's own default is the words "the catalogue", which tells
+    // nobody which file to open. The path is the plugin's to supply, and
+    // there is only one line of wiring that does it.
+    const { templates } = build();
+    await expect(
+      call<Promise<unknown>>(templates, 'transform', component('mistyped.html'), FIXTURE_ID),
+    ).rejects.toThrow(/no such message in .*[\\/]fixtures[\\/]en\.json/);
   });
 
   it('says what the key should have been', async () => {
@@ -234,7 +244,52 @@ describe('a second build from the same plugin object', () => {
   });
 });
 
+describe('a build with a client environment and a server one', () => {
+  // Vite brings one plugin object up once per environment, and `used` is
+  // cleared at each `buildStart`, so each environment reports against its own
+  // module graph. That is what a `build --watch` rebuild needs; here it means
+  // a message only a server-only module reaches is unaccounted for in the
+  // client's graph, and the client's `buildEnd` says so. The report has no way
+  // to know the other half of the build exists, so this is a fact to plan
+  // around rather than a bug to catch — which is why it is written down.
+  const SERVER_ONLY = `export const gone = t('abandoned');`;
+  const CLIENT_ONLY = `export const total = t('checkoutTotal', { amount });`;
+
+  it('reports a server-only message from the client half, and the reverse', async () => {
+    const { messages } = build();
+    await start(messages);
+    call(messages, 'transform', CLIENT_ONLY, FIXTURE_ID);
+    await call<Promise<void>>(messages, 'buildEnd');
+    expect(warned).toEqual([expect.stringContaining('Message `abandoned`')]);
+
+    warned = [];
+    await call<Promise<void>>(messages, 'buildStart');
+    call(messages, 'transform', SERVER_ONLY, FIXTURE_ID);
+    await call<Promise<void>>(messages, 'buildEnd');
+    expect(warned).toEqual([expect.stringContaining('Message `checkoutTotal`')]);
+  });
+
+  it('spares the keys a project names, and only those', async () => {
+    // `ignore` is the answer for the message above, and the reason it replaces
+    // the default rather than adding to it: an application that renders no
+    // Dialog is right to want `close` reported, which is what this run proves
+    // by reporting it.
+    const { messages } = build({ ignore: ['abandoned'] });
+    await start(messages);
+    call(messages, 'transform', CLIENT_ONLY, FIXTURE_ID);
+    await call<Promise<void>>(messages, 'buildEnd');
+
+    expect(warned).toEqual([
+      expect.stringContaining('Message `close`'),
+      expect.stringContaining('Message `pageOf`'),
+    ]);
+  });
+});
+
 describe('the catalogue as a module', () => {
+  const temporaryDirs: string[] = [];
+  afterAll(() => Promise.all(temporaryDirs.map((d) => rm(d, { recursive: true, force: true }))));
+
   it('answers to the virtual id', async () => {
     const { messages } = build();
     await start(messages);
@@ -268,6 +323,26 @@ describe('the catalogue as a module', () => {
     await expect(start(messages)).rejects.toThrow(/set `messages\.locale`/);
   });
 
+  it('refuses a shape no message can have, before a template is compiled', async () => {
+    // A nested catalogue used to generate: `home` and `away` taken for plural
+    // categories, a switch no locale ever selects an arm of, and a `nav()`
+    // returning `undefined` under a declaration promising a string. The read
+    // is where it has to stop, because the call-site check passes it too —
+    // `nav` is in the catalogue, so `t('nav')` looks fine.
+    const dir = await mkdtemp(join(tmpdir(), 'volt-messages-'));
+    temporaryDirs.push(dir);
+    const file = join(dir, 'en.json');
+    await writeFile(file, JSON.stringify({ nav: { home: 'Home', away: 'Away' } }), 'utf8');
+
+    const { messages, templates } = build({ catalog: file });
+    await expect(start(messages)).rejects.toThrow(/write `nav\.home` as `navHome`/);
+    // And through the template transform, which reads the catalogue itself
+    // when `buildStart` never ran — a `vite dev` request for a module.
+    await expect(
+      call<Promise<unknown>>(templates, 'transform', component('toolbar.html'), FIXTURE_ID),
+    ).rejects.toThrow(/group of messages/);
+  });
+
   it('takes the locale it is told, whatever the file is called', async () => {
     const { messages } = build({ locale: 'de-DE' });
     await start(messages);
@@ -298,6 +373,44 @@ describe('the declarations a project type-checks against', () => {
     const { messages } = build();
     await start(messages);
     await expect(readFile(TYPES, 'utf8')).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// What a real build prints
+// ---------------------------------------------------------------------------
+
+describe('the unused report from a build nobody stubbed', { timeout: 120_000 }, () => {
+  it('reaches the console, and names only the message nothing asks for', async () => {
+    // Every other test in this file drives `buildEnd` against a hand-rolled
+    // context, so "it warns" is true by construction there: nothing proves
+    // Rollup carries a plugin warning out to the logger a person is reading,
+    // which is exactly the step the accessibility pass once lost. This one
+    // runs the whole build and reads the logger.
+    const printed: string[] = [];
+    const logger = createLogger('silent', { allowClearScreen: false });
+    logger.warn = (message) => void printed.push(message);
+    logger.warnOnce = (message) => void printed.push(message);
+
+    await viteBuild({
+      root: resolve(import.meta.dirname, '..'),
+      configFile: false,
+      logLevel: 'silent',
+      customLogger: logger,
+      plugins: [volt({ messages: { catalog: CATALOG } })],
+      build: {
+        write: false,
+        target: 'esnext',
+        minify: false,
+        lib: { entry: join(FIXTURES, 'used-message.ts'), formats: ['es'], fileName: 'app' },
+      },
+    });
+
+    // `close` and `pageOf` are the library's own; `checkoutTotal` is asked for
+    // by the entry, which is the control that keeps this from passing against
+    // a report that names everything.
+    expect(printed).toEqual([expect.stringContaining('Message `abandoned`')]);
+    expect(printed[0]).toContain('en.json:5:');
   });
 });
 

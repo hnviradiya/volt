@@ -149,18 +149,19 @@ flushSync();        // synchronous
 await tick();       // or await the microtask
 ```
 
-### Effects run in three phases
+### Effects run in four phases
 
-Volt schedules in three phases, in this order:
+Volt schedules in four phases, in this order:
 
 | Phase | Function | For |
 |---|---|---|
 | Render | `renderEffect` | Patching the DOM. Compiled templates use this |
+| Data | `dataEffect` | Asking for data. `createResource` starts its fetch here |
 | Measure | `measureEffect` | Reading geometry, on a settled DOM |
 | User | `effect` | Your own work. What you almost always want |
 
 `effect` runs after the DOM has settled, so it always observes a consistent
-tree. The middle phase exists because reading geometry is expensive in a way
+tree. The measure phase exists because reading geometry is expensive in a way
 that is invisible at one component and brutal at twenty: `getBoundingClientRect`
 forces the browser to lay out everything written since the last frame, so a
 popover, a scroll sync and an autosizing textarea each measuring from their own
@@ -185,6 +186,25 @@ and `strayReads`, geometry read from a render or user effect. The second is
 the one that catches the mistake: a read from the wrong phase never reaches
 the measure lane, so it leaves `forcedLayouts` at zero and shows up only
 there.
+
+The data phase is one you normally reach through `createResource` rather than
+by name. It is deferred like a user effect — so a resource declared as a class
+field sees the props assigned after construction — and drained like a render
+effect, ahead of measure and user work:
+
+```ts
+dataEffect(() => {
+  // Runs on a server as well as in a browser. Nothing below this phase does:
+  // there is no layout to read and no live document to touch.
+  void search(query.get());
+});
+```
+
+That ordering is what lets the same component fetch on a server, and it is
+also what keeps the measure phase cheap. A data effect that writes a signal —
+a status turning `loading` — sends the flush back to the render phase; drained
+after measure, that write would dirty the layout measure had just paid for and
+the same flush would force a second one.
 
 ## Ownership and disposal
 

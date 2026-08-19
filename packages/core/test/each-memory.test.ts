@@ -40,10 +40,22 @@ function exposeGc(): () => void {
 
 const gc = exposeGc();
 
-/** Heap in use once collection has stopped finding anything to take. */
+/**
+ * Heap in use once collection has stopped finding anything to take.
+ *
+ * The floor across the rounds rather than the reading after the last one: a
+ * round can leave more behind than the one before it, and every claim below is
+ * a difference between two of these, so a noisy reading is a noisy answer. A
+ * floor can only be reached by collection actually happening, so nothing a
+ * later assertion asks for is made easier by taking one.
+ */
 function settled(): number {
-  for (let round = 0; round < 5; round++) gc();
-  return process.memoryUsage().heapUsed;
+  let floor = Infinity;
+  for (let round = 0; round < 8; round++) {
+    gc();
+    floor = Math.min(floor, process.memoryUsage().heapUsed);
+  }
+  return floor;
 }
 
 const labels = (n: number, prefix = 'r'): string[] =>
@@ -106,10 +118,14 @@ describe('a list that spikes and settles', () => {
     expect(list.nodes()).toHaveLength(3);
 
     // A `WeakRef`'s target survives the job that touched it, so the collection
-    // that would take these has to happen in a later one.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    gc();
-    gc();
+    // that would take these has to happen in a later one — and V8 promises
+    // nothing about which later one, so this asks again rather than deciding
+    // on the strength of a single round. What is retained is retained however
+    // many times it is asked; only the timing is being waited out.
+    for (let round = 0; round < 20 && dropped.some((ref) => ref.deref()); round++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      gc();
+    }
 
     expect(dropped.map((ref) => ref.deref())).toEqual([undefined, undefined, undefined]);
   });

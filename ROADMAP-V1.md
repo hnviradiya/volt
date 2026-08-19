@@ -338,19 +338,66 @@ resolves every dynamic node by a `firstChild`/`nextSibling` path computed at
 build time, because there is no virtual DOM to diff against. Hydration is the
 same walk against server-rendered markup instead of a cloned template: the
 paths are identical, only the source of the nodes differs. There is no tree to
-reconcile and no chance of a "hydration mismatch" in the React sense, because
-nothing is being compared — bindings simply attach to the nodes that are
-already there.
+reconcile, so a *value* mismatch in the React sense cannot happen: bindings
+write rather than compare. A *structural* one is the other half of that same
+fact — with nothing being compared, nothing detects one either. So the
+design's job is not to prevent structural mismatches but to bound each one to
+the hole it happened in and report it.
 
 The design is settled and written up in
 [`docs/design/ssr.md`](docs/design/ssr.md): a compiler-led server emitter
 writing bytes through a segment tree, rather than building a node tree and
 serialising it. Build order and what each stage has to prove are there.
 
+### What is built
+
+Stage two of that order: the reactivity lanes and request isolation. There is
+no emitter, so nothing renders to a string yet — what exists is what the
+emitter will drive, documented at
+[docs/reference/server.md](docs/reference/server.md).
+
+- [x] A fourth scheduler lane. `dataEffect` is drained after render and before
+      measure, and `createResource` triggers from it. Deferred like user work,
+      so a resource in a class field still sees the props assigned after
+      construction; drained like render work, so a server reaches it at all. A
+      server that runs no effects fetches nothing, which is why the roadmap
+      bullet below had to be narrowed rather than ticked as written.
+- [x] `onMount` is never queued on a server — at its scheduling site, since a
+      queued microtask fires at the first `await` inside the render, so
+      declining to wait for it is not the same as not queuing it. A server
+      flush stops after the data lane, and nothing self-flushes on a microtask.
+- [x] `__VOLT_SERVER__` defined per environment by `@voltdev/vite-plugin`,
+      which is the only way to be right on a dev server (`isSsrBuild` is a
+      build's answer) and the only way for the client half of an SSR build not
+      to be compiled as a server build.
+- [x] A request scope: its own effect queues, its own state slots, and the data
+      it is still waiting for. `settleRequest` is the quiescence rule written
+      out — flush to quiescence, await what that started, repeat, bounded —
+      and it is what holds the isolation together without `AsyncLocalStorage`,
+      which the edge constraint rules out.
+- [x] The process globals that leaked between requests are request state now:
+      the "styles already injected" mark, which used to give request 2..N a
+      page with no styles, and the ambient locale, which used to answer
+      request B with request A's. Ids come from where a component sits rather
+      than from a counter, so two renders of the same tree agree on them.
+- [x] The stage's own gates, in
+      `packages/primitives/test/server-isolation.test.ts` and beside it: two
+      concurrent renders whose promises are answered in the opposite order
+      produce what the same two renders produce serially, and a resource
+      declared as a class field fetches exactly once on a server and not at
+      all in a client-only build. Measured on the rendered tree and the
+      collected styles rather than on emitted bytes, there being no emitter.
+
+Not yet, and the reason:
+
 - [ ] `renderToString`, then `renderToStream` for streaming
 - [ ] A hydration codegen mode reusing the existing path resolution
 - [ ] Serialize initial signal state, and adopt it on the client
-- [ ] `onMount` must not run on the server; effects must not either
+- [ ] **Effects a browser is the point of must not run on the server** —
+      measure and user work, which today is enforced by the flush stopping
+      after the data lane. What is left is saying so at the point of use: an
+      `effect` that a server silently skips is a component that behaves
+      differently on the two sides with nothing to read that says why.
 - [ ] Portals — render inline on the server, relocate on hydration
 - [ ] Event delegation attaches once on hydration rather than per element
 - [ ] Async boundaries, so streaming can flush a shell before data arrives
@@ -833,9 +880,17 @@ project points it at a catalogue. The runtime catalogue is untouched.
       TypeScript, because `t('pageOf', { n })` is a literal the template
       compiler can read.
 - [x] An unused message is a warning, through the same `this.warn` the
-      accessibility rules use. Keys the component library speaks for itself
-      are never reported, and neither is anything on a dev-server rebuild,
-      which has only seen the modules that changed.
+      accessibility rules use — proved by a real `vite build` reading the
+      logger, not by a stubbed context. Keys the component library speaks for
+      itself are never reported, and neither is anything on a dev-server
+      rebuild, which has only seen the modules that changed. `messages.ignore`
+      names that spared list yourself.
+- [x] The catalogue is held to a shape a message can have, at the read rather
+      than at the call sites. A nested group, a plural with no `other`, a form
+      that is not a string, a number, a list, `null` — each of them otherwise
+      compiles to a function returning `undefined` under a declaration
+      promising a `string`, which is the failure the whole pass exists to
+      prevent, arriving through the one door the pass did not watch.
 
 Not yet, and the reason:
 
@@ -845,6 +900,19 @@ Not yet, and the reason:
 - [ ] A key must be a plain identifier. Nested and dotted catalogues are
       refused with a suggestion rather than silently renamed, because an
       export is a function name and there is no second way to spell one.
+- [ ] **`t` is a reserved name once a catalogue is configured.** Every `t(...)`
+      and every `<anything>.t(...)` in a template with a literal first argument
+      is a call site, so a component method of that name turns its argument
+      into a message key and a missing one into a build error. The compiler has
+      no way to tell the locale's `t` from anyone else's, and guessing would
+      cost the check its certainty.
+- [ ] **The unused report is per environment, not per build.** A build with a
+      client environment and a server one runs the cycle once for each, and
+      `used` is cleared at every `buildStart` — which is what a `build --watch`
+      rebuild needs. So a message only a server-only module asks for is
+      unaccounted for in the client's graph and the client half reports it.
+      Nothing in a `buildEnd` can see the other environment, so the answer for
+      now is `messages.ignore` or `unused: 'off'`.
 - [ ] `t` from the generated module names every message, so importing it links
       the catalogue whole. That is the dynamic-key path, and the per-message
       functions are the one to reach for.
@@ -938,9 +1006,15 @@ need one.
 - [x] **Why did this update** — which write woke which effect, which is the
       question fine-grained reactivity makes answerable and virtual DOM does
       not. Collected whether or not a session is recording, because the same
-      fact is what an effect that throws puts in its message and what a
-      production error report needs — one mechanism, as the observability entry
-      below asks for.
+      fact is what an effect that throws puts in its message. One mechanism,
+      as the observability entry below asks for, but a development-build one:
+      the production half of that entry is not built and cannot be while a
+      single flag decides both. `__VOLT_DEV__` removes the calls that tell the
+      tools a write happened — which is what keeps a null check off every
+      signal write in production — so a production build has no attribution to
+      report. Shipping it would mean splitting the flag, which is the open
+      "production diagnostics that survive the `__VOLT_DEV__` strip" item
+      above, not this one.
 - [x] **Performance** — effect run counts and durations, flush timings, and
       which bindings are re-running most
 - [ ] **Time travel** — signal history, step back and forth
